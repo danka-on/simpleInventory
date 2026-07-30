@@ -101,10 +101,22 @@
         color:#fff;
     }
     html.ss-theme-night .inventory-gear-btn:hover{filter:brightness(1.05)}
-    .inventory-dropdown{display:none;position:absolute;z-index:10000;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:8px;min-width:200px;margin-top:4px}
+    .inventory-dropdown{display:none;position:absolute;z-index:10000;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:8px;min-width:255px;margin-top:4px}
     .inventory-dropdown.active{display:block}
     .inventory-dropdown button{display:block;width:100%;text-align:left;padding:10px 12px;border:none;background:none;cursor:pointer;border-radius:4px;font-size:0.95rem}
     .inventory-dropdown button:hover{background:#f0f0f0}
+    .inventory-dropdown-primary{display:grid;gap:6px;margin-bottom:7px;padding-bottom:9px;border-bottom:1px solid #d7dee8}
+    .inventory-dropdown .inventory-dropdown-primary button{min-height:46px;padding:11px 13px;background:#eff6ff;border:1px solid #bfdbfe;color:#1d4ed8;font-size:1rem;font-weight:800}
+    .inventory-dropdown .inventory-dropdown-primary button:hover{background:#dbeafe;border-color:#93c5fd}
+    html.ss-theme-night .inventory-dropdown{background:#111827;border-color:#334155;box-shadow:0 6px 18px rgba(0,0,0,.5)}
+    html.ss-theme-night .inventory-dropdown button{color:#e2e8f0}
+    html.ss-theme-night .inventory-dropdown button:hover{background:#1e293b}
+    html.ss-theme-night .inventory-dropdown-primary{border-bottom-color:#475569}
+    html.ss-theme-night .inventory-dropdown .inventory-dropdown-primary button{background:#172554;border-color:#1d4ed8;color:#bfdbfe}
+    html.ss-theme-night .inventory-dropdown .inventory-dropdown-primary button:hover{background:#1e3a8a;border-color:#3b82f6}
+    html.ss-theme-night #soldPerformanceToggles{background:#111827 !important;border-color:#334155 !important;color:#e2e8f0}
+    html.ss-theme-night #soldPerformanceTotals>div{background:#111827 !important;border-color:#334155 !important;color:#e2e8f0}
+    html.ss-theme-night #soldPerformanceRange{background:#2e1065 !important;color:#ede9fe !important}
     .location-card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:16px;cursor:pointer;transition:all 0.2s;box-shadow:0 2px 4px rgba(0,0,0,0.05)}
     .location-card:hover{box-shadow:0 4px 12px rgba(0,0,0,0.1);border-color:#0066cc;transform:translateY(-2px)}
     .location-card.active{border-color:#0066cc;background:#f0f7ff}
@@ -396,10 +408,12 @@
             <div style="position:relative;">
                 <button class="inventory-gear-btn" id="inventory-gear">⚙️</button>
                 <div class="inventory-dropdown" id="inventory-dropdown">
+                    <div class="inventory-dropdown-primary">
+                        <button id="quantity-history-btn">📈 Quantity History</button>
+                        <button id="current-inventory-age-btn">⏳ Current Inventory Age</button>
+                    </div>
                     <button id="location-duplicates-btn">📍 Location Duplicates</button>
                     <button id="rack-history-btn">📋 Rack History</button>
-                    <button id="current-inventory-age-btn">⏳ Current Inventory Age</button>
-                    <button id="quantity-history-btn">📈 Quantity History</button>
                     <button id="automatic-cleanup-btn">🧹 Inventory Cleanup Decisions</button>
                     <button id="reset-cache-btn" style="color:#ff6b00;">🔄 Reset Cache</button>
                 </div>
@@ -426,6 +440,12 @@
                 <input type="checkbox" id="not-removed-filter" style="width:16px; height:16px; cursor:pointer;">
                 <span style="color:#e74c3c; font-weight:600;">Not Removed Only</span>
             </label>
+        </div>
+        <div id="sold-performance-container" style="display:none; margin-left:8px;">
+            <button id="sold-performance-btn" type="button" class="btn"
+                style="background:#7c3aed;color:#fff;border-color:#6d28d9;font-weight:800;">
+                📊 Sold Performance
+            </button>
         </div>
         <!-- Custom Items filter (only visible when Warehouse is selected) -->
         <div id="custom-items-filter-container" style="display:none; margin-left:8px;">
@@ -577,9 +597,18 @@
             <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;">
                 <div>
                     <h3 style="margin:0;">Current Inventory Age</h3>
-                    <div class="small-muted" style="margin-top:3px;">Exact receiving-batch age, weighted by active units. Click a band to filter Warehouse.</div>
+                    <div class="small-muted" style="margin-top:3px;">Best-supported receiving age, cross-referenced against Raw BOL, BOL / Item Manager, prep logs, and rack history. Click a band to filter Warehouse.</div>
                 </div>
                 <button id="closeCurrentInventoryAge">Close</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 12px;">
+                <button id="rescanCurrentInventoryAge" type="button" class="btn"
+                    aria-describedby="currentInventoryAgeRescanStatus"
+                    title="Comprehensively rebuild item ages from receiving, prep, Item Manager, and rack-history evidence">
+                    🔄 Comprehensive age rebuild
+                </button>
+                <div id="currentInventoryAgeRescanStatus" class="small-muted"
+                    role="status" aria-live="polite"></div>
             </div>
             <div id="currentInventoryAgeLoading" style="padding:54px 12px;text-align:center;color:#64748b;">Loading current inventory age…</div>
             <div id="currentInventoryAgeBody" style="display:none;">
@@ -604,6 +633,12 @@
             </div>
             <div id="quantityHistoryLoading" style="padding:60px 12px;text-align:center;color:#64748b;">Loading quantity history…</div>
             <div id="quantityHistoryBody" style="display:none;">
+                <div style="display:flex;justify-content:flex-end;margin:0 2px 8px;">
+                    <label style="display:inline-flex;align-items:center;gap:7px;font-weight:700;color:#dc2626;cursor:pointer;">
+                        <input id="quantityHistorySoldToggle" type="checkbox" checked>
+                        Sold items
+                    </label>
+                </div>
                 <div id="quantityHistoryChartWrap" style="width:100%;overflow:hidden;position:relative;">
                     <canvas id="quantityHistoryChart" role="img" aria-label="Warehouse quantity by time"
                         style="display:block;width:100%;height:380px;touch-action:none;"></canvas>
@@ -625,6 +660,44 @@
                         <div class="small-muted">Active warehouse units now</div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sold Performance Modal -->
+    <div id="soldPerformanceModal" class="modal">
+        <div class="card" style="max-width:96%;max-height:94vh;width:1100px;overflow:auto;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;">
+                <div>
+                    <h3 style="margin:0;">Sold Items &amp; Profit Over Time</h3>
+                    <div class="small-muted" style="margin-top:3px;">Solid lines show cumulative sold units. Dashed lines show cumulative payout/proceeds.</div>
+                </div>
+                <button id="closeSoldPerformance">Close</button>
+            </div>
+            <div id="soldPerformanceLoading" style="padding:60px 12px;text-align:center;color:#64748b;">Loading sold performance…</div>
+            <div id="soldPerformanceBody" style="display:none;">
+                <div id="soldPerformanceToggles"
+                    style="display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap;margin:0 2px 10px;padding:10px 12px;border:1px solid #dbe3ee;border-radius:9px;background:#f8fafc;">
+                    <strong style="margin-right:2px;">Lines:</strong>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;color:#dc2626;"><input type="checkbox" data-sold-series="all" checked> All</label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;color:#2563eb;"><input type="checkbox" data-sold-series="ebay" checked> eBay</label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;color:#f59e0b;"><input type="checkbox" data-sold-series="amazon" checked> Amazon</label>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;color:#16a34a;"><input type="checkbox" data-sold-series="facebook" checked> Facebook</label>
+                    <span style="height:20px;border-left:1px solid #cbd5e1;"></span>
+                    <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:700;color:#6d28d9;"><input id="soldPerformanceProfitToggle" type="checkbox" checked><span style="width:20px;border-top:2px dashed #7c3aed;"></span> Profit lines</label>
+                </div>
+                <div id="soldPerformanceChartWrap" style="width:100%;overflow:hidden;position:relative;">
+                    <canvas id="soldPerformanceChart" role="img"
+                        aria-label="Sold items and profit over time by store"
+                        style="display:block;width:100%;height:420px;touch-action:none;"></canvas>
+                    <div id="soldPerformanceTooltip"
+                        style="display:none;position:absolute;z-index:5;max-width:360px;padding:9px 11px;border-radius:8px;background:rgba(15,23,42,.95);color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.28);font-size:.82rem;line-height:1.45;pointer-events:none;"></div>
+                </div>
+                <div id="soldPerformanceRange"
+                    style="display:none;margin:8px 2px 0;padding:10px 12px;border-left:4px solid #7c3aed;border-radius:6px;background:#f5f3ff;color:#4c1d95;font-size:.9rem;"></div>
+                <div id="soldPerformanceTotals"
+                    style="display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:9px;margin-top:14px;"></div>
+                <div id="soldPerformanceNote" class="small-muted" style="margin:10px 2px 0;"></div>
             </div>
         </div>
     </div>
@@ -749,6 +822,14 @@ function attachDBChangeHandlers(){
         } else {
             notRemovedFilterContainer.style.display = 'none';
             document.getElementById('not-removed-filter').checked = false;
+        }
+        const soldPerformanceContainer = document.getElementById(
+            'sold-performance-container'
+        );
+        if (soldPerformanceContainer) {
+            soldPerformanceContainer.style.display = selectedDb === 'sold'
+                ? 'inline-flex'
+                : 'none';
         }
 
         // Show/hide Custom Items filter for warehouse (searchRack)
@@ -1311,9 +1392,6 @@ function fmtAgeDate(timestamp){
 
 document.getElementById('closeAgeModal').addEventListener('click', () => {
     document.getElementById('ageModal').style.display = 'none';
-});
-document.getElementById('ageModal').addEventListener('click', event => {
-    if (event.target === event.currentTarget) event.currentTarget.style.display = 'none';
 });
 
 function warehouseSortableTh(label, field) {
@@ -2467,6 +2545,14 @@ window.addEventListener('load', ()=>{
                     } else {
                         notRemovedFilterContainer.style.display = 'none';
                     }
+                    const soldPerformanceContainer = document.getElementById(
+                        'sold-performance-container'
+                    );
+                    if (soldPerformanceContainer) {
+                        soldPerformanceContainer.style.display = dbParam === 'sold'
+                            ? 'inline-flex'
+                            : 'none';
+                    }
 
                     // Show Custom Items filter for warehouse (searchRack)
                     const customItemsFilterContainer = document.getElementById('custom-items-filter-container');
@@ -2578,15 +2664,14 @@ document.getElementById('rack-history-btn').addEventListener('click', () => {
     openHistoryModalWithSearch('', '');
 });
 
-async function openCurrentInventoryAge() {
-    const modal = document.getElementById('currentInventoryAgeModal');
+async function loadCurrentInventoryAge({showLoading = true} = {}) {
     const loading = document.getElementById('currentInventoryAgeLoading');
     const body = document.getElementById('currentInventoryAgeBody');
-    document.getElementById('inventory-dropdown').classList.remove('active');
-    modal.style.display = 'flex';
-    loading.style.display = 'block';
-    loading.textContent = 'Loading current inventory age…';
-    body.style.display = 'none';
+    if (showLoading) {
+        loading.style.display = 'block';
+        loading.textContent = 'Loading current inventory age…';
+        body.style.display = 'none';
+    }
     try {
         const response = await fetch('/api/inventory-age-summary', {cache:'no-store'});
         const data = await response.json();
@@ -2625,12 +2710,139 @@ async function openCurrentInventoryAge() {
         document.getElementById('currentInventoryAgeTotal').textContent = total.toLocaleString();
         loading.style.display = 'none';
         body.style.display = 'block';
+        return data;
     } catch (error) {
-        loading.textContent = `Could not load inventory age: ${error.message}`;
+        if (showLoading) {
+            loading.style.display = 'block';
+            loading.textContent = `Could not load inventory age: ${error.message}`;
+        }
+        throw error;
+    }
+}
+
+async function openCurrentInventoryAge() {
+    const modal = document.getElementById('currentInventoryAgeModal');
+    document.getElementById('inventory-dropdown').classList.remove('active');
+    document.getElementById('currentInventoryAgeRescanStatus').textContent = '';
+    modal.style.display = 'flex';
+    try {
+        const ageData = await loadCurrentInventoryAge({showLoading: true});
+        const lastRebuild = ageData && ageData.last_comprehensive_rebuild;
+        if (lastRebuild && typeof lastRebuild === 'object') {
+            const highConfidence = Math.max(
+                0,
+                Number(
+                    lastRebuild.high_confidence_units
+                    ?? lastRebuild.verified_units
+                ) || 0
+            );
+            const totalUnits = Math.max(
+                0,
+                Number(lastRebuild.inventory_units) || 0
+            );
+            const percent = totalUnits > 0
+                ? ((highConfidence / totalUnits) * 100).toFixed(1)
+                : '100.0';
+            const status = document.getElementById('currentInventoryAgeRescanStatus');
+            status.style.color = '#64748b';
+            status.textContent = `Last rebuild: ${highConfidence.toLocaleString()} of ${totalUnits.toLocaleString()} units have high-confidence evidence (${percent}%).`;
+        }
+    } catch (_error) {
+        // The loading area already contains the user-facing error.
     }
 }
 
 document.getElementById('current-inventory-age-btn').addEventListener('click', openCurrentInventoryAge);
+document.getElementById('rescanCurrentInventoryAge').addEventListener('click', async () => {
+    const confirmed = window.confirm(
+        'Comprehensively rebuild current inventory ages using Raw BOL, BOL / Item Manager, prep logs, and rack history? '
+        + 'Inventory quantities and locations will not be changed.'
+    );
+    if (!confirmed) return;
+
+    const button = document.getElementById('rescanCurrentInventoryAge');
+    const status = document.getElementById('currentInventoryAgeRescanStatus');
+    const bars = document.getElementById('currentInventoryAgeBars');
+    const originalLabel = button.textContent;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = 'Rebuilding ages…';
+    bars.style.pointerEvents = 'none';
+    bars.style.opacity = '.65';
+    status.style.color = '#64748b';
+    status.textContent = 'Cross-referencing receiving, prep, Item Manager, and rack-history evidence…';
+    try {
+        const response = await fetch('/api/inventory-age/rescan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: '{}'
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Unable to rebuild inventory ages');
+        }
+        const changedRows = Math.max(0, Number(data.rows_changed) || 0);
+        const changedUnits = Math.max(0, Number(data.units_changed) || 0);
+        const responseCount = key => {
+            const value = data[key];
+            if (value === null || value === undefined || value === '') return null;
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
+        };
+        const highConfidenceUnits = responseCount('high_confidence_units')
+            ?? responseCount('verified_units');
+        const inventoryUnits = responseCount('inventory_units');
+        const ambiguousUnits = responseCount('ambiguous_units');
+        const historyOnlyUnits = responseCount('history_only_units');
+        const reorgUnits = responseCount('matched_reorg_units');
+        const historicalReorgUnits = responseCount(
+            'matched_historical_exception_units'
+        );
+        const evidenceParts = [];
+        if (highConfidenceUnits !== null && inventoryUnits !== null) {
+            const coverage = inventoryUnits > 0
+                ? ` (${((highConfidenceUnits / inventoryUnits) * 100).toFixed(1)}%)`
+                : '';
+            evidenceParts.push(`${highConfidenceUnits.toLocaleString()} of ${inventoryUnits.toLocaleString()} inventory units have high-confidence evidence${coverage}`);
+        } else if (highConfidenceUnits !== null) {
+            evidenceParts.push(`${highConfidenceUnits.toLocaleString()} inventory unit${highConfidenceUnits === 1 ? '' : 's'} with high-confidence evidence`);
+        } else if (inventoryUnits !== null) {
+            evidenceParts.push(`${inventoryUnits.toLocaleString()} inventory unit${inventoryUnits === 1 ? '' : 's'} evaluated`);
+        }
+        if (ambiguousUnits !== null) {
+            evidenceParts.push(`${ambiguousUnits.toLocaleString()} ambiguous unit${ambiguousUnits === 1 ? '' : 's'}`);
+        }
+        if (historyOnlyUnits !== null) {
+            evidenceParts.push(`${historyOnlyUnits.toLocaleString()} rack-history-only unit${historyOnlyUnits === 1 ? '' : 's'}`);
+        }
+        if (reorgUnits !== null) {
+            let reorgDetail = `${reorgUnits.toLocaleString()} delete-and-rescan unit${reorgUnits === 1 ? '' : 's'} kept their prior lineage`;
+            if (historicalReorgUnits) {
+                reorgDetail += `, including ${historicalReorgUnits.toLocaleString()} from the known Office Rack 3 historical cleanout`;
+            }
+            evidenceParts.push(reorgDetail);
+        }
+        status.style.color = '#15803d';
+        status.textContent = `Rebuild complete: ${changedUnits.toLocaleString()} unit${changedUnits === 1 ? '' : 's'} changed across ${changedRows.toLocaleString()} row${changedRows === 1 ? '' : 's'}.`
+            + (evidenceParts.length ? ` Evidence: ${evidenceParts.join('; ')}.` : '');
+        try {
+            await loadCurrentInventoryAge({showLoading: false});
+            await doSearch(false);
+        } catch (refreshError) {
+            status.style.color = '#b45309';
+            status.textContent += ` The ages were saved, but the screen could not refresh: ${refreshError.message}`;
+        }
+    } catch (error) {
+        status.style.color = '#dc2626';
+        status.textContent = `Age rebuild failed: ${error.message}`;
+    } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = originalLabel;
+        bars.style.pointerEvents = '';
+        bars.style.opacity = '';
+    }
+});
 document.getElementById('currentInventoryAgeBars').addEventListener('click', event => {
     const band = event.target.closest('button[data-age-filter]');
     if (!band) return;
@@ -2645,15 +2857,13 @@ document.getElementById('currentInventoryAgeBars').addEventListener('click', eve
 document.getElementById('closeCurrentInventoryAge').addEventListener('click', () => {
     document.getElementById('currentInventoryAgeModal').style.display = 'none';
 });
-document.getElementById('currentInventoryAgeModal').addEventListener('click', event => {
-    if (event.target === event.currentTarget) event.currentTarget.style.display = 'none';
-});
 
 let quantityHistoryState = null;
 let quantityHistoryResizeTimer = null;
 let quantityHistoryChartGeometry = null;
 let quantityHistoryDrag = null;
 let quantityHistorySelection = null;
+let quantityHistoryShowSold = true;
 
 function quantityChartDate(timestamp, includeTime = false) {
     const parsed = new Date(timestamp || '');
@@ -2662,6 +2872,16 @@ function quantityChartDate(timestamp, includeTime = false) {
         ? {year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}
         : {year:'numeric', month:'short', day:'numeric'};
     return parsed.toLocaleString('en-US', options);
+}
+
+function quantityChartDragDate(timestamp) {
+    const parsed = new Date(timestamp);
+    if (Number.isNaN(parsed.getTime())) return 'Unknown date';
+    return parsed.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
 }
 
 function drawQuantityHistoryChart(data, hoverState = null) {
@@ -2682,6 +2902,14 @@ function drawQuantityHistoryChart(data, hoverState = null) {
         }))
         .filter(upload => Number.isFinite(upload.timestampValue))
         .sort((a, b) => a.timestampValue - b.timestampValue);
+    const soldPoints = (Array.isArray(data.sold_points) ? data.sold_points : [])
+        .map(point => ({
+            timestamp: Date.parse(point.timestamp || ''),
+            quantity: Math.max(0, parseInt(point.quantity, 10) || 0)
+        }))
+        .filter(point => Number.isFinite(point.timestamp))
+        .sort((a, b) => a.timestamp - b.timestamp);
+    const chartStart = Date.parse(data.chart_start || '');
 
     const bounds = canvas.getBoundingClientRect();
     const cssWidth = Math.max(320, Math.floor(bounds.width || 900));
@@ -2702,6 +2930,7 @@ function drawQuantityHistoryChart(data, hoverState = null) {
         line: '#2563eb',
         peak: '#f59e0b',
         current: '#16a34a',
+        sold: '#dc2626',
         bol: '#7c3aed',
         bolHover: '#f59e0b',
         selectionFill: darkMode ? 'rgba(96,165,250,.18)' : 'rgba(37,99,235,.12)',
@@ -2716,13 +2945,17 @@ function drawQuantityHistoryChart(data, hoverState = null) {
     const plotWidth = Math.max(1, cssWidth - margin.left - margin.right);
     const plotHeight = Math.max(1, cssHeight - margin.top - margin.bottom);
     const timelineValues = points.map(point => point.timestamp)
-        .concat(bolUploads.map(upload => upload.timestampValue));
-    let minTime = Math.min(...timelineValues);
+        .concat(bolUploads.map(upload => upload.timestampValue))
+        .concat(quantityHistoryShowSold ? soldPoints.map(point => point.timestamp) : []);
+    let minTime = Number.isFinite(chartStart) ? chartStart : Math.min(...timelineValues);
     let maxTime = Math.max(...timelineValues);
     if (maxTime <= minTime) maxTime = minTime + 86400000;
+    const chartPoints = points.filter(point => point.timestamp >= minTime);
+    if (!chartPoints.length) chartPoints.push(points[points.length - 1]);
     const actualMax = Math.max(
         parseInt(data.peak_quantity, 10) || 0,
-        ...points.map(point => point.quantity),
+        ...chartPoints.map(point => point.quantity),
+        ...(quantityHistoryShowSold ? soldPoints.map(point => point.quantity) : []),
         1
     );
     const magnitude = Math.pow(10, Math.max(0, Math.floor(Math.log10(actualMax)) - 1));
@@ -2769,6 +3002,14 @@ function drawQuantityHistoryChart(data, hoverState = null) {
     ctx.lineTo(cssWidth - margin.right, margin.top + plotHeight);
     ctx.stroke();
 
+    const soldCoordinates = quantityHistoryShowSold
+        ? soldPoints.map(point => ({
+            x: xFor(point.timestamp),
+            y: yFor(point.quantity),
+            quantity: point.quantity,
+            timestamp: point.timestamp
+        }))
+        : [];
     if (hoverState && hoverState.type === 'range') {
         const startX = xFor(Math.min(hoverState.startTimestamp, hoverState.endTimestamp));
         const endX = xFor(Math.max(hoverState.startTimestamp, hoverState.endTimestamp));
@@ -2776,7 +3017,7 @@ function drawQuantityHistoryChart(data, hoverState = null) {
         ctx.fillRect(startX, margin.top, Math.max(1, endX - startX), plotHeight);
     }
 
-    const coordinates = points.map(point => ({
+    const coordinates = chartPoints.map(point => ({
         x: xFor(point.timestamp),
         y: yFor(point.quantity),
         quantity: point.quantity,
@@ -2806,6 +3047,19 @@ function drawQuantityHistoryChart(data, hoverState = null) {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.stroke();
+
+    if (soldCoordinates.length) {
+        ctx.beginPath();
+        soldCoordinates.forEach((point, index) => {
+            if (index === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+        });
+        ctx.strokeStyle = colors.sold;
+        ctx.lineWidth = 2.5;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.stroke();
+    }
 
     const peakQuantity = Math.max(0, parseInt(data.peak_quantity, 10) || 0);
     const peakTimestamp = Date.parse(data.peak_timestamp || '');
@@ -2921,6 +3175,15 @@ function drawQuantityHistoryChart(data, hoverState = null) {
         ctx.strokeStyle = darkMode ? 'rgba(226,232,240,.65)' : 'rgba(71,85,105,.55)';
         ctx.lineWidth = 1;
         ctx.stroke();
+        if (quantityHistoryShowSold && Number.isFinite(Number(hoverState.soldQuantity))) {
+            ctx.beginPath();
+            ctx.arc(hoverX, yFor(Number(hoverState.soldQuantity)), 5.5, 0, Math.PI * 2);
+            ctx.fillStyle = colors.sold;
+            ctx.fill();
+            ctx.strokeStyle = darkMode ? '#0f172a' : '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
         ctx.restore();
         ctx.beginPath();
         ctx.arc(hoverX, hoverY, 5.5, 0, Math.PI * 2);
@@ -2946,6 +3209,8 @@ function drawQuantityHistoryChart(data, hoverState = null) {
 
     quantityHistoryChartGeometry = {
         coordinates,
+        soldCoordinates,
+        soldPoints,
         bolMarkers,
         margin,
         plotWidth,
@@ -2998,17 +3263,28 @@ function quantityHistoryRangeFromPixels(geometry, firstX, secondX) {
         }
         return quantity;
     };
+    const soldAt = timestamp => {
+        let quantity = 0;
+        for (const point of geometry.soldPoints || []) {
+            if (point.timestamp > timestamp) break;
+            quantity = point.quantity;
+        }
+        return quantity;
+    };
     const startTimestamp = timestampForX(startX);
     const endTimestamp = timestampForX(endX);
     const startQuantity = quantityAt(startTimestamp);
     const endQuantity = quantityAt(endTimestamp);
+    const startSoldQuantity = soldAt(startTimestamp);
+    const endSoldQuantity = soldAt(endTimestamp);
     return {
         type: 'range',
         startTimestamp,
         endTimestamp,
         startQuantity,
         endQuantity,
-        change: endQuantity - startQuantity
+        change: endQuantity - startQuantity,
+        soldQuantity: Math.max(0, endSoldQuantity - startSoldQuantity)
     };
 }
 
@@ -3020,9 +3296,12 @@ function quantityHistoryRangeHtml(range) {
     const change = Number(range.change) || 0;
     const signedChange = `${change > 0 ? '+' : ''}${change.toLocaleString()} units`;
     const changeColor = change > 0 ? '#15803d' : (change < 0 ? '#dc2626' : '#475569');
+    const soldQuantity = Math.max(0, Number(range.soldQuantity) || 0);
     return `<strong>Selected range:</strong> ${durationDays.toLocaleString()} day${durationDays === 1 ? '' : 's'}
         <span style="margin-left:12px;"><strong>Quantity change:</strong>
-        <span style="color:${changeColor};font-weight:800;">${signedChange}</span></span>`;
+        <span style="color:${changeColor};font-weight:800;">${signedChange}</span></span>
+        <span style="margin-left:12px;"><strong>Items sold:</strong>
+        <span style="color:#dc2626;font-weight:800;">${soldQuantity.toLocaleString()}</span></span>`;
 }
 
 function showQuantityHistoryRange(range) {
@@ -3107,6 +3386,16 @@ document.getElementById('quantityHistoryChart').addEventListener('pointermove', 
             );
             drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection);
             showQuantityHistoryRange(quantityHistorySelection);
+            const plotLeft = geometry.margin.left;
+            const plotRight = plotLeft + geometry.plotWidth;
+            const cursorX = Math.max(plotLeft, Math.min(plotRight, mouseX));
+            const cursorTimestamp = geometry.minTime
+                + ((cursorX - plotLeft) / geometry.plotWidth)
+                * (geometry.maxTime - geometry.minTime);
+            positionQuantityHistoryTooltip(
+                event,
+                `<div style="font-size:1rem;font-weight:800;">${esc(quantityChartDragDate(cursorTimestamp))}</div>`
+            );
         }
         canvas.style.cursor = 'ew-resize';
         event.preventDefault();
@@ -3147,14 +3436,23 @@ document.getElementById('quantityHistoryChart').addEventListener('pointermove', 
             nearestDistance = distance;
         }
     }
+    let soldQuantity = 0;
+    for (const point of geometry.soldCoordinates || []) {
+        if (point.timestamp > nearest.timestamp) break;
+        soldQuantity = point.quantity;
+    }
     drawQuantityHistoryChart(quantityHistoryState, {
         type: 'quantity',
         timestamp: nearest.timestamp,
-        quantity: nearest.quantity
+        quantity: nearest.quantity,
+        soldQuantity
     });
     positionQuantityHistoryTooltip(
         event,
-        `<div style="font-size:1rem;font-weight:800;">${Number(nearest.quantity).toLocaleString()} units</div>`
+        `<div style="font-size:1rem;font-weight:800;">${Number(nearest.quantity).toLocaleString()} warehouse units</div>`
+        + (quantityHistoryShowSold
+            ? `<div style="color:#fca5a5;font-weight:700;">${Number(soldQuantity).toLocaleString()} items sold</div>`
+            : '')
         + `<div>${esc(quantityChartDate(new Date(nearest.timestamp).toISOString(), true))}</div>`
     );
     canvas.style.cursor = 'crosshair';
@@ -3176,6 +3474,7 @@ document.getElementById('quantityHistoryChart').addEventListener('pointerup', ev
     }
     quantityHistoryDrag = null;
     canvas.style.cursor = 'crosshair';
+    hideQuantityHistoryTooltip(false);
     event.preventDefault();
 });
 
@@ -3183,6 +3482,7 @@ document.getElementById('quantityHistoryChart').addEventListener('pointercancel'
     if (!quantityHistoryDrag || quantityHistoryDrag.pointerId !== event.pointerId) return;
     quantityHistoryDrag = null;
     event.currentTarget.style.cursor = 'default';
+    hideQuantityHistoryTooltip(false);
     drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection);
 });
 
@@ -3235,17 +3535,779 @@ document.getElementById('quantity-history-btn').addEventListener('click', () => 
     document.getElementById('inventory-dropdown').classList.remove('active');
     openQuantityHistory();
 });
+document.getElementById('quantityHistorySoldToggle').addEventListener('change', event => {
+    quantityHistoryShowSold = event.target.checked;
+    hideQuantityHistoryTooltip(false);
+    if (quantityHistoryState) {
+        drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection);
+    }
+});
 document.getElementById('closeQuantityHistory').addEventListener('click', () => {
     document.getElementById('quantityHistoryModal').style.display = 'none';
-});
-document.getElementById('quantityHistoryModal').addEventListener('click', event => {
-    if (event.target === event.currentTarget) event.currentTarget.style.display = 'none';
 });
 window.addEventListener('resize', () => {
     if (!quantityHistoryState || document.getElementById('quantityHistoryModal').style.display !== 'flex') return;
     clearTimeout(quantityHistoryResizeTimer);
     quantityHistoryResizeTimer = setTimeout(
         () => drawQuantityHistoryChart(quantityHistoryState, quantityHistorySelection),
+        120
+    );
+});
+
+const soldPerformanceKeys = ['all', 'ebay', 'amazon', 'facebook'];
+const soldPerformanceLabels = {
+    all: 'All',
+    ebay: 'eBay',
+    amazon: 'Amazon',
+    facebook: 'Facebook'
+};
+const soldPerformanceColors = {
+    all: '#dc2626',
+    ebay: '#2563eb',
+    amazon: '#f59e0b',
+    facebook: '#16a34a'
+};
+let soldPerformanceState = null;
+let soldPerformanceGeometry = null;
+let soldPerformanceSelection = null;
+let soldPerformanceDrag = null;
+let soldPerformanceResizeTimer = null;
+let soldPerformanceShowProfit = true;
+let soldPerformanceVisible = new Set(soldPerformanceKeys);
+
+function soldPerformancePoints(rawPoints, valueKey) {
+    return (Array.isArray(rawPoints) ? rawPoints : [])
+        .map(point => ({
+            timestamp: Date.parse(point.timestamp || ''),
+            value: Number(point[valueKey]) || 0
+        }))
+        .filter(point => Number.isFinite(point.timestamp))
+        .sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function soldPerformanceValueAt(points, timestamp) {
+    let value = 0;
+    for (const point of points || []) {
+        if (point.timestamp > timestamp) break;
+        value = point.value;
+    }
+    return value;
+}
+
+function soldPerformanceCompactMoney(value) {
+    const amount = Number(value) || 0;
+    const absolute = Math.abs(amount);
+    if (absolute >= 1000000) return `$${(amount / 1000000).toFixed(1)}m`;
+    if (absolute >= 1000) return `$${(amount / 1000).toFixed(1)}k`;
+    return `$${Math.round(amount).toLocaleString()}`;
+}
+
+function soldPerformanceParsedSeries(data) {
+    const source = data && data.series && typeof data.series === 'object'
+        ? data.series
+        : {};
+    const parsed = {};
+    soldPerformanceKeys.forEach(key => {
+        const item = source[key] || {};
+        parsed[key] = {
+            sales: soldPerformancePoints(item.sales_points, 'quantity'),
+            profit: soldPerformancePoints(item.profit_points, 'amount'),
+            soldUnits: Math.max(0, Number(item.sold_units) || 0),
+            profitTotal: Number(item.profit) || 0
+        };
+    });
+    return parsed;
+}
+
+function drawSoldPerformanceChart(data, hoverState = null) {
+    const canvas = document.getElementById('soldPerformanceChart');
+    if (!canvas || !data) return;
+    const parsedSeries = soldPerformanceParsedSeries(data);
+    const bolUploads = (Array.isArray(data.bol_uploads) ? data.bol_uploads : [])
+        .map(upload => ({
+            ...upload,
+            timestampValue: Date.parse(upload.timestamp || '')
+        }))
+        .filter(upload => Number.isFinite(upload.timestampValue))
+        .sort((a, b) => a.timestampValue - b.timestampValue);
+    const timeline = [
+        Date.parse(data.chart_start || ''),
+        Date.parse(data.chart_end || ''),
+        ...bolUploads.map(upload => upload.timestampValue)
+    ];
+    soldPerformanceKeys.forEach(key => {
+        timeline.push(...parsedSeries[key].sales.map(point => point.timestamp));
+        timeline.push(...parsedSeries[key].profit.map(point => point.timestamp));
+    });
+    const validTimeline = timeline.filter(Number.isFinite);
+    if (!validTimeline.length) return;
+    let minTime = Number.isFinite(Date.parse(data.chart_start || ''))
+        ? Date.parse(data.chart_start)
+        : Math.min(...validTimeline);
+    let maxTime = Number.isFinite(Date.parse(data.chart_end || ''))
+        ? Date.parse(data.chart_end)
+        : Math.max(...validTimeline);
+    if (maxTime <= minTime) maxTime = minTime + 86400000;
+
+    const bounds = canvas.getBoundingClientRect();
+    const cssWidth = Math.max(340, Math.floor(bounds.width || 980));
+    const cssHeight = window.innerWidth <= 640 ? 330 : 420;
+    const pixelRatio = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width = Math.floor(cssWidth * pixelRatio);
+    canvas.height = Math.floor(cssHeight * pixelRatio);
+    canvas.style.height = `${cssHeight}px`;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const darkMode = document.documentElement.classList.contains('ss-theme-night');
+    const margin = {
+        left: window.innerWidth <= 640 ? 48 : 62,
+        right: soldPerformanceShowProfit ? (window.innerWidth <= 640 ? 58 : 74) : 22,
+        top: 24,
+        bottom: 72
+    };
+    const plotWidth = Math.max(1, cssWidth - margin.left - margin.right);
+    const plotHeight = Math.max(1, cssHeight - margin.top - margin.bottom);
+    const visibleKeys = soldPerformanceKeys.filter(key =>
+        soldPerformanceVisible.has(key)
+    );
+    const salesValues = visibleKeys.flatMap(key =>
+        parsedSeries[key].sales.map(point => point.value)
+    );
+    const profitValues = soldPerformanceShowProfit
+        ? visibleKeys.flatMap(key =>
+            parsedSeries[key].profit.map(point => point.value)
+        )
+        : [];
+    const maxSalesRaw = Math.max(1, ...salesValues);
+    const salesMagnitude = Math.pow(
+        10,
+        Math.max(0, Math.floor(Math.log10(maxSalesRaw)) - 1)
+    );
+    const maxSales = Math.max(
+        5,
+        Math.ceil(maxSalesRaw / salesMagnitude) * salesMagnitude
+    );
+    const minProfit = Math.min(0, ...profitValues);
+    const maxProfit = Math.max(1, ...profitValues);
+    const profitRange = Math.max(1, maxProfit - minProfit);
+    const xFor = value => margin.left
+        + ((value - minTime) / (maxTime - minTime)) * plotWidth;
+    const ySales = value => margin.top + plotHeight
+        - (Math.max(0, value) / maxSales) * plotHeight;
+    const yProfit = value => margin.top + plotHeight
+        - ((value - minProfit) / profitRange) * plotHeight;
+    const textColor = darkMode ? '#dbe7f4' : '#475569';
+    const gridColor = darkMode
+        ? 'rgba(148,163,184,.22)'
+        : 'rgba(148,163,184,.30)';
+
+    ctx.font = `${window.innerWidth <= 640 ? 10 : 12}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    for (let tick = 0; tick <= 5; tick += 1) {
+        const ratio = tick / 5;
+        const y = margin.top + plotHeight - ratio * plotHeight;
+        ctx.beginPath();
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 1;
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(margin.left + plotWidth, y);
+        ctx.stroke();
+        ctx.fillStyle = textColor;
+        ctx.textAlign = 'right';
+        ctx.fillText(
+            String(Math.round(maxSales * ratio)),
+            margin.left - 8,
+            y
+        );
+        if (soldPerformanceShowProfit) {
+            const profitTick = minProfit + profitRange * ratio;
+            ctx.fillStyle = darkMode ? '#c4b5fd' : '#6d28d9';
+            ctx.textAlign = 'left';
+            ctx.fillText(
+                soldPerformanceCompactMoney(profitTick),
+                margin.left + plotWidth + 8,
+                y
+            );
+        }
+    }
+
+    const xTickCount = window.innerWidth <= 640 ? 3 : 5;
+    for (let tick = 0; tick < xTickCount; tick += 1) {
+        const ratio = xTickCount === 1 ? 0 : tick / (xTickCount - 1);
+        const value = minTime + (maxTime - minTime) * ratio;
+        const x = xFor(value);
+        ctx.beginPath();
+        ctx.strokeStyle = gridColor;
+        ctx.moveTo(x, margin.top);
+        ctx.lineTo(x, margin.top + plotHeight);
+        ctx.stroke();
+        ctx.fillStyle = textColor;
+        ctx.textAlign = tick === 0
+            ? 'left'
+            : (tick === xTickCount - 1 ? 'right' : 'center');
+        ctx.fillText(
+            quantityChartDate(new Date(value).toISOString()),
+            x,
+            cssHeight - 22
+        );
+    }
+
+    ctx.beginPath();
+    ctx.strokeStyle = darkMode ? '#94a3b8' : '#64748b';
+    ctx.lineWidth = 1.25;
+    ctx.moveTo(margin.left, margin.top);
+    ctx.lineTo(margin.left, margin.top + plotHeight);
+    ctx.lineTo(margin.left + plotWidth, margin.top + plotHeight);
+    ctx.stroke();
+
+    if (hoverState && hoverState.type === 'range') {
+        const startX = xFor(Math.min(
+            hoverState.startTimestamp,
+            hoverState.endTimestamp
+        ));
+        const endX = xFor(Math.max(
+            hoverState.startTimestamp,
+            hoverState.endTimestamp
+        ));
+        ctx.fillStyle = darkMode
+            ? 'rgba(167,139,250,.17)'
+            : 'rgba(124,58,237,.11)';
+        ctx.fillRect(
+            startX,
+            margin.top,
+            Math.max(1, endX - startX),
+            plotHeight
+        );
+    }
+
+    function drawLine(points, yForValue, color, dashed, width) {
+        if (!points.length) return;
+        ctx.save();
+        ctx.beginPath();
+        let previousY = null;
+        points.forEach((point, index) => {
+            const x = xFor(point.timestamp);
+            const y = yForValue(point.value);
+            if (index === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, previousY);
+                ctx.lineTo(x, y);
+            }
+            previousY = y;
+        });
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        ctx.setLineDash(dashed ? [7, 5] : []);
+        ctx.globalAlpha = dashed ? .8 : 1;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    visibleKeys.forEach(key => {
+        drawLine(
+            parsedSeries[key].sales,
+            ySales,
+            soldPerformanceColors[key],
+            false,
+            key === 'all' ? 3.2 : 2.2
+        );
+    });
+    if (soldPerformanceShowProfit) {
+        visibleKeys.forEach(key => {
+            drawLine(
+                parsedSeries[key].profit,
+                yProfit,
+                soldPerformanceColors[key],
+                true,
+                key === 'all' ? 2.8 : 2
+            );
+        });
+    }
+
+    const bolMarkers = [];
+    bolUploads.forEach(upload => {
+        const x = xFor(upload.timestampValue);
+        const previous = bolMarkers[bolMarkers.length - 1];
+        if (previous && x - previous.lastX <= 28) {
+            previous.uploads.push(upload);
+            previous.lastX = x;
+            previous.xSum += x;
+            previous.x = previous.xSum / previous.uploads.length;
+        } else {
+            bolMarkers.push({
+                uploads: [upload],
+                x,
+                xSum: x,
+                lastX: x
+            });
+        }
+    });
+    bolMarkers.forEach(marker => {
+        const x = marker.x;
+        const y = margin.top + plotHeight + 8;
+        ctx.save();
+        ctx.setLineDash([2, 4]);
+        ctx.beginPath();
+        ctx.moveTo(x, margin.top);
+        ctx.lineTo(x, margin.top + plotHeight);
+        ctx.strokeStyle = darkMode
+            ? 'rgba(196,181,253,.65)'
+            : 'rgba(124,58,237,.42)';
+        ctx.stroke();
+        ctx.restore();
+        ctx.beginPath();
+        ctx.strokeStyle = '#7c3aed';
+        ctx.lineWidth = 1.8;
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + 21);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + 12, y + 4.5);
+        ctx.lineTo(x, y + 9);
+        ctx.closePath();
+        ctx.fillStyle = '#7c3aed';
+        ctx.fill();
+        if (marker.uploads.length > 1) {
+            ctx.fillStyle = '#7c3aed';
+            ctx.font = '800 12px system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(String(marker.uploads.length), x + 15, y + 5);
+        }
+        marker.left = x - 7;
+        marker.right = x + (marker.uploads.length > 1 ? 38 : 17);
+        marker.top = y - 6;
+        marker.bottom = y + 25;
+    });
+
+    if (hoverState && hoverState.type === 'cursor') {
+        const hoverX = xFor(hoverState.timestamp);
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(hoverX, margin.top);
+        ctx.lineTo(hoverX, margin.top + plotHeight);
+        ctx.strokeStyle = darkMode
+            ? 'rgba(226,232,240,.7)'
+            : 'rgba(71,85,105,.6)';
+        ctx.stroke();
+        ctx.restore();
+    }
+    if (hoverState && hoverState.type === 'range') {
+        const startX = xFor(hoverState.startTimestamp);
+        const endX = xFor(hoverState.endTimestamp);
+        ctx.save();
+        ctx.setLineDash([5, 4]);
+        ctx.strokeStyle = '#7c3aed';
+        [startX, endX].forEach(x => {
+            ctx.beginPath();
+            ctx.moveTo(x, margin.top);
+            ctx.lineTo(x, margin.top + plotHeight);
+            ctx.stroke();
+        });
+        ctx.restore();
+    }
+
+    ctx.save();
+    ctx.translate(15, margin.top + plotHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = textColor;
+    ctx.font = '600 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Items Sold', 0, 0);
+    ctx.restore();
+    if (soldPerformanceShowProfit) {
+        ctx.save();
+        ctx.translate(cssWidth - 14, margin.top + plotHeight / 2);
+        ctx.rotate(Math.PI / 2);
+        ctx.fillStyle = darkMode ? '#c4b5fd' : '#6d28d9';
+        ctx.font = '600 12px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Profit / Payout Proceeds', 0, 0);
+        ctx.restore();
+    }
+
+    soldPerformanceGeometry = {
+        parsedSeries,
+        visibleKeys,
+        bolMarkers,
+        margin,
+        plotWidth,
+        plotHeight,
+        minTime,
+        maxTime
+    };
+}
+
+function soldPerformanceRangeFromPixels(geometry, firstX, secondX) {
+    const plotLeft = geometry.margin.left;
+    const plotRight = plotLeft + geometry.plotWidth;
+    const first = Math.max(plotLeft, Math.min(plotRight, firstX));
+    const second = Math.max(plotLeft, Math.min(plotRight, secondX));
+    const startX = Math.min(first, second);
+    const endX = Math.max(first, second);
+    const timestampForX = x => geometry.minTime
+        + ((x - plotLeft) / geometry.plotWidth)
+        * (geometry.maxTime - geometry.minTime);
+    const startTimestamp = timestampForX(startX);
+    const endTimestamp = timestampForX(endX);
+    const stores = {};
+    geometry.visibleKeys.forEach(key => {
+        const series = geometry.parsedSeries[key];
+        stores[key] = {
+            sold: Math.max(
+                0,
+                soldPerformanceValueAt(series.sales, endTimestamp)
+                - soldPerformanceValueAt(series.sales, startTimestamp)
+            ),
+            profit: (
+                soldPerformanceValueAt(series.profit, endTimestamp)
+                - soldPerformanceValueAt(series.profit, startTimestamp)
+            )
+        };
+    });
+    return {
+        type: 'range',
+        startTimestamp,
+        endTimestamp,
+        stores
+    };
+}
+
+function soldPerformanceRangeHtml(range) {
+    const rows = Object.entries(range.stores || {}).map(([key, values]) => {
+        const profit = Number(values.profit) || 0;
+        return `<span style="display:inline-block;margin:3px 14px 3px 0;">
+            <strong style="color:${soldPerformanceColors[key]};">${soldPerformanceLabels[key]}:</strong>
+            ${Math.max(0, Number(values.sold) || 0).toLocaleString()} sold`
+            + (soldPerformanceShowProfit
+                ? ` · ${formatQuantityChartMoney(profit)} profit/proceeds`
+                : '')
+            + `</span>`;
+    }).join('');
+    return `<div><strong>${esc(quantityChartDragDate(range.startTimestamp))}</strong>
+        through <strong>${esc(quantityChartDragDate(range.endTimestamp))}</strong></div>
+        <div style="margin-top:4px;">${rows || 'No visible series selected.'}</div>`;
+}
+
+function showSoldPerformanceRange(range) {
+    const summary = document.getElementById('soldPerformanceRange');
+    summary.innerHTML = soldPerformanceRangeHtml(range);
+    summary.style.display = 'block';
+}
+
+function positionSoldPerformanceTooltip(event, html) {
+    const tooltip = document.getElementById('soldPerformanceTooltip');
+    const wrap = document.getElementById('soldPerformanceChartWrap');
+    const wrapRect = wrap.getBoundingClientRect();
+    tooltip.innerHTML = html;
+    tooltip.style.display = 'block';
+    const mouseX = event.clientX - wrapRect.left;
+    const mouseY = event.clientY - wrapRect.top;
+    const width = tooltip.offsetWidth || 250;
+    const height = tooltip.offsetHeight || 100;
+    tooltip.style.left = `${Math.max(
+        8,
+        Math.min(wrapRect.width - width - 8, mouseX + 14)
+    )}px`;
+    const above = mouseY - height - 12;
+    tooltip.style.top = `${Math.max(
+        8,
+        above >= 8
+            ? above
+            : Math.min(wrapRect.height - height - 8, mouseY + 14)
+    )}px`;
+}
+
+function hideSoldPerformanceTooltip(redraw = true) {
+    document.getElementById('soldPerformanceTooltip').style.display = 'none';
+    if (redraw && soldPerformanceState) {
+        drawSoldPerformanceChart(
+            soldPerformanceState,
+            soldPerformanceSelection
+        );
+    }
+}
+
+function soldPerformanceCursorHtml(timestamp, geometry) {
+    const rows = geometry.visibleKeys.map(key => {
+        const series = geometry.parsedSeries[key];
+        const sold = soldPerformanceValueAt(series.sales, timestamp);
+        const profit = soldPerformanceValueAt(series.profit, timestamp);
+        return `<div style="margin-top:4px;">
+            <strong style="color:${soldPerformanceColors[key]};">${soldPerformanceLabels[key]}</strong>:
+            ${Math.max(0, sold).toLocaleString()} sold`
+            + (soldPerformanceShowProfit
+                ? ` · ${formatQuantityChartMoney(profit)} profit/proceeds`
+                : '')
+            + `</div>`;
+    }).join('');
+    return `<div style="font-size:1rem;font-weight:800;">${esc(quantityChartDragDate(timestamp))}</div>
+        ${rows || '<div style="margin-top:4px;">No visible series selected.</div>'}`;
+}
+
+function renderSoldPerformanceTotals(data) {
+    const series = data.series || {};
+    document.getElementById('soldPerformanceTotals').innerHTML =
+        soldPerformanceKeys.map(key => {
+            const item = series[key] || {};
+            return `<div style="padding:10px 12px;border:1px solid #dbe3ee;border-top:4px solid ${soldPerformanceColors[key]};border-radius:8px;background:#fff;">
+                <div style="font-weight:800;color:${soldPerformanceColors[key]};">${soldPerformanceLabels[key]}</div>
+                <div style="margin-top:4px;"><strong>${Math.max(0, Number(item.sold_units) || 0).toLocaleString()}</strong> sold</div>
+                <div class="small-muted">${formatQuantityChartMoney(Number(item.profit) || 0)} profit/proceeds</div>
+            </div>`;
+        }).join('');
+}
+
+async function openSoldPerformance() {
+    const modal = document.getElementById('soldPerformanceModal');
+    const loading = document.getElementById('soldPerformanceLoading');
+    const body = document.getElementById('soldPerformanceBody');
+    soldPerformanceVisible = new Set(
+        Array.from(document.querySelectorAll(
+            'input[data-sold-series]:checked'
+        )).map(input => input.dataset.soldSeries)
+    );
+    soldPerformanceShowProfit = document.getElementById(
+        'soldPerformanceProfitToggle'
+    ).checked;
+    soldPerformanceSelection = null;
+    soldPerformanceDrag = null;
+    document.getElementById('soldPerformanceRange').style.display = 'none';
+    hideSoldPerformanceTooltip(false);
+    modal.style.display = 'flex';
+    loading.style.display = 'block';
+    loading.textContent = 'Loading sold items, payouts, Marketplace proceeds, and BOL uploads…';
+    body.style.display = 'none';
+    try {
+        const response = await fetch(
+            '/api/sold-performance-history',
+            {cache: 'no-store'}
+        );
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Unable to load sold performance');
+        }
+        soldPerformanceState = data;
+        renderSoldPerformanceTotals(data);
+        const warnings = Array.isArray(data.warnings) && data.warnings.length
+            ? ` ${data.warnings.join(' ')}`
+            : '';
+        document.getElementById('soldPerformanceNote').textContent =
+            'Profit uses eBay/Amazon USD payouts and Facebook Marketplace sale proceeds. '
+            + 'Bottom flags mark BOL uploads. Hover for totals or drag to measure a date range.'
+            + warnings;
+        loading.style.display = 'none';
+        body.style.display = 'block';
+        window.requestAnimationFrame(() =>
+            drawSoldPerformanceChart(data)
+        );
+    } catch (error) {
+        loading.textContent =
+            `Could not load sold performance: ${error.message}`;
+    }
+}
+
+const soldPerformanceCanvas = document.getElementById(
+    'soldPerformanceChart'
+);
+soldPerformanceCanvas.addEventListener('pointerdown', event => {
+    if (!soldPerformanceState || !soldPerformanceGeometry) return;
+    const rect = soldPerformanceCanvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const geometry = soldPerformanceGeometry;
+    const inside = x >= geometry.margin.left
+        && x <= geometry.margin.left + geometry.plotWidth
+        && y >= geometry.margin.top
+        && y <= geometry.margin.top + geometry.plotHeight;
+    if (event.button !== 0 || !inside) return;
+    soldPerformanceDrag = {
+        pointerId: event.pointerId,
+        startX: x,
+        currentX: x,
+        moved: false
+    };
+    soldPerformanceSelection = null;
+    document.getElementById('soldPerformanceRange').style.display = 'none';
+    hideSoldPerformanceTooltip(false);
+    if (soldPerformanceCanvas.setPointerCapture) {
+        soldPerformanceCanvas.setPointerCapture(event.pointerId);
+    }
+    event.preventDefault();
+});
+
+soldPerformanceCanvas.addEventListener('pointermove', event => {
+    if (!soldPerformanceState || !soldPerformanceGeometry) return;
+    const rect = soldPerformanceCanvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const geometry = soldPerformanceGeometry;
+    if (
+        soldPerformanceDrag
+        && soldPerformanceDrag.pointerId === event.pointerId
+    ) {
+        soldPerformanceDrag.currentX = x;
+        soldPerformanceDrag.moved = soldPerformanceDrag.moved
+            || Math.abs(x - soldPerformanceDrag.startX) >= 3;
+        if (soldPerformanceDrag.moved) {
+            soldPerformanceSelection = soldPerformanceRangeFromPixels(
+                geometry,
+                soldPerformanceDrag.startX,
+                x
+            );
+            drawSoldPerformanceChart(
+                soldPerformanceState,
+                soldPerformanceSelection
+            );
+            showSoldPerformanceRange(soldPerformanceSelection);
+            const plotLeft = geometry.margin.left;
+            const cursorX = Math.max(
+                plotLeft,
+                Math.min(plotLeft + geometry.plotWidth, x)
+            );
+            const timestamp = geometry.minTime
+                + ((cursorX - plotLeft) / geometry.plotWidth)
+                * (geometry.maxTime - geometry.minTime);
+            positionSoldPerformanceTooltip(
+                event,
+                `<div style="font-size:1rem;font-weight:800;">${esc(quantityChartDragDate(timestamp))}</div>`
+            );
+        }
+        event.preventDefault();
+        return;
+    }
+
+    const marker = geometry.bolMarkers.find(item =>
+        x >= item.left && x <= item.right
+        && y >= item.top && y <= item.bottom
+    );
+    if (marker) {
+        drawSoldPerformanceChart(
+            soldPerformanceState,
+            soldPerformanceSelection
+        );
+        positionSoldPerformanceTooltip(
+            event,
+            quantityBolTooltipHtml(marker.uploads)
+        );
+        soldPerformanceCanvas.style.cursor = 'pointer';
+        return;
+    }
+    const inside = x >= geometry.margin.left
+        && x <= geometry.margin.left + geometry.plotWidth
+        && y >= geometry.margin.top
+        && y <= geometry.margin.top + geometry.plotHeight;
+    if (!inside) {
+        soldPerformanceCanvas.style.cursor = 'default';
+        hideSoldPerformanceTooltip();
+        return;
+    }
+    const timestamp = geometry.minTime
+        + ((x - geometry.margin.left) / geometry.plotWidth)
+        * (geometry.maxTime - geometry.minTime);
+    drawSoldPerformanceChart(soldPerformanceState, {
+        type: 'cursor',
+        timestamp
+    });
+    positionSoldPerformanceTooltip(
+        event,
+        soldPerformanceCursorHtml(timestamp, geometry)
+    );
+    soldPerformanceCanvas.style.cursor = 'crosshair';
+});
+
+soldPerformanceCanvas.addEventListener('pointerup', event => {
+    if (
+        !soldPerformanceDrag
+        || soldPerformanceDrag.pointerId !== event.pointerId
+    ) return;
+    if (
+        soldPerformanceCanvas.releasePointerCapture
+        && soldPerformanceCanvas.hasPointerCapture
+        && soldPerformanceCanvas.hasPointerCapture(event.pointerId)
+    ) {
+        soldPerformanceCanvas.releasePointerCapture(event.pointerId);
+    }
+    if (soldPerformanceDrag.moved && soldPerformanceSelection) {
+        showSoldPerformanceRange(soldPerformanceSelection);
+    } else {
+        soldPerformanceSelection = null;
+        document.getElementById('soldPerformanceRange').style.display = 'none';
+    }
+    soldPerformanceDrag = null;
+    hideSoldPerformanceTooltip(false);
+    drawSoldPerformanceChart(
+        soldPerformanceState,
+        soldPerformanceSelection
+    );
+    event.preventDefault();
+});
+
+soldPerformanceCanvas.addEventListener('pointercancel', () => {
+    soldPerformanceDrag = null;
+    hideSoldPerformanceTooltip(false);
+    if (soldPerformanceState) {
+        drawSoldPerformanceChart(
+            soldPerformanceState,
+            soldPerformanceSelection
+        );
+    }
+});
+soldPerformanceCanvas.addEventListener('pointerleave', () => {
+    if (soldPerformanceDrag) return;
+    soldPerformanceCanvas.style.cursor = 'default';
+    hideSoldPerformanceTooltip();
+});
+
+document.getElementById('sold-performance-btn').addEventListener(
+    'click',
+    openSoldPerformance
+);
+document.getElementById('closeSoldPerformance').addEventListener(
+    'click',
+    () => {
+        document.getElementById('soldPerformanceModal').style.display = 'none';
+    }
+);
+document.getElementById('soldPerformanceToggles').addEventListener(
+    'change',
+    event => {
+        if (event.target.matches('input[data-sold-series]')) {
+            soldPerformanceVisible = new Set(
+                Array.from(document.querySelectorAll(
+                    'input[data-sold-series]:checked'
+                )).map(input => input.dataset.soldSeries)
+            );
+        }
+        if (event.target.id === 'soldPerformanceProfitToggle') {
+            soldPerformanceShowProfit = event.target.checked;
+        }
+        soldPerformanceSelection = null;
+        document.getElementById('soldPerformanceRange').style.display = 'none';
+        hideSoldPerformanceTooltip(false);
+        if (soldPerformanceState) {
+            drawSoldPerformanceChart(soldPerformanceState);
+        }
+    }
+);
+window.addEventListener('resize', () => {
+    if (
+        !soldPerformanceState
+        || document.getElementById('soldPerformanceModal').style.display
+            !== 'flex'
+    ) return;
+    clearTimeout(soldPerformanceResizeTimer);
+    soldPerformanceResizeTimer = setTimeout(
+        () => drawSoldPerformanceChart(
+            soldPerformanceState,
+            soldPerformanceSelection
+        ),
         120
     );
 });
@@ -4137,6 +5199,21 @@ showNotRemoved = async function(orderId) {
     window._lastNotRemovedOrderId = orderId;
     return _origShowNotRemoved(orderId);
 };
+
+// Every Warehouse popup closes when its shaded backdrop is clicked. Trigger
+// the popup's own close button so specialized cleanup (such as move quantity
+// listener removal) still runs.
+document.querySelectorAll('.modal').forEach(modal => {
+    modal.addEventListener('click', event => {
+        if (event.target !== modal) return;
+        const closeButton = modal.querySelector('button[id^="close"]');
+        if (closeButton) {
+            closeButton.click();
+        } else {
+            modal.style.display = 'none';
+        }
+    });
+});
 
 </script>
 <script src="/static/location-preview.js?v=20260317a"></script>

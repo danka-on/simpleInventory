@@ -1182,13 +1182,52 @@ def _ensure_inventory_age_schema(conn):
             source TEXT NOT NULL DEFAULT 'inventory',
             source_history_id INTEGER,
             estimated INTEGER NOT NULL DEFAULT 0,
+            lot_number TEXT NOT NULL DEFAULT '',
+            evidence_source TEXT NOT NULL DEFAULT '',
+            confidence TEXT NOT NULL DEFAULT 'low',
+            confidence_score INTEGER NOT NULL DEFAULT 0,
+            evidence_json TEXT NOT NULL DEFAULT '{}',
+            rebuild_run_id TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     ''')
+    cur.execute("PRAGMA table_info('inventory_age_batches')")
+    existing_columns = {
+        str(row[1]).strip().casefold()
+        for row in cur.fetchall()
+    }
+    migration_columns = {
+        'lot_number': "TEXT NOT NULL DEFAULT ''",
+        'evidence_source': "TEXT NOT NULL DEFAULT ''",
+        'confidence': "TEXT NOT NULL DEFAULT 'low'",
+        'confidence_score': 'INTEGER NOT NULL DEFAULT 0',
+        'evidence_json': "TEXT NOT NULL DEFAULT '{}'",
+        'rebuild_run_id': 'TEXT',
+    }
+    for column, declaration in migration_columns.items():
+        if column not in existing_columns:
+            cur.execute(
+                f'ALTER TABLE inventory_age_batches '
+                f'ADD COLUMN {_sqlite_ident(column)} {declaration}'
+            )
     cur.execute('''
         CREATE TABLE IF NOT EXISTS inventory_age_meta (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        )
+    ''')
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS inventory_age_rebuild_runs (
+            run_id TEXT PRIMARY KEY,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            input_digest TEXT NOT NULL,
+            plan_digest TEXT NOT NULL,
+            mode TEXT NOT NULL DEFAULT 'comprehensive',
+            status TEXT NOT NULL,
+            summary_json TEXT NOT NULL DEFAULT '{}',
+            before_ledger_json TEXT NOT NULL DEFAULT '[]',
+            after_ledger_json TEXT NOT NULL DEFAULT '[]'
         )
     ''')
     cur.execute('''
@@ -1227,7 +1266,9 @@ def _inventory_age_received_at(value, fallback=None):
 
 def _inventory_age_insert_batch(
     cur, searchrack_id, barcode, received_at, quantity, *,
-    source='inventory', source_history_id=None, estimated=False
+    source='inventory', source_history_id=None, estimated=False,
+    lot_number='', evidence_source='', confidence='low',
+    confidence_score=0, evidence_json='{}', rebuild_run_id=None
 ):
     quantity = max(0, _coerce_int(quantity, 0))
     if quantity <= 0 or searchrack_id in (None, ''):
@@ -1235,8 +1276,10 @@ def _inventory_age_insert_batch(
     cur.execute('''
         INSERT OR IGNORE INTO inventory_age_batches (
             searchrack_id, barcode, received_at, quantity,
-            source, source_history_id, estimated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            source, source_history_id, estimated, lot_number,
+            evidence_source, confidence, confidence_score,
+            evidence_json, rebuild_run_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ''', (
         int(searchrack_id),
         str(barcode or '').strip(),
@@ -1245,6 +1288,16 @@ def _inventory_age_insert_batch(
         str(source or 'inventory'),
         source_history_id,
         1 if estimated else 0,
+        str(lot_number or '').strip(),
+        str(evidence_source or '').strip(),
+        str(confidence or 'low').strip().casefold(),
+        max(0, min(100, _coerce_int(confidence_score, 0))),
+        (
+            json.dumps(evidence_json, sort_keys=True, separators=(',', ':'))
+            if isinstance(evidence_json, (dict, list))
+            else str(evidence_json or '{}')
+        ),
+        str(rebuild_run_id or '').strip() or None,
     ))
     return cur.lastrowid
 
@@ -1256,7 +1309,9 @@ def _inventory_age_consume_fifo(cur, searchrack_id, quantity):
     if remaining <= 0:
         return consumed
     cur.execute('''
-        SELECT id, barcode, received_at, quantity, source, source_history_id, estimated
+        SELECT id, barcode, received_at, quantity, source, source_history_id,
+               estimated, lot_number, evidence_source, confidence,
+               confidence_score, evidence_json, rebuild_run_id
         FROM inventory_age_batches
         WHERE searchrack_id = ? AND quantity > 0
         ORDER BY received_at, id
@@ -1264,7 +1319,11 @@ def _inventory_age_consume_fifo(cur, searchrack_id, quantity):
     for row in cur.fetchall():
         if remaining <= 0:
             break
-        batch_id, barcode, received_at, batch_qty, source, history_id, estimated = row
+        (
+            batch_id, barcode, received_at, batch_qty, source, history_id,
+            estimated, lot_number, evidence_source, confidence,
+            confidence_score, evidence_json, rebuild_run_id
+        ) = row
         batch_qty = max(0, _coerce_int(batch_qty, 0))
         take = min(batch_qty, remaining)
         if take <= 0:
@@ -1276,6 +1335,12 @@ def _inventory_age_consume_fifo(cur, searchrack_id, quantity):
             'source': source,
             'source_history_id': history_id,
             'estimated': bool(estimated),
+            'lot_number': str(lot_number or ''),
+            'evidence_source': str(evidence_source or ''),
+            'confidence': str(confidence or 'low'),
+            'confidence_score': max(0, _coerce_int(confidence_score, 0)),
+            'evidence_json': str(evidence_json or '{}'),
+            'rebuild_run_id': rebuild_run_id,
         })
         if take >= batch_qty:
             cur.execute('DELETE FROM inventory_age_batches WHERE id = ?', (batch_id,))
@@ -1306,6 +1371,12 @@ def _inventory_age_transfer_fifo(cur, source_row_id, destination_row_id, quantit
             batch_qty,
             source='fifo_move',
             estimated=bool(batch.get('estimated')),
+            lot_number=batch.get('lot_number'),
+            evidence_source=batch.get('evidence_source'),
+            confidence=batch.get('confidence'),
+            confidence_score=batch.get('confidence_score'),
+            evidence_json=batch.get('evidence_json'),
+            rebuild_run_id=batch.get('rebuild_run_id'),
         )
         moved += batch_qty
     return moved
@@ -1504,6 +1575,2002 @@ def _reconcile_inventory_age_batches(conn):
         conn.rollback()
         raise
     return {**backfill, 'added_units': added_units, 'consumed_units': consumed_units}
+
+
+_inventory_age_rescan_lock = threading.Lock()
+
+
+def _inventory_age_exact_key(value):
+    return str(
+        _normalize_upc_preserve_suffix_for_match(value) or ''
+    ).strip().casefold()
+
+
+def _inventory_age_base_key(value):
+    return _inventory_age_exact_key(value).split('-', 1)[0]
+
+
+def _inventory_age_lot_key(value):
+    lot = str(value or '').strip()
+    if (
+        not lot
+        or lot.casefold() in {'nan', 'none', 'null', 'n/a', 'unknown'}
+        or lot.casefold().startswith('uncategorized')
+    ):
+        return ''
+    return lot.casefold()
+
+
+def _inventory_age_confidence_label(score):
+    score = max(0, min(100, _coerce_int(score, 0)))
+    if score >= 90:
+        return 'high'
+    if score >= 70:
+        return 'medium'
+    return 'low'
+
+
+def _inventory_age_evidence_paths(evidence_paths=None):
+    provided = dict(evidence_paths or {})
+
+    def selected(short_name, filename):
+        value = provided.get(short_name) or provided.get(filename)
+        return Path(value) if value else (BASE_DIR / filename)
+
+    return {
+        'rawbol': selected('rawbol', 'rawbol.db'),
+        'bol': selected('bol', 'bol.db'),
+        'preplog': selected('preplog', 'preplog.db'),
+    }
+
+
+def _inventory_age_load_receipt_evidence(evidence_paths=None):
+    """Load immutable receipt dates plus Item Manager/prep lot evidence."""
+    from collections import defaultdict
+
+    paths = _inventory_age_evidence_paths(evidence_paths)
+    raw_groups = {}
+    upload_dates_by_lot = defaultdict(list)
+    bol_pairs = set()
+    bol_suffix_lots = defaultdict(set)
+    prep_by_exact = defaultdict(list)
+    status_by_exact_lot = {}
+    warnings = []
+    fatal_errors = []
+    fingerprint_rows = []
+
+    raw_path = paths['rawbol']
+    if raw_path.exists():
+        raw_conn = sqlite3.connect(str(raw_path), timeout=30.0)
+        raw_conn.row_factory = sqlite3.Row
+        try:
+            raw_cur = raw_conn.cursor()
+            try:
+                raw_cur.execute('''
+                    SELECT id, filename, lot_number, import_date, uploaded_at
+                    FROM upload_logs
+                    ORDER BY id
+                ''')
+                for row in raw_cur.fetchall():
+                    lot_key = _inventory_age_lot_key(row['lot_number'])
+                    import_at = _history_timestamp(row['import_date'])
+                    if lot_key and import_at is not None:
+                        upload_dates_by_lot[lot_key].append(import_at)
+                    fingerprint_rows.append((
+                        'upload', row['id'], row['filename'], row['lot_number'],
+                        row['import_date'], row['uploaded_at']
+                    ))
+            except sqlite3.Error as exc:
+                fatal_errors.append(f'Raw BOL upload log unavailable: {exc}')
+
+            raw_cur.execute('''
+                SELECT id, upc, quantity, lot_number, import_date, created_at
+                FROM raw_bol_items
+                ORDER BY id
+            ''')
+            for row in raw_cur.fetchall():
+                base_key = _inventory_age_base_key(row['upc'])
+                lot_key = _inventory_age_lot_key(row['lot_number'])
+                if not base_key or not lot_key:
+                    continue
+                group = raw_groups.setdefault((base_key, lot_key), {
+                    'base_key': base_key,
+                    'lot_key': lot_key,
+                    'lot_number': str(row['lot_number'] or '').strip(),
+                    'quantity': 0,
+                    'raw_ids': [],
+                    'import_dates': [],
+                    'created_dates': [],
+                })
+                group['quantity'] += max(0, _coerce_int(row['quantity'], 0))
+                group['raw_ids'].append(max(0, _coerce_int(row['id'], 0)))
+                parsed_import = _history_timestamp(row['import_date'])
+                if parsed_import is not None:
+                    group['import_dates'].append(parsed_import)
+                parsed_created = _history_timestamp(row['created_at'])
+                if parsed_created is not None:
+                    group['created_dates'].append(parsed_created)
+                fingerprint_rows.append((
+                    'raw', row['id'], row['upc'], row['quantity'],
+                    row['lot_number'], row['import_date'], row['created_at']
+                ))
+        finally:
+            raw_conn.close()
+    else:
+        fatal_errors.append(
+            f'Raw BOL database not found: {raw_path.name}'
+        )
+
+    bol_path = paths['bol']
+    if bol_path.exists():
+        bol_conn = sqlite3.connect(str(bol_path), timeout=30.0)
+        bol_conn.row_factory = sqlite3.Row
+        try:
+            bol_cur = bol_conn.cursor()
+            try:
+                bol_cur.execute('''
+                    SELECT id, upc, lot_number
+                    FROM bol_items
+                    ORDER BY id
+                ''')
+                for row in bol_cur.fetchall():
+                    exact_key = _inventory_age_exact_key(row['upc'])
+                    base_key = _inventory_age_base_key(row['upc'])
+                    lot_key = _inventory_age_lot_key(row['lot_number'])
+                    if base_key and lot_key:
+                        bol_pairs.add((base_key, lot_key))
+                        if exact_key and '-' in exact_key:
+                            bol_suffix_lots[exact_key].add(lot_key)
+                    fingerprint_rows.append((
+                        'bol', row['id'], row['upc'], row['lot_number']
+                    ))
+            except sqlite3.Error as exc:
+                fatal_errors.append(f'BOL item evidence unavailable: {exc}')
+
+            try:
+                bol_cur.execute('''
+                    SELECT id, upc, lot_number, status, quantity, updated_at
+                    FROM items_prep_status
+                    WHERE LOWER(TRIM(COALESCE(status, ''))) = 'good'
+                      AND COALESCE(CAST(quantity AS INTEGER), 0) > 0
+                    ORDER BY id
+                ''')
+                for row in bol_cur.fetchall():
+                    exact_key = _inventory_age_exact_key(row['upc'])
+                    lot_key = _inventory_age_lot_key(row['lot_number'])
+                    if exact_key and lot_key:
+                        key = (exact_key, lot_key)
+                        status = status_by_exact_lot.setdefault(key, {
+                            'exact_key': exact_key,
+                            'lot_key': lot_key,
+                            'quantity': 0,
+                            'ids': [],
+                            'updated_at': [],
+                        })
+                        status['quantity'] += max(
+                            0, _coerce_int(row['quantity'], 0)
+                        )
+                        status['ids'].append(max(0, _coerce_int(row['id'], 0)))
+                        parsed_updated = _history_timestamp(row['updated_at'])
+                        if parsed_updated is not None:
+                            status['updated_at'].append(parsed_updated)
+                    fingerprint_rows.append((
+                        'status', row['id'], row['upc'], row['lot_number'],
+                        row['status'], row['quantity'], row['updated_at']
+                    ))
+            except sqlite3.Error as exc:
+                fatal_errors.append(
+                    f'Item Manager prep status unavailable: {exc}'
+                )
+        finally:
+            bol_conn.close()
+    else:
+        fatal_errors.append(
+            f'BOL/Item Manager database not found: {bol_path.name}'
+        )
+
+    preplog_path = paths['preplog']
+    if preplog_path.exists():
+        prep_conn = sqlite3.connect(str(preplog_path), timeout=30.0)
+        prep_conn.row_factory = sqlite3.Row
+        try:
+            prep_cur = prep_conn.cursor()
+            try:
+                prep_cur.execute('''
+                    SELECT id, created_at, upc, base_upc, status, quantity,
+                           meta_json, undone
+                    FROM prep_log
+                    WHERE COALESCE(undone, 0) = 0
+                      AND LOWER(TRIM(COALESCE(status, ''))) = 'good'
+                      AND COALESCE(CAST(quantity AS INTEGER), 0) > 0
+                    ORDER BY created_at, id
+                ''')
+                for row in prep_cur.fetchall():
+                    try:
+                        meta = json.loads(row['meta_json'] or '{}')
+                    except Exception:
+                        meta = {}
+                    if not isinstance(meta, dict):
+                        meta = {}
+                    lot_number = (
+                        meta.get('lot_number')
+                        or meta.get('assigned_lot')
+                        or meta.get('lot')
+                    )
+                    exact_key = _inventory_age_exact_key(row['upc'])
+                    lot_key = _inventory_age_lot_key(lot_number)
+                    created_at = _history_timestamp(row['created_at'])
+                    if exact_key and lot_key and created_at is not None:
+                        prep_by_exact[exact_key].append({
+                            'id': max(0, _coerce_int(row['id'], 0)),
+                            'exact_key': exact_key,
+                            'lot_key': lot_key,
+                            'created_at': created_at,
+                            'quantity': max(
+                                0, _coerce_int(row['quantity'], 0)
+                            ),
+                            'auto_assigned': bool(meta.get('auto_assigned')),
+                            'forced_lot_override': bool(
+                                meta.get('forced_lot_override')
+                            ),
+                            'exception_overage': bool(
+                                meta.get('exception_overage')
+                            ),
+                            'needs_review': bool(meta.get('needs_review')),
+                            'continued_without_lot': bool(
+                                meta.get('continued_without_lot')
+                            ),
+                        })
+                    fingerprint_rows.append((
+                        'prep', row['id'], row['created_at'], row['upc'],
+                        row['base_upc'], row['status'], row['quantity'],
+                        row['meta_json'], row['undone']
+                    ))
+            except sqlite3.Error as exc:
+                fatal_errors.append(f'Prep-log evidence unavailable: {exc}')
+        finally:
+            prep_conn.close()
+    else:
+        fatal_errors.append(
+            f'Prep-log database not found: {preplog_path.name}'
+        )
+
+    catalog = defaultdict(dict)
+    for (base_key, lot_key), group in raw_groups.items():
+        import_dates = sorted(group['import_dates'])
+        upload_dates = sorted(upload_dates_by_lot.get(lot_key, []))
+        if import_dates:
+            received_at = import_dates[0]
+            date_source = 'raw_bol_import_date'
+        elif upload_dates:
+            received_at = upload_dates[0]
+            date_source = 'upload_log_import_date'
+        else:
+            # A Raw-BOL ingestion timestamp is not a purchase date, so it is
+            # intentionally excluded from the validated receipt catalog.
+            continue
+        upload_confirmed = any(
+            value.date() == received_at.date()
+            for value in upload_dates
+        )
+        catalog[base_key][lot_key] = {
+            **group,
+            'received_at': received_at,
+            'date_source': date_source,
+            'upload_confirmed': upload_confirmed,
+            'bol_confirmed': (base_key, lot_key) in bol_pairs,
+        }
+
+    for exact_key in prep_by_exact:
+        prep_by_exact[exact_key].sort(key=lambda item: (
+            item['created_at'], item['id']
+        ))
+
+    fingerprint_payload = json.dumps(
+        sorted(fingerprint_rows, key=lambda value: tuple(str(v) for v in value)),
+        ensure_ascii=False,
+        default=str,
+        separators=(',', ':'),
+    )
+    fingerprint = hashlib.sha256(
+        fingerprint_payload.encode('utf-8')
+    ).hexdigest()
+    return {
+        'paths': paths,
+        'catalog': {key: dict(value) for key, value in catalog.items()},
+        'prep_by_exact': dict(prep_by_exact),
+        'status_by_exact_lot': status_by_exact_lot,
+        'bol_suffix_lots': {
+            key: set(value) for key, value in bol_suffix_lots.items()
+        },
+        'warnings': warnings,
+        'fatal_errors': fatal_errors,
+        'complete': not fatal_errors,
+        'fingerprint': fingerprint,
+        'raw_pairs': sum(len(value) for value in catalog.values()),
+    }
+
+
+def _inventory_age_load_history(
+    active_barcode_keys, history_path=None, active_base_keys=None
+):
+    """Read relevant rack events and suppress paired location-only snapshots."""
+    from collections import defaultdict
+
+    def normalized_location(value):
+        text = str(value or '').strip().casefold()
+        if not text or text == 'picture':
+            return ''
+        return re.sub(r'[^a-z0-9]', '', text)
+
+    def snapshot_location(raw_snapshot):
+        try:
+            snapshot = json.loads(raw_snapshot or '{}')
+        except Exception:
+            snapshot = {}
+        if not isinstance(snapshot, dict):
+            return ''
+        folded = {
+            str(key).casefold(): value
+            for key, value in snapshot.items()
+        }
+        item_location = normalized_location(
+            folded.get('item_position')
+        )
+        if item_location:
+            return item_location
+        return normalized_location(folded.get('pictureposition'))
+
+    def event_location(event, direction):
+        if direction == 'source':
+            candidates = (
+                event.get('from_position'),
+                snapshot_location(event.get('source_row_json')),
+                event.get('item_position'),
+            )
+        else:
+            candidates = (
+                event.get('to_position'),
+                snapshot_location(event.get('result_row_json')),
+                event.get('item_position'),
+            )
+        for candidate in candidates:
+            normalized = normalized_location(candidate)
+            if normalized:
+                return normalized
+        return ''
+
+    resolved_path = Path(history_path or (BASE_DIR / 'rackhistory.db'))
+    if not resolved_path.exists():
+        return {
+            'events': [],
+            'fingerprint': hashlib.sha256(b'').hexdigest(),
+            'movement_events_suppressed': 0,
+            'path': resolved_path,
+            'available': False,
+            'error': f'Rack-history database not found: {resolved_path.name}',
+        }
+
+    history_conn = sqlite3.connect(str(resolved_path), timeout=30.0)
+    history_conn.row_factory = sqlite3.Row
+    active_base_keys = set(active_base_keys or ())
+    fingerprint_rows = []
+    events = []
+    try:
+        history_cur = history_conn.cursor()
+        history_cur.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='removed_items'"
+        )
+        if not history_cur.fetchone():
+            return {
+                'events': [],
+                'fingerprint': hashlib.sha256(b'').hexdigest(),
+                'movement_events_suppressed': 0,
+                'path': resolved_path,
+                'available': False,
+                'error': 'Rack-history event table is missing',
+            }
+        history_cur.execute('''
+            SELECT id, barcode, removed_at, searchrack_id,
+                   old_quantity, new_quantity, removal_type,
+                   source_row_json, result_row_json, event_id,
+                   event_status, undone_at, item_position,
+                   from_position, to_position
+            FROM removed_items
+            WHERE COALESCE(event_status, 'applied') != 'superseded'
+              AND (undone_at IS NULL OR undone_at = '')
+            ORDER BY removed_at, id
+        ''')
+        for raw_event in history_cur.fetchall():
+            event = dict(raw_event)
+            barcode_key = _inventory_age_exact_key(event.get('barcode'))
+            base_key = _inventory_age_base_key(barcode_key)
+            occurred_at = _history_timestamp(event.get('removed_at'))
+            row_id = event.get('searchrack_id')
+            if (
+                not barcode_key
+                or (
+                    barcode_key not in active_barcode_keys
+                    and base_key not in active_base_keys
+                )
+                or occurred_at is None
+                or row_id in (None, '')
+            ):
+                continue
+            event['_barcode_key'] = barcode_key
+            event['_base_key'] = base_key
+            event['_occurred_at'] = occurred_at
+            event['_row_id'] = int(row_id)
+            event['_source_location'] = event_location(event, 'source')
+            event['_destination_location'] = event_location(
+                event, 'destination'
+            )
+            events.append(event)
+            fingerprint_rows.append((
+                event.get('id'), event.get('barcode'), event.get('removed_at'),
+                event.get('searchrack_id'), event.get('old_quantity'),
+                event.get('new_quantity'), event.get('removal_type'),
+                event.get('source_row_json'), event.get('result_row_json'),
+                event.get('event_id'), event.get('event_status'),
+                event.get('undone_at'), event.get('item_position'),
+                event.get('from_position'), event.get('to_position')
+            ))
+    finally:
+        history_conn.close()
+
+    movement_groups = defaultdict(list)
+    for event in events:
+        removal_type = str(
+            event.get('removal_type') or ''
+        ).strip().casefold()
+        if removal_type not in {'locationmoved', 'locationcleared'}:
+            continue
+        group_key = (
+            event['_row_id'],
+            event['_barcode_key'],
+            event['_occurred_at'].isoformat(),
+            removal_type,
+        )
+        movement_groups[group_key].append(event)
+
+    suppressed_ids = set()
+    for grouped in movement_groups.values():
+        deltas = [
+            _coerce_int(event.get('new_quantity'), 0)
+            - _coerce_int(event.get('old_quantity'), 0)
+            for event in grouped
+        ]
+        if (
+            sum(deltas) == 0
+            and any(value > 0 for value in deltas)
+            and any(value < 0 for value in deltas)
+        ):
+            suppressed_ids.update(
+                max(0, _coerce_int(event.get('id'), 0))
+                for event in grouped
+            )
+    if suppressed_ids:
+        events = [
+            event for event in events
+            if max(0, _coerce_int(event.get('id'), 0)) not in suppressed_ids
+        ]
+
+    events.sort(key=lambda event: (
+        event['_occurred_at'],
+        max(0, _coerce_int(event.get('id'), 0)),
+    ))
+    fingerprint_payload = json.dumps(
+        fingerprint_rows,
+        ensure_ascii=False,
+        default=str,
+        separators=(',', ':'),
+    )
+    return {
+        'events': events,
+        'fingerprint': hashlib.sha256(
+            fingerprint_payload.encode('utf-8')
+        ).hexdigest(),
+        'movement_events_suppressed': len(suppressed_ids),
+        'path': resolved_path,
+        'available': True,
+        'error': '',
+    }
+
+
+def _inventory_age_replay_history(
+    history_events, evidence, match_window_days=2
+):
+    """Rebuild per-unit warehouse lineages and preserve delete/rescan moves."""
+    row_units = {}
+    parked_by_barcode = {}
+    restoring_rows = {}
+    stats = {
+        'history_events_used': 0,
+        'matched_reorg_units': 0,
+        'matched_short_gap_reorg_units': 0,
+        'matched_historical_exception_units': 0,
+        'inferred_history_units': 0,
+        'reorg_units_blocked_by_new_receipt': 0,
+        'reorg_units_blocked_by_confirmed_receipt': 0,
+        'reorg_units_blocked_by_possible_receipt': 0,
+        'pending_unmatched_clear_units': 0,
+    }
+    reusable_removal_types = {
+        'inventoryremoved',
+        'manual_multidb_delete',
+    }
+    restore_addition_types = {
+        'add_to_shelf',
+        'inventory_added',
+    }
+    match_window = datetime.timedelta(
+        days=max(1, int(match_window_days or 2))
+    )
+    # Audited legacy exception: OR3 was bulk-cleared May 5–6, 2026 and
+    # deliberately left empty until its July reinventory. Keep this bounded
+    # to the observed operation; future rack clears use the normal 2-day
+    # workflow window.
+    historical_exception_window = datetime.timedelta(days=180)
+    historical_or3_removed_start = datetime.datetime(2026, 5, 5)
+    historical_or3_removed_end = datetime.datetime(2026, 5, 7)
+    historical_or3_added_start = datetime.datetime(2026, 7, 15)
+    historical_or3_added_end = datetime.datetime(2026, 8, 1)
+    new_receipt_token_remaining = {
+        (exact_key, token['id']): max(
+            0, _coerce_int(token.get('quantity'), 0)
+        )
+        for exact_key, tokens in evidence.get('prep_by_exact', {}).items()
+        for token in tokens
+    }
+    receipt_capacity_remaining = {
+        (base_key, lot_key): max(
+            0, _coerce_int(lot_info.get('quantity'), 0)
+        )
+        for base_key, lots in evidence.get('catalog', {}).items()
+        for lot_key, lot_info in lots.items()
+    }
+
+    def snapshot_created_at(event):
+        for raw_snapshot in (
+            event.get('source_row_json'),
+            event.get('result_row_json'),
+        ):
+            try:
+                snapshot = json.loads(raw_snapshot or '{}')
+            except Exception:
+                snapshot = {}
+            if not isinstance(snapshot, dict):
+                continue
+            folded = {
+                str(key).casefold(): value
+                for key, value in snapshot.items()
+            }
+            parsed = _history_timestamp(folded.get('created_at'))
+            if parsed is not None:
+                return parsed
+        return event['_occurred_at']
+
+    def normalized_location(value):
+        text = str(value or '').strip().casefold()
+        if not text or text == 'picture':
+            return ''
+        return re.sub(r'[^a-z0-9]', '', text)
+
+    def snapshot_location(raw_snapshot):
+        try:
+            snapshot = json.loads(raw_snapshot or '{}')
+        except Exception:
+            snapshot = {}
+        if not isinstance(snapshot, dict):
+            return ''
+        folded = {
+            str(key).casefold(): value
+            for key, value in snapshot.items()
+        }
+        item_location = normalized_location(
+            folded.get('item_position')
+        )
+        if item_location:
+            return item_location
+        return normalized_location(folded.get('pictureposition'))
+
+    def event_location(event, direction):
+        derived_key = (
+            '_source_location'
+            if direction == 'source'
+            else '_destination_location'
+        )
+        derived_location = normalized_location(event.get(derived_key))
+        if derived_location:
+            return derived_location
+        if direction == 'source':
+            candidates = (
+                event.get('from_position'),
+                snapshot_location(event.get('source_row_json')),
+                event.get('item_position'),
+            )
+        else:
+            candidates = (
+                event.get('to_position'),
+                snapshot_location(event.get('result_row_json')),
+                event.get('item_position'),
+            )
+        for candidate in candidates:
+            location = normalized_location(candidate)
+            if location:
+                return location
+        return ''
+
+    def historical_location_scope(location):
+        normalized = normalized_location(location)
+        if re.match(r'^or3(?:s|$)', normalized):
+            return 'or3'
+        if re.match(r'^or2s5(?:b\d+)?$', normalized):
+            return 'or2s5'
+        if re.match(r'^or2s6(?:b\d+)?$', normalized):
+            return 'or2s6'
+        return ''
+
+    def reorg_match_type(event, parked):
+        gap = event['_occurred_at'] - parked['parked_at']
+        if not datetime.timedelta(0) <= gap:
+            return ''
+        if gap <= match_window:
+            return 'short_gap'
+        source_scope = historical_location_scope(
+            parked.get('source_location')
+        )
+        if (
+            source_scope == 'or3'
+            and historical_or3_removed_start
+            <= parked['parked_at']
+            < historical_or3_removed_end
+            and historical_or3_added_start
+            <= event['_occurred_at']
+            < historical_or3_added_end
+            and gap <= historical_exception_window
+        ):
+            return 'known_historical_office_reinventory'
+        return ''
+
+    def receipt_conflict_between(event, parked):
+        exact_key = event['_barcode_key']
+        base_key = event['_base_key']
+        catalog = evidence.get('catalog', {}).get(base_key, {})
+        if not catalog:
+            return ''
+        parked_at = parked['parked_at']
+        add_at = event['_occurred_at']
+        parked_day = parked_at.date()
+        add_day = add_at.date()
+        for token in evidence.get('prep_by_exact', {}).get(
+            exact_key, []
+        ):
+            token_key = (exact_key, token['id'])
+            if new_receipt_token_remaining.get(token_key, 0) <= 0:
+                continue
+            lot_info = catalog.get(token['lot_key'])
+            if not lot_info:
+                continue
+            capacity_key = (base_key, token['lot_key'])
+            if receipt_capacity_remaining.get(capacity_key, 0) <= 0:
+                continue
+            received_at = lot_info['received_at']
+            token_at = token['created_at']
+            if (
+                parked_day <= received_at.date() <= add_day
+                and parked_at <= token_at
+                <= add_at + datetime.timedelta(days=2)
+            ):
+                new_receipt_token_remaining[token_key] -= 1
+                receipt_capacity_remaining[capacity_key] -= 1
+                return 'confirmed'
+        possible_lots = sorted(
+            (
+                lot_key,
+                lot_info,
+            )
+            for lot_key, lot_info in catalog.items()
+            if (
+                lot_info.get('received_at') is not None
+                and parked_day
+                <= lot_info['received_at'].date()
+                <= add_day
+                and receipt_capacity_remaining.get(
+                    (base_key, lot_key), 0
+                ) > 0
+            )
+        )
+        if possible_lots:
+            possible_lot_key = possible_lots[0][0]
+            receipt_capacity_remaining[
+                (base_key, possible_lot_key)
+            ] -= 1
+            return 'possible'
+        return ''
+
+    def row_key(event):
+        return (event['_row_id'], event['_barcode_key'])
+
+    def unit_sort_key(unit):
+        return (
+            unit['received_at'],
+            tuple(unit.get('history_ids') or []),
+        )
+
+    def sync_row_quantity(event, target_quantity):
+        units = row_units.setdefault(row_key(event), [])
+        target_quantity = max(0, _coerce_int(target_quantity, 0))
+        if len(units) < target_quantity:
+            missing = target_quantity - len(units)
+            inferred_at = snapshot_created_at(event)
+            for _ in range(missing):
+                units.append({
+                    'received_at': inferred_at,
+                    'first_seen': inferred_at,
+                    'lineage_source': 'rack_snapshot',
+                    'lineage_confidence': 55,
+                    'history_ids': [
+                        max(0, _coerce_int(event.get('id'), 0))
+                    ],
+                })
+            stats['inferred_history_units'] += missing
+        elif len(units) > target_quantity:
+            # Unrecorded decrements are treated as FIFO consumption.
+            del units[:len(units) - target_quantity]
+        units.sort(key=unit_sort_key)
+        return units
+
+    for event in history_events:
+        old_quantity = max(0, _coerce_int(event.get('old_quantity'), 0))
+        new_quantity = max(0, _coerce_int(event.get('new_quantity'), 0))
+        if old_quantity == new_quantity:
+            continue
+        stats['history_events_used'] += 1
+        units = sync_row_quantity(event, old_quantity)
+        removal_type = str(
+            event.get('removal_type') or ''
+        ).strip().casefold()
+
+        if new_quantity > old_quantity:
+            add_quantity = new_quantity - old_quantity
+            restored_units = []
+            restore_key = row_key(event)
+            last_restore_at = restoring_rows.get(restore_key)
+            continuing_restore = (
+                last_restore_at is not None
+                and datetime.timedelta(0)
+                <= event['_occurred_at'] - last_restore_at
+                <= datetime.timedelta(days=1)
+            )
+            if (
+                removal_type in restore_addition_types
+                and (old_quantity == 0 or continuing_restore)
+            ):
+                parked = parked_by_barcode.setdefault(
+                    event['_barcode_key'], []
+                )
+                eligible = []
+                for item in parked:
+                    if item['source_row_id'] == event['_row_id']:
+                        continue
+                    match_type = reorg_match_type(event, item)
+                    if match_type:
+                        eligible.append((item, match_type))
+                eligible.sort(key=lambda match: (
+                    0 if match[1] == 'short_gap' else 1,
+                    -match[0]['parked_at'].timestamp(),
+                    match[0]['unit']['received_at'],
+                ))
+                classified_fresh = 0
+                for item, match_type in eligible:
+                    if (
+                        len(restored_units) + classified_fresh
+                        >= add_quantity
+                    ):
+                        break
+                    receipt_conflict = receipt_conflict_between(
+                        event, item
+                    )
+                    if receipt_conflict:
+                        stats['reorg_units_blocked_by_new_receipt'] += 1
+                        stats[
+                            'reorg_units_blocked_by_'
+                            + receipt_conflict
+                            + '_receipt'
+                        ] += 1
+                        classified_fresh += 1
+                        continue
+                    restored_unit = item['unit']
+                    addition_history_id = max(
+                        0, _coerce_int(event.get('id'), 0)
+                    )
+                    restored_unit['history_ids'] = sorted(set(
+                        list(restored_unit.get('history_ids') or [])
+                        + [item['history_id'], addition_history_id]
+                    ))
+                    restored_unit['reorg_match_type'] = match_type
+                    continuity_score = (
+                        96 if match_type == 'short_gap' else 82
+                    )
+                    restored_unit['lineage_confidence'] = min(
+                        max(
+                            0,
+                            _coerce_int(
+                                restored_unit.get(
+                                    'lineage_confidence'
+                                ),
+                                55,
+                            ),
+                        ),
+                        continuity_score,
+                    )
+                    restored_unit.setdefault(
+                        'reorg_matches', []
+                    ).append({
+                        'match_type': match_type,
+                        'from_location': item.get(
+                            'source_location'
+                        ) or '',
+                        'to_location': event_location(
+                            event, 'destination'
+                        ),
+                        'gap_hours': round(
+                            (
+                                event['_occurred_at']
+                                - item['parked_at']
+                            ).total_seconds() / 3600,
+                            2,
+                        ),
+                        'continuity_score': continuity_score,
+                        'removal_history_id': item['history_id'],
+                        'addition_history_id': addition_history_id,
+                    })
+                    if match_type == 'known_historical_office_reinventory':
+                        restored_unit['lineage_confidence'] = min(
+                            55,
+                            max(
+                                0,
+                                _coerce_int(
+                                    restored_unit.get(
+                                        'lineage_confidence'
+                                    ),
+                                    55,
+                                ),
+                            ),
+                        )
+                        stats[
+                            'matched_historical_exception_units'
+                        ] += 1
+                    else:
+                        stats['matched_short_gap_reorg_units'] += 1
+                    restored_units.append(restored_unit)
+                    parked.remove(item)
+                stats['matched_reorg_units'] += len(restored_units)
+                if restored_units or classified_fresh:
+                    restoring_rows[restore_key] = event['_occurred_at']
+
+            units.extend(restored_units)
+            for _ in range(add_quantity - len(restored_units)):
+                units.append({
+                    'received_at': event['_occurred_at'],
+                    'first_seen': event['_occurred_at'],
+                    'lineage_source': 'rack_add_event',
+                    'lineage_confidence': 65,
+                    'history_ids': [
+                        max(0, _coerce_int(event.get('id'), 0))
+                    ],
+                })
+            units.sort(key=unit_sort_key)
+        else:
+            restoring_rows.pop(row_key(event), None)
+            remove_quantity = old_quantity - new_quantity
+            consumed = units[:remove_quantity]
+            del units[:remove_quantity]
+            if removal_type in reusable_removal_types and new_quantity == 0:
+                parked = parked_by_barcode.setdefault(
+                    event['_barcode_key'], []
+                )
+                for unit in consumed:
+                    parked.append({
+                        'unit': unit,
+                        'parked_at': event['_occurred_at'],
+                        'history_id': max(
+                            0, _coerce_int(event.get('id'), 0)
+                        ),
+                        'source_row_id': event['_row_id'],
+                        'source_location': event_location(
+                            event, 'source'
+                        ),
+                    })
+
+    stats['pending_unmatched_clear_units'] = sum(
+        len(items) for items in parked_by_barcode.values()
+    )
+    return row_units, stats
+
+
+def _inventory_age_depleted_raw_capacity(history_events, evidence):
+    """Subtract known permanent warehouse exits from Raw-BOL supply FIFO."""
+    remaining = {}
+    depleted_by_pair = {}
+    for base_key, lots in evidence['catalog'].items():
+        for lot_key, lot_info in lots.items():
+            pair = (base_key, lot_key)
+            remaining[pair] = max(
+                0, _coerce_int(lot_info.get('quantity'), 0)
+            )
+            depleted_by_pair[pair] = 0
+
+    permanent_removal_types = {
+        'manual_handled',
+        'manual_sold_removal',
+        'repair_removal',
+        'automatic',
+        'automatic_allocated',
+        'finder_removal',
+        'prep_history_delete',
+    }
+    stats = {
+        'known_permanent_removal_units': 0,
+        'raw_capacity_depleted_units': 0,
+        'unmatched_permanent_removal_units': 0,
+        'bases_with_raw_capacity_depletion': set(),
+    }
+    for event in history_events:
+        removal_type = str(
+            event.get('removal_type') or ''
+        ).strip().casefold()
+        if removal_type not in permanent_removal_types:
+            continue
+        remove_quantity = max(
+            0,
+            _coerce_int(event.get('old_quantity'), 0)
+            - _coerce_int(event.get('new_quantity'), 0),
+        )
+        if remove_quantity <= 0:
+            continue
+        stats['known_permanent_removal_units'] += remove_quantity
+        base_key = event.get('_base_key') or _inventory_age_base_key(
+            event.get('barcode')
+        )
+        lots = evidence['catalog'].get(base_key, {})
+        eligible = sorted(
+            (
+                (lot_info['received_at'], lot_key)
+                for lot_key, lot_info in lots.items()
+                if (
+                    lot_info.get('received_at') is not None
+                    and lot_info['received_at']
+                    <= event['_occurred_at'] + datetime.timedelta(days=1)
+                )
+            ),
+            key=lambda value: (value[0], value[1]),
+        )
+        remaining_to_deplete = remove_quantity
+        for _received_at, lot_key in eligible:
+            pair = (base_key, lot_key)
+            available = max(0, remaining.get(pair, 0))
+            take = min(available, remaining_to_deplete)
+            if take <= 0:
+                continue
+            remaining[pair] = available - take
+            depleted_by_pair[pair] = (
+                depleted_by_pair.get(pair, 0) + take
+            )
+            stats['raw_capacity_depleted_units'] += take
+            stats['bases_with_raw_capacity_depletion'].add(base_key)
+            remaining_to_deplete -= take
+            if remaining_to_deplete <= 0:
+                break
+        stats['unmatched_permanent_removal_units'] += remaining_to_deplete
+
+    stats['bases_with_raw_capacity_depletion'] = len(
+        stats['bases_with_raw_capacity_depletion']
+    )
+    return remaining, depleted_by_pair, stats
+
+
+def _inventory_age_read_ledger_rows(cur):
+    cur.execute('''
+        SELECT id, searchrack_id, barcode, received_at, quantity, source,
+               source_history_id, estimated, lot_number, evidence_source,
+               confidence, confidence_score, evidence_json, rebuild_run_id,
+               created_at
+        FROM inventory_age_batches
+        WHERE quantity > 0
+        ORDER BY id
+    ''')
+    return [dict(row) for row in cur.fetchall()]
+
+
+def _inventory_age_ledger_signature(rows):
+    return [(
+        int(row['id']),
+        int(row['searchrack_id']),
+        str(row.get('barcode') or ''),
+        str(row.get('received_at') or ''),
+        max(0, _coerce_int(row.get('quantity'), 0)),
+        str(row.get('source') or ''),
+        row.get('source_history_id'),
+        max(0, _coerce_int(row.get('estimated'), 0)),
+        str(row.get('lot_number') or ''),
+        str(row.get('evidence_source') or ''),
+        str(row.get('confidence') or ''),
+        max(0, _coerce_int(row.get('confidence_score'), 0)),
+        str(row.get('evidence_json') or ''),
+        str(row.get('rebuild_run_id') or ''),
+        str(row.get('created_at') or ''),
+    ) for row in rows]
+
+
+def _inventory_age_unit_signature(unit):
+    evidence_json = unit.get('evidence_json') or '{}'
+    if isinstance(evidence_json, (dict, list)):
+        evidence_json = json.dumps(
+            evidence_json, sort_keys=True, separators=(',', ':')
+        )
+    return (
+        _inventory_age_received_at(unit.get('received_at')),
+        str(unit.get('source') or ''),
+        str(unit.get('lot_number') or ''),
+        str(unit.get('evidence_source') or ''),
+        str(unit.get('confidence') or 'low'),
+        max(0, _coerce_int(unit.get('confidence_score'), 0)),
+        1 if unit.get('estimated') else 0,
+        str(evidence_json or '{}'),
+        unit.get('source_history_id'),
+    )
+
+
+def _inventory_age_group_plan(units, row_id, barcode):
+    grouped = {}
+    for unit in units:
+        key = _inventory_age_unit_signature(unit)
+        grouped[key] = grouped.get(key, 0) + 1
+    result = []
+    for key, quantity in sorted(grouped.items(), key=lambda item: item[0]):
+        (
+            received_at, source, lot_number, evidence_source, confidence,
+            confidence_score, estimated, evidence_json, source_history_id
+        ) = key
+        result.append({
+            'searchrack_id': int(row_id),
+            'barcode': str(barcode or '').strip(),
+            'received_at': received_at,
+            'quantity': quantity,
+            'source': source,
+            'source_history_id': source_history_id,
+            'estimated': bool(estimated),
+            'lot_number': lot_number,
+            'evidence_source': evidence_source,
+            'confidence': confidence,
+            'confidence_score': confidence_score,
+            'evidence_json': evidence_json,
+        })
+    return result
+
+
+def _rescan_inventory_age_from_history(
+    conn, history_path=None, match_window_days=2, evidence_paths=None
+):
+    """Comprehensively rebuild current ages without mutating warehouse stock."""
+    from collections import Counter, defaultdict
+
+    started_at = datetime.datetime.now().isoformat()
+    run_id = uuid.uuid4().hex
+    _ensure_inventory_age_schema(conn)
+    reconcile = {
+        'backfilled': False,
+        'added_units': 0,
+        'consumed_units': 0,
+        'canonical_rebuild': True,
+    }
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute('''
+        SELECT ID AS searchrack_id, BARCODE AS barcode,
+               COALESCE(CAST(QUANTITY AS INTEGER), 0) AS quantity,
+               CREATED_AT AS created_at
+        FROM SEARCHRACK
+        WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+        ORDER BY ID
+    ''')
+    active_rows = [dict(row) for row in cur.fetchall()]
+    active_keys = {
+        _inventory_age_exact_key(row.get('barcode'))
+        for row in active_rows
+        if _inventory_age_exact_key(row.get('barcode'))
+    }
+    active_base_keys = {
+        _inventory_age_base_key(row.get('barcode'))
+        for row in active_rows
+        if _inventory_age_base_key(row.get('barcode'))
+    }
+    expected_inventory = [(
+        int(row['searchrack_id']),
+        str(row.get('barcode') or '').strip(),
+        max(0, _coerce_int(row.get('quantity'), 0)),
+    ) for row in active_rows]
+    active_row_ids = {
+        row_id for row_id, _barcode, _quantity in expected_inventory
+    }
+
+    existing_ledger_rows = _inventory_age_read_ledger_rows(cur)
+    existing_ledger_signature = _inventory_age_ledger_signature(
+        existing_ledger_rows
+    )
+    stale_ledger_row_ids = sorted({
+        int(row['searchrack_id'])
+        for row in existing_ledger_rows
+        if int(row['searchrack_id']) not in active_row_ids
+    })
+
+    evidence = _inventory_age_load_receipt_evidence(evidence_paths)
+    if not evidence.get('complete'):
+        raise RuntimeError(
+            'Comprehensive age evidence is unavailable: '
+            + '; '.join(evidence.get('fatal_errors') or ['unknown source error'])
+        )
+    history = _inventory_age_load_history(
+        active_keys, history_path, active_base_keys
+    )
+    if not history.get('available'):
+        raise RuntimeError(
+            'Comprehensive age evidence is unavailable: '
+            + str(history.get('error') or 'rack history is unavailable')
+        )
+    row_lineages, replay_stats = _inventory_age_replay_history(
+        history['events'], evidence, match_window_days
+    )
+
+    all_units = []
+    fallback_units = 0
+    now = datetime.datetime.now()
+    for active in active_rows:
+        row_id = int(active['searchrack_id'])
+        barcode = str(active.get('barcode') or '').strip()
+        exact_key = _inventory_age_exact_key(barcode)
+        base_key = _inventory_age_base_key(barcode)
+        target_quantity = max(0, _coerce_int(active.get('quantity'), 0))
+        created_at = _history_timestamp(active.get('created_at')) or now
+
+        history_units = list(
+            row_lineages.get((row_id, exact_key), [])
+        )
+        history_units.sort(key=lambda unit: unit['received_at'])
+        if len(history_units) > target_quantity:
+            history_units = history_units[:target_quantity]
+
+        # The plan is canonical and independent of the prior derived ledger.
+        # Existing batches are used only for change detection/audit, never as
+        # receipt evidence. That makes a second rebuild exactly idempotent.
+        while len(history_units) < target_quantity:
+            history_units.append({
+                'received_at': created_at,
+                'first_seen': created_at,
+                'lineage_source': 'warehouse_created_at',
+                'lineage_confidence': 35,
+                'history_ids': [],
+            })
+            fallback_units += 1
+        history_units.sort(key=lambda unit: unit['received_at'])
+
+        for index in range(target_quantity):
+            lineage = history_units[index]
+            all_units.append({
+                'searchrack_id': row_id,
+                'barcode': barcode,
+                'exact_key': exact_key,
+                'base_key': base_key,
+                'unit_index': index,
+                'received_at': lineage['received_at'],
+                'first_seen': (
+                    lineage.get('first_seen')
+                    or created_at
+                ),
+                'lineage_source': str(
+                    lineage.get('lineage_source')
+                    or 'warehouse_created_at'
+                ),
+                'lineage_confidence': max(
+                    0,
+                    _coerce_int(
+                        lineage.get('lineage_confidence'), 35
+                    ),
+                ),
+                'history_ids': list(lineage.get('history_ids') or []),
+                'reorg_match_type': str(
+                    lineage.get('reorg_match_type') or ''
+                ),
+                'reorg_matches': list(
+                    lineage.get('reorg_matches') or []
+                ),
+                'assigned': False,
+            })
+
+    (
+        remaining_capacity,
+        depleted_capacity_by_pair,
+        depletion_stats,
+    ) = _inventory_age_depleted_raw_capacity(
+        history['events'], evidence
+    )
+
+    assignment_counts = Counter()
+    assigned_by_exact_lot = Counter()
+
+    def lot_is_temporally_eligible(unit, lot_info):
+        first_seen = unit.get('first_seen')
+        received_at = lot_info.get('received_at')
+        if first_seen is None or received_at is None:
+            return False
+        return received_at <= first_seen + datetime.timedelta(days=1)
+
+    def assign_receipt(unit, lot_key, evidence_source, score, detail):
+        base_key = unit['base_key']
+        lot_info = evidence['catalog'].get(base_key, {}).get(lot_key)
+        capacity_key = (base_key, lot_key)
+        if (
+            unit.get('assigned')
+            or not lot_info
+            or remaining_capacity.get(capacity_key, 0) <= 0
+            or not lot_is_temporally_eligible(unit, lot_info)
+        ):
+            return False
+        adjusted_score = max(0, min(100, _coerce_int(score, 0)))
+        if not lot_info.get('upload_confirmed'):
+            adjusted_score -= 3
+        if not lot_info.get('bol_confirmed'):
+            adjusted_score -= 3
+        adjusted_score = max(0, adjusted_score)
+        confidence = _inventory_age_confidence_label(adjusted_score)
+        evidence_detail = {
+            'reason': evidence_source,
+            'raw_bol_ids': lot_info.get('raw_ids') or [],
+            'raw_bol_quantity': max(
+                0, _coerce_int(lot_info.get('quantity'), 0)
+            ),
+            'known_permanent_depletion': max(
+                0,
+                depleted_capacity_by_pair.get(
+                    (base_key, lot_key), 0
+                ),
+            ),
+            'date_source': lot_info.get('date_source'),
+            'upload_log_confirmed': bool(
+                lot_info.get('upload_confirmed')
+            ),
+            'bol_item_confirmed': bool(
+                lot_info.get('bol_confirmed')
+            ),
+            'warehouse_lineage': {
+                'lineage_source': unit.get('lineage_source'),
+                'history_ids': unit.get('history_ids') or [],
+                'reorg_match_type': unit.get('reorg_match_type') or '',
+                'reorg_matches': unit.get('reorg_matches') or [],
+            },
+            **dict(detail or {}),
+        }
+        unit.update({
+            'received_at': lot_info['received_at'],
+            'source': 'comprehensive_age_rebuild',
+            'source_history_id': None,
+            'estimated': adjusted_score < 90,
+            'lot_number': lot_info.get('lot_number') or lot_key,
+            'evidence_source': evidence_source,
+            'confidence': confidence,
+            'confidence_score': adjusted_score,
+            'evidence_json': json.dumps(
+                evidence_detail,
+                sort_keys=True,
+                separators=(',', ':'),
+            ),
+            'assigned': True,
+        })
+        remaining_capacity[capacity_key] -= 1
+        assignment_counts[evidence_source] += 1
+        assigned_by_exact_lot[(unit['exact_key'], lot_key)] += 1
+        return True
+
+    units_by_exact = defaultdict(list)
+    for unit in all_units:
+        units_by_exact[unit['exact_key']].append(unit)
+    for units in units_by_exact.values():
+        units.sort(key=lambda unit: (
+            unit['first_seen'],
+            unit['searchrack_id'],
+            unit['unit_index'],
+        ))
+
+    # First priority: non-undone GOOD prep events with an exact UPC and an
+    # explicit lot. Each logged quantity is consumed once.
+    for exact_key, units in sorted(units_by_exact.items()):
+        expanded_tokens = []
+        for token in evidence['prep_by_exact'].get(exact_key, []):
+            for token_index in range(
+                max(0, _coerce_int(token.get('quantity'), 0))
+            ):
+                expanded_tokens.append({
+                    **token,
+                    'token_index': token_index,
+                })
+        for unit in units:
+            candidates = []
+            for token in expanded_tokens:
+                lot_info = evidence['catalog'].get(
+                    unit['base_key'], {}
+                ).get(token['lot_key'])
+                if not lot_info:
+                    continue
+                if not lot_is_temporally_eligible(unit, lot_info):
+                    continue
+                if (
+                    token['created_at']
+                    > unit['first_seen'] + datetime.timedelta(days=2)
+                ):
+                    continue
+                if (
+                    lot_info['received_at']
+                    > token['created_at'] + datetime.timedelta(days=1)
+                ):
+                    continue
+                if remaining_capacity.get(
+                    (unit['base_key'], token['lot_key']), 0
+                ) <= 0:
+                    continue
+                distance = abs(
+                    (
+                        unit['first_seen'] - token['created_at']
+                    ).total_seconds()
+                )
+                candidates.append((distance, token['created_at'], token))
+            if not candidates:
+                continue
+            candidates.sort(key=lambda value: (
+                value[0], value[1], value[2]['id'],
+                value[2]['token_index'],
+            ))
+            token = candidates[0][2]
+            score = 98
+            if (
+                token.get('exception_overage')
+                or token.get('needs_review')
+                or token.get('continued_without_lot')
+            ):
+                score = 88
+            elif (
+                token.get('auto_assigned')
+                or token.get('forced_lot_override')
+            ):
+                score = 96
+            if assign_receipt(
+                unit,
+                token['lot_key'],
+                'prep_log_exact_lot',
+                score,
+                {
+                    'prep_log_id': token['id'],
+                    'prep_event_at': token['created_at'].isoformat(),
+                    'auto_assigned': bool(token.get('auto_assigned')),
+                    'forced_lot_override': bool(
+                        token.get('forced_lot_override')
+                    ),
+                    'exception_overage': bool(
+                        token.get('exception_overage')
+                    ),
+                    'needs_review': bool(token.get('needs_review')),
+                },
+            ):
+                expanded_tokens.remove(token)
+
+    # Item Manager's current GOOD status can fill only its remaining exact
+    # UPC+lot quantity. Its updated_at is deliberately not treated as receipt.
+    status_remaining = {}
+    for key, status in evidence['status_by_exact_lot'].items():
+        status_remaining[key] = max(
+            0,
+            _coerce_int(status.get('quantity'), 0)
+            - assigned_by_exact_lot.get(key, 0),
+        )
+    for exact_key, units in sorted(units_by_exact.items()):
+        for unit in units:
+            if unit.get('assigned'):
+                continue
+            eligible_lots = []
+            for (status_exact, lot_key), remaining in status_remaining.items():
+                if status_exact != exact_key or remaining <= 0:
+                    continue
+                lot_info = evidence['catalog'].get(
+                    unit['base_key'], {}
+                ).get(lot_key)
+                if (
+                    lot_info
+                    and lot_is_temporally_eligible(unit, lot_info)
+                    and remaining_capacity.get(
+                        (unit['base_key'], lot_key), 0
+                    ) > 0
+                ):
+                    eligible_lots.append(lot_key)
+            eligible_lots = sorted(set(eligible_lots))
+            if len(eligible_lots) != 1:
+                continue
+            lot_key = eligible_lots[0]
+            status = evidence['status_by_exact_lot'][
+                (exact_key, lot_key)
+            ]
+            if assign_receipt(
+                unit,
+                lot_key,
+                'item_manager_exact_lot',
+                95,
+                {'item_prep_status_ids': status.get('ids') or []},
+            ):
+                status_remaining[(exact_key, lot_key)] -= 1
+
+    # A suffixed Item Manager/BOL row is a distinct unit identity. A base BOL
+    # row is intentionally not used as a hard pin because it can blend lots.
+    for exact_key, units in sorted(units_by_exact.items()):
+        if '-' not in exact_key:
+            continue
+        for unit in units:
+            if unit.get('assigned'):
+                continue
+            lots = [
+                lot_key
+                for lot_key in evidence['bol_suffix_lots'].get(
+                    exact_key, set()
+                )
+                if (
+                    lot_key in evidence['catalog'].get(
+                        unit['base_key'], {}
+                    )
+                    and lot_is_temporally_eligible(
+                        unit,
+                        evidence['catalog'][unit['base_key']][lot_key],
+                    )
+                    and remaining_capacity.get(
+                        (unit['base_key'], lot_key), 0
+                    ) > 0
+                )
+            ]
+            if len(set(lots)) == 1:
+                assign_receipt(
+                    unit,
+                    lots[0],
+                    'item_manager_suffix_lot',
+                    92,
+                    {'exact_suffix_identity': True},
+                )
+
+    # When Raw BOL contains only one receipt lot for the base UPC, there is no
+    # cross-lot choice to guess. Capacity still applies globally.
+    units_by_base = defaultdict(list)
+    for unit in all_units:
+        units_by_base[unit['base_key']].append(unit)
+    for base_key, units in sorted(units_by_base.items()):
+        catalog_lots = evidence['catalog'].get(base_key, {})
+        if len(catalog_lots) != 1:
+            continue
+        lot_key = next(iter(catalog_lots))
+        for unit in sorted(units, key=lambda item: (
+            item['first_seen'], item['searchrack_id'], item['unit_index']
+        )):
+            if unit.get('assigned'):
+                continue
+            assign_receipt(
+                unit,
+                lot_key,
+                'raw_bol_unique_lot',
+                96,
+                {'candidate_lot_count': 1},
+            )
+
+    # For repeated UPCs, a trustworthy first warehouse sighting may eliminate
+    # all later lots. More than one eligible lot stays ambiguous.
+    for base_key, units in sorted(units_by_base.items()):
+        catalog_lots = evidence['catalog'].get(base_key, {})
+        if len(catalog_lots) <= 1:
+            continue
+        for unit in sorted(units, key=lambda item: (
+            item['first_seen'], item['searchrack_id'], item['unit_index']
+        )):
+            if unit.get('assigned'):
+                continue
+            eligible_lots = [
+                lot_key
+                for lot_key, lot_info in catalog_lots.items()
+                if (
+                    lot_is_temporally_eligible(unit, lot_info)
+                    and remaining_capacity.get((base_key, lot_key), 0) > 0
+                )
+            ]
+            if len(eligible_lots) == 1:
+                assign_receipt(
+                    unit,
+                    eligible_lots[0],
+                    'raw_bol_temporal_single_lot',
+                    86,
+                    {
+                        'candidate_lot_count': len(catalog_lots),
+                        'eligible_lot_count': 1,
+                        'first_seen': unit['first_seen'].isoformat(),
+                    },
+                )
+
+    # Any unresolved unit retains its best reconstructed lineage date and is
+    # explicitly estimated; no arbitrary oldest/newest lot is selected.
+    for unit in all_units:
+        if unit.get('assigned'):
+            continue
+        lineage_score = max(
+            25, min(65, _coerce_int(unit.get('lineage_confidence'), 35))
+        )
+        evidence_source = (
+            'rack_history_lineage'
+            if unit.get('history_ids')
+            else 'warehouse_age_fallback'
+        )
+        unit.update({
+            'source': 'comprehensive_age_rebuild',
+            'source_history_id': None,
+            'estimated': True,
+            'lot_number': '',
+            'evidence_source': evidence_source,
+            'confidence': _inventory_age_confidence_label(lineage_score),
+            'confidence_score': lineage_score,
+            'evidence_json': json.dumps({
+                'reason': evidence_source,
+                'lineage_source': unit.get('lineage_source'),
+                'history_ids': unit.get('history_ids') or [],
+                'reorg_match_type': unit.get('reorg_match_type') or '',
+                'reorg_matches': unit.get('reorg_matches') or [],
+                'raw_candidate_lots': len(
+                    evidence['catalog'].get(unit['base_key'], {})
+                ),
+            }, sort_keys=True, separators=(',', ':')),
+        })
+
+    proposed_units_by_row = defaultdict(list)
+    for unit in all_units:
+        proposed_units_by_row[int(unit['searchrack_id'])].append(unit)
+    for units in proposed_units_by_row.values():
+        units.sort(key=_inventory_age_unit_signature)
+
+    active_barcode_by_id = {
+        int(row['searchrack_id']): str(row.get('barcode') or '').strip()
+        for row in active_rows
+    }
+    proposed_batches_by_row = {
+        row_id: _inventory_age_group_plan(
+            units,
+            row_id,
+            active_barcode_by_id.get(row_id, ''),
+        )
+        for row_id, units in proposed_units_by_row.items()
+    }
+
+    current_units_for_compare = defaultdict(list)
+    for batch in existing_ledger_rows:
+        for _ in range(max(0, _coerce_int(batch.get('quantity'), 0))):
+            current_units_for_compare[int(batch['searchrack_id'])].append({
+                'received_at': batch.get('received_at'),
+                'source': batch.get('source'),
+                'source_history_id': batch.get('source_history_id'),
+                'estimated': bool(batch.get('estimated')),
+                'lot_number': batch.get('lot_number'),
+                'evidence_source': batch.get('evidence_source'),
+                'confidence': batch.get('confidence'),
+                'confidence_score': batch.get('confidence_score'),
+                'evidence_json': batch.get('evidence_json'),
+            })
+    for units in current_units_for_compare.values():
+        units.sort(key=_inventory_age_unit_signature)
+
+    rows_changed = 0
+    rows_rebuilt = 0
+    units_changed = 0
+    units_moved_older = 0
+    units_moved_newer = 0
+    rows_to_rebuild = []
+    for active in active_rows:
+        row_id = int(active['searchrack_id'])
+        old_units = current_units_for_compare.get(row_id, [])
+        new_units = proposed_units_by_row.get(row_id, [])
+        old_signatures = [
+            _inventory_age_unit_signature(unit) for unit in old_units
+        ]
+        new_signatures = [
+            _inventory_age_unit_signature(unit) for unit in new_units
+        ]
+        if old_signatures != new_signatures:
+            rows_rebuilt += 1
+            rows_to_rebuild.append(row_id)
+        old_dates = sorted(
+            _history_timestamp(unit.get('received_at')) or now
+            for unit in old_units
+        )
+        new_dates = sorted(
+            _history_timestamp(unit.get('received_at')) or now
+            for unit in new_units
+        )
+        changed_here = 0
+        for old_at, new_at in zip(old_dates, new_dates):
+            difference = (new_at - old_at).total_seconds()
+            if abs(difference) <= 60:
+                continue
+            changed_here += 1
+            if difference < 0:
+                units_moved_older += 1
+            else:
+                units_moved_newer += 1
+        if changed_here:
+            rows_changed += 1
+            units_changed += changed_here
+
+    ledger_state_changed = bool(
+        rows_to_rebuild or stale_ledger_row_ids
+    )
+    inventory_units = len(all_units)
+    current_reorg_units = sum(
+        1 for unit in all_units if unit.get('reorg_matches')
+    )
+    current_short_gap_reorg_units = sum(
+        1
+        for unit in all_units
+        if any(
+            match.get('match_type') == 'short_gap'
+            for match in unit.get('reorg_matches') or []
+        )
+    )
+    current_historical_reorg_units = sum(
+        1
+        for unit in all_units
+        if any(
+            match.get('match_type')
+            == 'known_historical_office_reinventory'
+            for match in unit.get('reorg_matches') or []
+        )
+    )
+    raw_coverage_units = sum(
+        1 for unit in all_units
+        if unit['base_key'] in evidence['catalog']
+    )
+    verified_units = sum(
+        1 for unit in all_units
+        if _coerce_int(unit.get('confidence_score'), 0) >= 90
+    )
+    medium_confidence_units = sum(
+        1 for unit in all_units
+        if 70 <= _coerce_int(unit.get('confidence_score'), 0) < 90
+    )
+    low_confidence_units = (
+        inventory_units - verified_units - medium_confidence_units
+    )
+    history_only_units = sum(
+        1 for unit in all_units
+        if unit.get('evidence_source') in {
+            'rack_history_lineage', 'warehouse_age_fallback'
+        }
+    )
+    ambiguous_units = sum(
+        1 for unit in all_units
+        if (
+            not unit.get('assigned')
+            and len(evidence['catalog'].get(unit['base_key'], {})) > 1
+        )
+    )
+    no_bol_units = sum(
+        1 for unit in all_units
+        if not evidence['catalog'].get(unit['base_key'])
+    )
+    estimated_units = sum(
+        1 for unit in all_units if bool(unit.get('estimated'))
+    )
+    raw_capacity_shortfall_units = 0
+    for base_key, units in units_by_base.items():
+        available_capacity = sum(
+            max(
+                0,
+                _coerce_int(info.get('quantity'), 0)
+                - depleted_capacity_by_pair.get(
+                    (base_key, lot_key), 0
+                ),
+            )
+            for lot_key, info in evidence['catalog'].get(
+                base_key, {}
+            ).items()
+        )
+        if (
+            evidence['catalog'].get(base_key)
+            and len(units) > available_capacity
+        ):
+            raw_capacity_shortfall_units += (
+                len(units) - available_capacity
+            )
+
+    before_ledger_json = (
+        json.dumps(
+            existing_ledger_rows,
+            ensure_ascii=False,
+            default=str,
+            separators=(',', ':'),
+        )
+        if ledger_state_changed
+        else '[]'
+    )
+    planned_batches = [
+        batch
+        for row_id in sorted(proposed_batches_by_row)
+        for batch in proposed_batches_by_row[row_id]
+    ]
+    after_plan_json = json.dumps(
+        planned_batches,
+        ensure_ascii=False,
+        default=str,
+        sort_keys=True,
+        separators=(',', ':'),
+    )
+    plan_digest = hashlib.sha256(
+        after_plan_json.encode('utf-8')
+    ).hexdigest()
+    input_digest = hashlib.sha256(json.dumps({
+        'inventory': expected_inventory,
+        'ledger': existing_ledger_signature,
+        'history': history['fingerprint'],
+        'evidence': evidence['fingerprint'],
+    }, default=str, sort_keys=True, separators=(',', ':')).encode(
+        'utf-8'
+    )).hexdigest()
+
+    # Re-read every external source immediately before the write. The final
+    # SEARCHRACK transaction independently rechecks inventory and ledger state.
+    evidence_recheck = _inventory_age_load_receipt_evidence(
+        evidence['paths']
+    )
+    if (
+        not evidence_recheck.get('complete')
+        or evidence_recheck['fingerprint'] != evidence['fingerprint']
+    ):
+        raise RuntimeError(
+            'BOL or Item Manager data changed during the age rebuild; please retry'
+        )
+    history_recheck = _inventory_age_load_history(
+        active_keys, history['path'], active_base_keys
+    )
+    if (
+        not history_recheck.get('available')
+        or history_recheck['fingerprint'] != history['fingerprint']
+    ):
+        raise RuntimeError(
+            'Rack history changed during the age rebuild; please retry'
+        )
+
+    completed_at = datetime.datetime.now().isoformat()
+    summary = {
+        'run_id': run_id,
+        'started_at': started_at,
+        'completed_at': completed_at,
+        'mode': 'comprehensive',
+        'match_window_days': max(1, int(match_window_days or 2)),
+        'inventory_rows': len(active_rows),
+        'inventory_units': inventory_units,
+        'raw_bol_coverage_units': raw_coverage_units,
+        'high_confidence_units': verified_units,
+        'strong_evidence_percent': (
+            round((verified_units / inventory_units) * 100, 1)
+            if inventory_units else 100.0
+        ),
+        # Kept for older clients; this is evidence coverage, not a measured
+        # accuracy rate.
+        'verified_units': verified_units,
+        'verified_percent': (
+            round((verified_units / inventory_units) * 100, 1)
+            if inventory_units else 100.0
+        ),
+        'medium_confidence_units': medium_confidence_units,
+        'low_confidence_units': low_confidence_units,
+        'estimated_units': estimated_units,
+        'history_only_units': history_only_units,
+        'ambiguous_units': ambiguous_units,
+        'no_bol_units': no_bol_units,
+        'raw_capacity_shortfall_units': raw_capacity_shortfall_units,
+        'known_permanent_removal_units': depletion_stats[
+            'known_permanent_removal_units'
+        ],
+        'raw_capacity_depleted_units': depletion_stats[
+            'raw_capacity_depleted_units'
+        ],
+        'unmatched_permanent_removal_units': depletion_stats[
+            'unmatched_permanent_removal_units'
+        ],
+        'bases_with_raw_capacity_depletion': depletion_stats[
+            'bases_with_raw_capacity_depletion'
+        ],
+        'history_events_scanned': len(history['events']),
+        'history_events_used': replay_stats['history_events_used'],
+        'movement_events_suppressed': history[
+            'movement_events_suppressed'
+        ],
+        'matched_reorg_units': current_reorg_units,
+        'matched_short_gap_reorg_units': current_short_gap_reorg_units,
+        'matched_historical_exception_units': (
+            current_historical_reorg_units
+        ),
+        'history_reorg_operations': replay_stats[
+            'matched_reorg_units'
+        ],
+        'reorg_units_blocked_by_new_receipt': replay_stats[
+            'reorg_units_blocked_by_new_receipt'
+        ],
+        'reorg_units_blocked_by_confirmed_receipt': replay_stats[
+            'reorg_units_blocked_by_confirmed_receipt'
+        ],
+        'reorg_units_blocked_by_possible_receipt': replay_stats[
+            'reorg_units_blocked_by_possible_receipt'
+        ],
+        'pending_unmatched_clear_units': replay_stats[
+            'pending_unmatched_clear_units'
+        ],
+        'inferred_history_units': replay_stats[
+            'inferred_history_units'
+        ],
+        'fallback_units': fallback_units,
+        'rows_rebuilt': rows_rebuilt,
+        'stale_age_rows_removed': len(stale_ledger_row_ids),
+        'rows_changed': rows_changed,
+        'units_changed': units_changed,
+        'units_moved_older': units_moved_older,
+        'units_moved_newer': units_moved_newer,
+        'assignment_counts': dict(sorted(assignment_counts.items())),
+        'input_digest': input_digest,
+        'plan_digest': plan_digest,
+        'warnings': evidence['warnings'],
+    }
+
+    cur.execute('BEGIN IMMEDIATE')
+    try:
+        cur.execute('''
+            SELECT ID, BARCODE, COALESCE(CAST(QUANTITY AS INTEGER), 0)
+            FROM SEARCHRACK
+            WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+            ORDER BY ID
+        ''')
+        current_inventory = [(
+            int(row[0]),
+            str(row[1] or '').strip(),
+            max(0, _coerce_int(row[2], 0)),
+        ) for row in cur.fetchall()]
+        if current_inventory != expected_inventory:
+            raise RuntimeError(
+                'Warehouse inventory changed during the age rebuild; please retry'
+            )
+        current_ledger_rows = _inventory_age_read_ledger_rows(cur)
+        if (
+            _inventory_age_ledger_signature(current_ledger_rows)
+            != existing_ledger_signature
+        ):
+            raise RuntimeError(
+                'Inventory ages changed during the age rebuild; please retry'
+            )
+
+        if stale_ledger_row_ids:
+            placeholders = ','.join('?' for _ in stale_ledger_row_ids)
+            cur.execute(
+                f'DELETE FROM inventory_age_batches '
+                f'WHERE searchrack_id IN ({placeholders})',
+                tuple(stale_ledger_row_ids),
+            )
+        for row_id in rows_to_rebuild:
+            cur.execute(
+                'DELETE FROM inventory_age_batches WHERE searchrack_id = ?',
+                (row_id,),
+            )
+            for batch in proposed_batches_by_row.get(row_id, []):
+                _inventory_age_insert_batch(
+                    cur,
+                    row_id,
+                    batch['barcode'],
+                    batch['received_at'],
+                    batch['quantity'],
+                    source=batch['source'],
+                    source_history_id=batch['source_history_id'],
+                    estimated=batch['estimated'],
+                    lot_number=batch['lot_number'],
+                    evidence_source=batch['evidence_source'],
+                    confidence=batch['confidence'],
+                    confidence_score=batch['confidence_score'],
+                    evidence_json=batch['evidence_json'],
+                    rebuild_run_id=run_id,
+                )
+
+        cur.execute('''
+            SELECT searchrack_id, COALESCE(SUM(quantity), 0)
+            FROM inventory_age_batches
+            WHERE quantity > 0
+            GROUP BY searchrack_id
+        ''')
+        ledger_quantities = {
+            int(row[0]): max(0, _coerce_int(row[1], 0))
+            for row in cur.fetchall()
+        }
+        expected_quantities = {
+            row_id: quantity
+            for row_id, _barcode, quantity in expected_inventory
+        }
+        if ledger_quantities != expected_quantities:
+            raise RuntimeError(
+                'Age rebuild quantity invariant failed; no changes were saved'
+            )
+
+        final_ledger_rows = _inventory_age_read_ledger_rows(cur)
+        final_ledger_json = (
+            json.dumps(
+                final_ledger_rows,
+                ensure_ascii=False,
+                default=str,
+                separators=(',', ':'),
+            )
+            if ledger_state_changed
+            else '[]'
+        )
+        cur.execute('''
+            INSERT INTO inventory_age_rebuild_runs (
+                run_id, started_at, completed_at, input_digest,
+                plan_digest, mode, status, summary_json,
+                before_ledger_json, after_ledger_json
+            ) VALUES (?, ?, ?, ?, ?, 'comprehensive', 'completed', ?, ?, ?)
+        ''', (
+            run_id,
+            started_at,
+            completed_at,
+            input_digest,
+            plan_digest,
+            json.dumps(summary, sort_keys=True, separators=(',', ':')),
+            before_ledger_json,
+            final_ledger_json,
+        ))
+        # Retain complete rollback evidence for only the five newest
+        # state-changing rebuilds. Older/no-op runs keep their digest/summary.
+        cur.execute('''
+            UPDATE inventory_age_rebuild_runs
+            SET before_ledger_json = '[]',
+                after_ledger_json = '[]'
+            WHERE run_id NOT IN (
+                SELECT run_id
+                FROM inventory_age_rebuild_runs
+                WHERE before_ledger_json != '[]'
+                   OR after_ledger_json != '[]'
+                ORDER BY completed_at DESC, started_at DESC
+                LIMIT 5
+            )
+        ''')
+        summary_json = json.dumps(
+            summary, sort_keys=True, separators=(',', ':')
+        )
+        cur.execute('''
+            INSERT OR REPLACE INTO inventory_age_meta(key, value)
+            VALUES ('last_comprehensive_rebuild', ?)
+        ''', (summary_json,))
+        cur.execute('''
+            INSERT OR IGNORE INTO inventory_age_meta(key, value)
+            VALUES ('backfill_v1', ?)
+        ''', (completed_at,))
+        cur.execute('''
+            INSERT OR REPLACE INTO inventory_age_meta(key, value)
+            VALUES ('last_history_rescan', ?)
+        ''', (summary_json,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    return {
+        **summary,
+        'reconcile': reconcile,
+        'quantity_invariant': True,
+    }
 
 
 def _inventory_age_lookup(conn, searchrack_ids):
@@ -20575,13 +22642,117 @@ def api_inventory_cleanup():
 def api_inventory_age_summary():
     try:
         from seller_analytics import build_inventory_age_summary
-        return jsonify(build_inventory_age_summary(BASE_DIR))
+        payload = build_inventory_age_summary(BASE_DIR)
+        try:
+            with sqlite3.connect(
+                str(BASE_DIR / 'searchRack.db'),
+                timeout=30.0,
+            ) as age_conn:
+                age_cur = age_conn.cursor()
+                age_cur.execute('''
+                    SELECT value
+                    FROM inventory_age_meta
+                    WHERE key = 'last_comprehensive_rebuild'
+                    LIMIT 1
+                ''')
+                meta_row = age_cur.fetchone()
+                if meta_row:
+                    parsed = json.loads(meta_row[0] or '{}')
+                    if isinstance(parsed, dict):
+                        payload['last_comprehensive_rebuild'] = parsed
+        except Exception:
+            # Age bands remain available even on a legacy database that has
+            # not run the comprehensive rebuild yet.
+            pass
+        return jsonify(payload)
     except Exception as exc:
         logger.exception('Inventory age summary failed')
         return jsonify({
             'success': False,
             'error': _safe_error(exc, 'inventory_age_summary')
         }), 500
+
+
+@app.route('/api/inventory-age/rescan', methods=['POST'])
+def api_inventory_age_rescan():
+    if not _inventory_age_rescan_lock.acquire(blocking=False):
+        return jsonify({
+            'success': False,
+            'error': 'An inventory age rescan is already running.'
+        }), 409
+
+    conn = None
+    try:
+        mirrored_events = 0
+        pending_history_events = None
+        for _ in range(40):
+            processed = _flush_searchrack_history_outbox(limit=250)
+            mirrored_events += processed
+            with sqlite3.connect(
+                str(BASE_DIR / 'searchRack.db'),
+                timeout=30.0
+            ) as pending_conn:
+                pending_cur = pending_conn.cursor()
+                _ensure_searchrack_history_outbox(pending_cur)
+                pending_cur.execute('''
+                    SELECT COUNT(*)
+                    FROM searchrack_history_outbox
+                    WHERE processed_at IS NULL
+                ''')
+                pending_history_events = max(
+                    0, _coerce_int(pending_cur.fetchone()[0], 0)
+                )
+            if pending_history_events == 0:
+                break
+            if processed == 0:
+                time.sleep(0.05)
+
+        if pending_history_events:
+            return jsonify({
+                'success': False,
+                'error': (
+                    'Rack history is still catching up. '
+                    'Please wait a moment and run the age re-scan again.'
+                ),
+                'pending_history_events': pending_history_events,
+            }), 503
+
+        conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=60.0)
+        result = _rescan_inventory_age_from_history(conn)
+        _invalidate_searchrack_cache()
+        return jsonify({
+            'success': True,
+            'mirrored_history_events': mirrored_events,
+            **result,
+        })
+    except RuntimeError as exc:
+        message = str(exc)
+        if message.startswith('Comprehensive age evidence is unavailable:'):
+            return jsonify({'success': False, 'error': message}), 503
+        if message in {
+            'Warehouse inventory changed during the age rescan; please retry',
+            'Inventory ages changed during the rescan; please retry',
+            'Warehouse inventory changed during the age rebuild; please retry',
+            'Inventory ages changed during the age rebuild; please retry',
+            'BOL or Item Manager data changed during the age rebuild; please retry',
+            'Rack history changed during the age rebuild; please retry',
+        }:
+            return jsonify({'success': False, 'error': message}), 409
+        logger.exception('Comprehensive inventory age rebuild failed')
+        return jsonify({
+            'success': False,
+            'error': _safe_error(exc, 'inventory_age_rescan')
+        }), 500
+    except Exception as exc:
+        logger.exception('Comprehensive inventory age rebuild failed')
+        return jsonify({
+            'success': False,
+            'error': _safe_error(exc, 'inventory_age_rescan')
+        }), 500
+    finally:
+        if conn is not None:
+            conn.close()
+        _inventory_age_rescan_lock.release()
 
 
 @app.route('/api/inventory-seller-analytics', methods=['GET'])
@@ -43923,9 +46094,11 @@ def searchrack_page():
 @app.route('/api/inventory-quantity-history', methods=['GET'])
 def api_inventory_quantity_history():
     """Return a move-safe reconstruction of total active warehouse units over time."""
+    chart_start = datetime.datetime(2025, 11, 19)
     rack_conn = None
     history_conn = None
     rawbol_conn = None
+    sold_conn = None
     try:
         _flush_searchrack_history_outbox()
 
@@ -43937,6 +46110,44 @@ def api_inventory_quantity_history():
             WHERE COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
         ''')
         current_quantity = max(0, _coerce_int(rack_cur.fetchone()[0], 0))
+
+        sold_points = []
+        try:
+            sold_conn = sqlite3.connect(str(BASE_DIR / 'sold.db'), timeout=30.0)
+            sold_conn.row_factory = sqlite3.Row
+            sold_cur = sold_conn.cursor()
+            sold_cur.execute('''
+                SELECT id, paid_time, COALESCE(CAST(quantity AS INTEGER), 1) AS quantity
+                FROM orders
+                WHERE paid_time IS NOT NULL
+                  AND TRIM(paid_time) != ''
+                ORDER BY paid_time, id
+            ''')
+            sold_events = []
+            for sold_row in sold_cur.fetchall():
+                sold_at = _history_timestamp(sold_row['paid_time'])
+                if sold_at is None or sold_at < chart_start:
+                    continue
+                sold_events.append((
+                    sold_at,
+                    max(0, _coerce_int(sold_row['quantity'], 1)),
+                    max(0, _coerce_int(sold_row['id'], 0)),
+                ))
+            sold_events.sort(key=lambda event: (event[0], event[2]))
+            sold_points.append({
+                'timestamp': chart_start.isoformat(),
+                'quantity': 0,
+            })
+            if sold_events:
+                running_sold = 0
+                for sold_at, sold_quantity, _sold_id in sold_events:
+                    running_sold += sold_quantity
+                    sold_points.append({
+                        'timestamp': sold_at.isoformat(),
+                        'quantity': running_sold,
+                    })
+        except Exception as sold_error:
+            logger.warning('Sold-items chart series unavailable: %s', sold_error)
 
         bol_uploads = []
         try:
@@ -43970,6 +46181,8 @@ def api_inventory_quantity_history():
                         upload.get('uploaded_at') or upload.get('import_date')
                     )
                     if uploaded_at is None:
+                        continue
+                    if uploaded_at < chart_start:
                         continue
                     total_client_cost = upload.get('total_client_cost')
                     shipping_cost = upload.get('shipping_cost')
@@ -44040,14 +46253,26 @@ def api_inventory_quantity_history():
 
         now = datetime.datetime.now()
         if not events:
+            points = [
+                {
+                    'timestamp': chart_start.isoformat(),
+                    'quantity': current_quantity,
+                },
+                {
+                    'timestamp': now.isoformat(),
+                    'quantity': current_quantity,
+                },
+            ]
             return jsonify({
                 'success': True,
-                'points': [{'timestamp': now.isoformat(), 'quantity': current_quantity}],
+                'points': points,
                 'peak_quantity': current_quantity,
                 'peak_timestamp': now.isoformat(),
                 'current_quantity': current_quantity,
                 'reconstructed': False,
                 'bol_uploads': bol_uploads,
+                'sold_points': sold_points,
+                'chart_start': chart_start.isoformat(),
             })
 
         # A row whose first recorded event starts above zero was already active
@@ -44061,13 +46286,21 @@ def api_inventory_quantity_history():
         if initial_quantity + minimum_cumulative < 0:
             initial_quantity += -(initial_quantity + minimum_cumulative)
 
-        first_timestamp = events[0]['timestamp']
-        points = [{
-            'timestamp': (first_timestamp - datetime.timedelta(milliseconds=1)).isoformat(),
-            'quantity': initial_quantity,
-        }]
         running_quantity = initial_quantity
         for event in events:
+            if event['timestamp'] >= chart_start:
+                break
+            running_quantity = max(
+                0, running_quantity + event['delta']
+            )
+
+        points = [{
+            'timestamp': chart_start.isoformat(),
+            'quantity': running_quantity,
+        }]
+        for event in events:
+            if event['timestamp'] < chart_start:
+                continue
             running_quantity = max(0, running_quantity + event['delta'])
             points.append({
                 'timestamp': event['timestamp'].isoformat(),
@@ -44098,6 +46331,8 @@ def api_inventory_quantity_history():
             'reconstructed': reconstructed,
             'history_start': points[0]['timestamp'],
             'bol_uploads': bol_uploads,
+            'sold_points': sold_points,
+            'chart_start': chart_start.isoformat(),
         })
     except Exception as exc:
         return jsonify({
@@ -44111,6 +46346,304 @@ def api_inventory_quantity_history():
             rack_conn.close()
         if rawbol_conn is not None:
             rawbol_conn.close()
+        if sold_conn is not None:
+            sold_conn.close()
+
+
+@app.route('/api/sold-performance-history', methods=['GET'])
+def api_sold_performance_history():
+    """Return cumulative sold-unit and payout/proceeds series by store."""
+    store_keys = ('ebay', 'amazon', 'facebook')
+    sold_conn = None
+    rawbol_conn = None
+    marketplace_conn = None
+    warnings = []
+
+    def normalized_store(value):
+        text = str(value or '').strip().casefold()
+        if 'ebay' in text:
+            return 'ebay'
+        if 'amazon' in text:
+            return 'amazon'
+        if 'facebook' in text or 'marketplace' in text:
+            return 'facebook'
+        return ''
+
+    def cumulative_series(events, value_name):
+        running = {
+            'all': 0.0,
+            'ebay': 0.0,
+            'amazon': 0.0,
+            'facebook': 0.0,
+        }
+        points = {key: [] for key in running}
+        for occurred_at, store, value, _event_id in sorted(
+            events, key=lambda item: (item[0], item[3])
+        ):
+            if store not in store_keys:
+                continue
+            running[store] += value
+            running['all'] += value
+            points[store].append({
+                'timestamp': occurred_at.isoformat(),
+                value_name: round(running[store], 2),
+            })
+            points['all'].append({
+                'timestamp': occurred_at.isoformat(),
+                value_name: round(running['all'], 2),
+            })
+        return points, {
+            key: round(value, 2) for key, value in running.items()
+        }
+
+    try:
+        sold_conn = sqlite3.connect(
+            str(BASE_DIR / 'sold.db'), timeout=30.0
+        )
+        sold_conn.row_factory = sqlite3.Row
+        sold_cur = sold_conn.cursor()
+        sold_cur.execute('''
+            SELECT id, paid_time, store,
+                   COALESCE(CAST(quantity AS INTEGER), 1) AS quantity
+            FROM orders
+            WHERE paid_time IS NOT NULL
+              AND TRIM(paid_time) != ''
+            ORDER BY paid_time, id
+        ''')
+        sale_events = []
+        ignored_store_units = 0
+        for row in sold_cur.fetchall():
+            sold_at = _history_timestamp(row['paid_time'])
+            quantity = max(0, _coerce_int(row['quantity'], 1))
+            if sold_at is None or quantity <= 0:
+                continue
+            store = normalized_store(row['store'])
+            if not store:
+                ignored_store_units += quantity
+                continue
+            sale_events.append((
+                sold_at,
+                store,
+                float(quantity),
+                max(0, _coerce_int(row['id'], 0)),
+            ))
+        if ignored_store_units:
+            warnings.append(
+                f'{ignored_store_units} sold units with an unknown/test store '
+                'were excluded from the All line.'
+            )
+
+        profit_events = []
+        try:
+            sold_cur.execute('''
+                SELECT id, store, payout_date, end_date, start_date,
+                       amount, currency
+                FROM payouts
+                WHERE COALESCE(amount, 0) != 0
+                ORDER BY COALESCE(
+                    NULLIF(payout_date, ''),
+                    NULLIF(end_date, ''),
+                    start_date
+                ), id
+            ''')
+            for row in sold_cur.fetchall():
+                store = normalized_store(row['store'])
+                currency = str(row['currency'] or 'USD').strip().upper()
+                payout_at = _history_timestamp(
+                    row['payout_date']
+                    or row['end_date']
+                    or row['start_date']
+                )
+                if (
+                    store not in {'ebay', 'amazon'}
+                    or currency != 'USD'
+                    or payout_at is None
+                ):
+                    continue
+                profit_events.append((
+                    payout_at,
+                    store,
+                    float(row['amount'] or 0),
+                    max(0, _coerce_int(row['id'], 0)),
+                ))
+        except sqlite3.Error as payout_error:
+            warnings.append(
+                f'Payout profit data unavailable: {payout_error}'
+            )
+
+        try:
+            marketplace_conn = sqlite3.connect(
+                str(BASE_DIR / 'marketplace.db'), timeout=30.0
+            )
+            marketplace_conn.row_factory = sqlite3.Row
+            marketplace_cur = marketplace_conn.cursor()
+            marketplace_cur.execute('''
+                SELECT id, sale_date, created_at, price
+                FROM marketplace_sales
+                WHERE COALESCE(price, 0) != 0
+                ORDER BY COALESCE(
+                    NULLIF(created_at, ''),
+                    sale_date
+                ), id
+            ''')
+            for row in marketplace_cur.fetchall():
+                sale_at = _history_timestamp(
+                    row['sale_date'] or row['created_at']
+                )
+                if sale_at is None:
+                    continue
+                profit_events.append((
+                    sale_at,
+                    'facebook',
+                    float(row['price'] or 0),
+                    1000000000 + max(
+                        0, _coerce_int(row['id'], 0)
+                    ),
+                ))
+        except sqlite3.Error as marketplace_error:
+            warnings.append(
+                f'Facebook Marketplace profit data unavailable: '
+                f'{marketplace_error}'
+            )
+
+        bol_uploads = []
+        try:
+            rawbol_conn = sqlite3.connect(
+                str(BASE_DIR / 'rawbol.db'), timeout=30.0
+            )
+            rawbol_conn.row_factory = sqlite3.Row
+            rawbol_cur = rawbol_conn.cursor()
+            rawbol_cur.execute('''
+                SELECT u.id, u.filename, u.lot_number, u.bol_location,
+                       u.import_date, u.uploaded_at,
+                       u.total_client_cost, u.shipping_cost,
+                       COALESCE((
+                           SELECT SUM(
+                               CASE
+                                   WHEN COALESCE(
+                                       CAST(items.quantity AS INTEGER), 0
+                                   ) > 0
+                                   THEN CAST(items.quantity AS INTEGER)
+                                   ELSE 0
+                               END
+                           )
+                           FROM raw_bol_items AS items
+                           WHERE items.lot_number = u.lot_number
+                       ), 0) AS total_quantity
+                FROM upload_logs AS u
+                ORDER BY COALESCE(
+                    NULLIF(u.uploaded_at, ''),
+                    u.import_date
+                ), u.id
+            ''')
+            for row in rawbol_cur.fetchall():
+                uploaded_at = _history_timestamp(
+                    row['uploaded_at'] or row['import_date']
+                )
+                if uploaded_at is None:
+                    continue
+                bol_uploads.append({
+                    'id': max(0, _coerce_int(row['id'], 0)),
+                    'timestamp': uploaded_at.isoformat(),
+                    'filename': str(row['filename'] or '').strip(),
+                    'lot_number': str(row['lot_number'] or '').strip(),
+                    'bol_location': str(
+                        row['bol_location'] or ''
+                    ).strip(),
+                    'import_date': str(row['import_date'] or '').strip(),
+                    'total_quantity': max(
+                        0, _coerce_int(row['total_quantity'], 0)
+                    ),
+                    'total_client_cost': (
+                        float(row['total_client_cost'])
+                        if row['total_client_cost'] not in (None, '')
+                        else None
+                    ),
+                    'shipping_cost': (
+                        float(row['shipping_cost'])
+                        if row['shipping_cost'] not in (None, '')
+                        else None
+                    ),
+                })
+        except sqlite3.Error as bol_error:
+            warnings.append(f'BOL flags unavailable: {bol_error}')
+
+        timeline = (
+            [event[0] for event in sale_events]
+            + [event[0] for event in profit_events]
+            + [
+                _history_timestamp(upload['timestamp'])
+                for upload in bol_uploads
+            ]
+        )
+        timeline = [value for value in timeline if value is not None]
+        now = datetime.datetime.now()
+        chart_start = (
+            min(timeline)
+            if timeline
+            else now - datetime.timedelta(days=30)
+        )
+        chart_end = max(timeline + [now])
+
+        sales_points, sales_totals = cumulative_series(
+            sale_events, 'quantity'
+        )
+        profit_points, profit_totals = cumulative_series(
+            profit_events, 'amount'
+        )
+        for key in ('all', *store_keys):
+            sales_points[key].insert(0, {
+                'timestamp': chart_start.isoformat(),
+                'quantity': 0,
+            })
+            profit_points[key].insert(0, {
+                'timestamp': chart_start.isoformat(),
+                'amount': 0.0,
+            })
+            sales_points[key].append({
+                'timestamp': chart_end.isoformat(),
+                'quantity': int(round(sales_totals[key])),
+            })
+            profit_points[key].append({
+                'timestamp': chart_end.isoformat(),
+                'amount': profit_totals[key],
+            })
+
+        return jsonify({
+            'success': True,
+            'chart_start': chart_start.isoformat(),
+            'chart_end': chart_end.isoformat(),
+            'series': {
+                key: {
+                    'sales_points': sales_points[key],
+                    'profit_points': profit_points[key],
+                    'sold_units': int(round(sales_totals[key])),
+                    'profit': profit_totals[key],
+                }
+                for key in ('all', *store_keys)
+            },
+            'bol_uploads': bol_uploads,
+            'profit_definition': {
+                'ebay': 'USD payouts from /payouts',
+                'amazon': 'USD settlements from /payouts',
+                'facebook': 'Marketplace sale proceeds from /marketplace-stats',
+                'all': 'eBay + Amazon payouts and Facebook sale proceeds',
+            },
+            'warnings': warnings,
+        })
+    except Exception as exc:
+        logger.exception('Sold performance history failed')
+        return jsonify({
+            'success': False,
+            'error': _safe_error(exc, 'sold_performance_history')
+        }), 500
+    finally:
+        if sold_conn is not None:
+            sold_conn.close()
+        if rawbol_conn is not None:
+            rawbol_conn.close()
+        if marketplace_conn is not None:
+            marketplace_conn.close()
 
 
 @app.route('/finder')
