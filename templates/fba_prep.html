@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+  <title>Amazon FBA Prep</title>
+  <style>
+    :root{--ink:#172033;--muted:#667085;--line:#e4e7ec;--soft:#f7f8fa;--card:#fff;--amazon:#f59e0b;--amazon-dark:#b45309;--blue:#2563eb;--green:#059669;--red:#dc2626;--purple:#7c3aed;--shadow:0 4px 18px rgba(15,23,42,.07)}
+    *{box-sizing:border-box}
+    body{margin:0;background:#f3f5f8;color:var(--ink);font-family:Inter,"Segoe UI",Arial,sans-serif;min-height:100vh}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .topbar{position:sticky;top:0;z-index:50;background:linear-gradient(135deg,#fff7df,#ffedd0);border-bottom:1px solid #fed7aa;box-shadow:0 2px 14px rgba(120,53,15,.08)}
+    .topbar-inner{max-width:1120px;margin:auto;padding:12px 16px;display:flex;align-items:center;gap:12px}
+    .back{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:#7c2d12;font-weight:700;padding:8px;border-radius:9px;text-decoration:none}
+    .back:hover{background:rgba(255,255,255,.7)}
+    .brand{flex:1;min-width:0}
+    .brand h1{font-size:1.12rem;margin:0;color:#78350f}.brand p{font-size:.76rem;margin:2px 0 0;color:#9a5a17}
+    .page{max-width:1120px;margin:0 auto;padding:18px 16px 70px}
+    .tabs{display:flex;gap:6px;background:#fff;border:1px solid var(--line);border-radius:13px;padding:5px;margin-bottom:14px;box-shadow:var(--shadow);overflow:auto}
+    .tab{border:0;background:transparent;color:var(--muted);border-radius:9px;padding:10px 14px;font-weight:750;white-space:nowrap;display:flex;align-items:center;gap:7px}
+    .tab.active{background:#fff2d8;color:#92400e;box-shadow:0 1px 5px rgba(120,53,15,.12)}
+    .count-badge{min-width:21px;height:21px;border-radius:999px;background:#fee2e2;color:#b91c1c;padding:2px 6px;font-size:.72rem;display:inline-flex;align-items:center;justify-content:center}
+    .panel{display:none}.panel.active{display:block}
+    [hidden]{display:none!important}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:15px;box-shadow:var(--shadow);margin-bottom:14px;overflow:hidden}
+    .card-head{padding:14px 16px 11px;border-bottom:1px solid #eef0f3;display:flex;justify-content:space-between;gap:12px;align-items:center}
+    .card-title{font-weight:800}.card-sub{font-size:.8rem;color:var(--muted);margin-top:2px}
+    .card-body{padding:15px 16px}
+    .meta-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}
+    .field{display:flex;flex-direction:column;gap:5px;min-width:0}.field.wide{grid-column:span 2}
+    .field label{font-size:.72rem;text-transform:uppercase;letter-spacing:.055em;font-weight:800;color:#667085}
+    .field input,.field select,.field textarea{width:100%;border:1.5px solid #d0d5dd;border-radius:9px;background:#fff;color:var(--ink);padding:9px 10px;min-height:40px}
+    .field textarea{resize:vertical;min-height:62px}
+    .field input:focus,.field select:focus,.field textarea:focus{outline:0;border-color:var(--amazon);box-shadow:0 0 0 3px rgba(245,158,11,.14)}
+    .scan-row{display:flex;gap:9px}.scan-row input{flex:1;border:1.5px solid #d0d5dd;border-radius:10px;padding:12px 13px;font-size:1rem}.scan-row input:focus{outline:0;border-color:var(--amazon);box-shadow:0 0 0 3px rgba(245,158,11,.14)}
+    .btn{border:0;border-radius:9px;padding:9px 13px;font-weight:750;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:transform .08s,filter .15s;text-decoration:none}
+    .btn:active{transform:scale(.98)}.btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-amazon{background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff}.btn-blue{background:var(--blue);color:#fff}.btn-green{background:var(--green);color:#fff}.btn-ghost{background:#fff;color:#475467;border:1px solid #d0d5dd}.btn-red{background:#fee2e2;color:#b91c1c}.btn-sm{padding:6px 9px;font-size:.78rem}
+    .status{display:none;margin-top:10px;padding:9px 11px;border-radius:9px;font-size:.84rem;font-weight:650}.status.show{display:block}.status.info{background:#eff6ff;color:#1d4ed8}.status.ok{background:#ecfdf3;color:#047857}.status.error{background:#fff1f2;color:#be123c}
+    .session-row{display:grid;grid-template-columns:minmax(170px,1fr) minmax(180px,1fr) auto auto auto;gap:8px;align-items:center}.session-row select,.session-row input{width:100%;border:1.5px solid #d0d5dd;border-radius:9px;background:#fff;color:var(--ink);padding:9px 10px;min-height:40px}.session-row select:focus,.session-row input:focus{outline:0;border-color:var(--amazon);box-shadow:0 0 0 3px rgba(245,158,11,.14)}.save-state{margin-top:8px;font-size:.75rem;color:#667085;min-height:18px}.save-state.saving{color:#1d4ed8}.save-state.saved{color:#047857}.save-state.error{color:#b42318}.collab-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding:9px 10px;border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff}.collab-row input{width:190px;max-width:100%;border:1px solid #93c5fd;border-radius:8px;background:#fff;padding:7px 9px}.collab-status{font-size:.75rem;font-weight:800;color:#1d4ed8;flex:1;min-width:220px}.collab-dot{width:9px;height:9px;border-radius:999px;background:#60a5fa}.collab-row.live .collab-dot{background:#10b981;box-shadow:0 0 0 3px rgba(16,185,129,.13)}.collab-row.live .collab-status{color:#047857}.collab-row.error{border-color:#fecaca;background:#fff1f2}.collab-row.error .collab-dot{background:#ef4444}.collab-row.error .collab-status{color:#b42318}
+    .working-add{display:flex;gap:8px}.working-add input{flex:1;border:1.5px solid #d0d5dd;border-radius:9px;background:#fff;color:var(--ink);padding:10px 11px;min-height:42px}.working-add input:focus{outline:0;border-color:var(--amazon);box-shadow:0 0 0 3px rgba(245,158,11,.14)}.working-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}.working-empty{color:#98a2b3;font-size:.8rem}.working-pill{display:flex;border:1px solid #d0d5dd;border-radius:9px;overflow:hidden;background:#fff}.working-pill.active{border-color:#f59e0b;background:#fffbeb;box-shadow:0 0 0 2px rgba(245,158,11,.1)}.working-toggle,.working-remove{border:0;background:transparent}.working-toggle{padding:7px 9px;color:#475467;font-weight:800}.working-pill.active .working-toggle{color:#92400e}.working-count{font-size:.67rem;font-weight:650;color:#98a2b3;margin-left:5px}.working-remove{padding:7px 8px;color:#b42318;border-left:1px solid #e4e7ec}.working-foot{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:10px}.working-summary{font-size:.76rem;color:#667085;flex:1;min-width:170px}.location-status{font-size:.75rem;color:#667085;margin-top:8px;min-height:18px}.location-status.ok{color:#047857}.location-status.error{color:#b42318}.location-status.info{color:#1d4ed8}
+    .queue-summary{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.summary-pill{background:#f2f4f7;border-radius:999px;padding:5px 9px;font-size:.78rem;font-weight:750;color:#475467}
+    .auto-print-toggle{display:inline-flex;align-items:center;gap:7px;border:1px solid #d0d5dd;border-radius:8px;padding:6px 9px;background:#fff;color:#475467;font-size:.75rem;font-weight:800;white-space:nowrap}.auto-print-toggle input{margin:0;accent-color:#059669}.auto-print-toggle:has(input:checked){border-color:#86efac;background:#ecfdf3;color:#047857}
+    .queue-list{overflow-x:auto;padding:0}
+    .empty{padding:34px 16px;text-align:center;color:#98a2b3}.empty strong{display:block;color:#667085;margin-bottom:4px}
+    @keyframes packed-find-pulse{0%,100%{box-shadow:inset 0 0 0 0 #16a34a}35%,70%{box-shadow:inset 0 0 0 4px #16a34a}}
+    .plan-sheet{width:100%;min-width:880px;border-collapse:separate;border-spacing:0;font-size:.8rem}.plan-sheet th{background:#f8fafc;color:#667085;text-align:left;text-transform:uppercase;letter-spacing:.045em;font-size:.67rem;font-weight:850;padding:8px 10px;border-bottom:1px solid #d0d5dd;border-right:1px solid #e4e7ec}.plan-sheet th:last-child{border-right:0}.plan-sheet td{padding:8px 10px;vertical-align:middle;border-bottom:1px solid #e4e7ec;border-right:1px solid #eef0f3;background:#fff}.plan-sheet td:last-child{border-right:0}.plan-sheet tbody:last-child tr:last-child td{border-bottom:0}.plan-sheet tbody:hover .plan-item-row td{background:#fffdf7}.plan-sheet tbody.locked .plan-item-row td{background:#fafafa}.plan-sheet tbody.packed-complete .plan-item-row td,.plan-sheet tbody.packed-complete:hover .plan-item-row td{background:#dcfce7;color:#166534;border-bottom-color:#86efac}.plan-sheet tbody.packed-complete .packed-count{color:#047857;font-weight:900}.plan-sheet tbody.packed-find .plan-item-row{animation:packed-find-pulse .65s ease-in-out 3}.item-ident{display:flex;gap:9px;align-items:center;min-width:250px}.thumb{width:42px;height:42px;object-fit:contain;border:1px solid #eaecf0;border-radius:5px;background:#f8fafc;flex:none}.item-copy{min-width:0}.item-title{font-weight:750;line-height:1.25}.upc{font:700 .72rem ui-monospace,SFMono-Regular,Consolas,monospace;color:#667085;margin-top:3px;word-break:break-all}.stock-text{color:#667085;font-size:.7rem;margin-top:2px}
+    .badges{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-top:7px}.badge{font-size:.68rem;font-weight:800;border-radius:999px;padding:4px 7px;background:#f2f4f7;color:#475467}.badge.ebay{background:#e8f1ff;color:#075ab8}.badge.amazon{background:#fff3d7;color:#9a5500}.amazon-label-printed,.amazon-label-manual{display:inline-flex;align-items:center;border-radius:999px;padding:5px 9px;font-size:.7rem;font-weight:900;white-space:nowrap}.amazon-label-printed{border:1px solid #86efac;background:#dcfce7;color:#166534}.amazon-label-printed:hover:not(:disabled){background:#bbf7d0;border-color:#4ade80}.amazon-label-manual{border:1px solid #f59e0b;background:#fffbeb;color:#92400e}.amazon-label-manual:hover:not(:disabled){background:#fef3c7}.amazon-label-printed:disabled,.amazon-label-manual:disabled{opacity:.6;cursor:wait}.label-status{display:block;color:#667085;font-size:.72rem;line-height:1.3;max-width:155px}.label-status.needed{color:#9a3412;font-weight:750}.label-status.ok{color:#047857;font-weight:750}
+    .qty-block{text-align:center}.qty-label{font-size:.7rem;color:#667085;font-weight:800;text-transform:uppercase}.qty-step{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:6px}.qty-step button{width:30px;height:30px;border:1px solid #d0d5dd;background:#f8fafc;border-radius:8px;font-size:1.05rem}.qty-value{font-weight:850;min-width:24px}.qty-max{font-size:.7rem;color:#98a2b3;margin-top:4px}
+    .source-title{font-size:.7rem;color:#667085;font-weight:800;text-transform:uppercase;margin-bottom:6px}.source-list{display:flex;flex-direction:column}.source-row{display:flex;align-items:center;gap:7px;border:0;border-bottom:1px solid #eef0f3;background:transparent;padding:5px 2px;font-size:.79rem}.source-row:last-child{border-bottom:0}.source-row.selected{background:#fffbeb}.source-row input{accent-color:#d97706}.source-code{font-weight:800;flex:1}.source-qty{color:#667085}.preview{border:0;background:transparent;color:#2563eb;padding:1px 3px;font-weight:700}.source-warning{font-size:.72rem;color:#b42318;margin-top:6px;font-weight:700}.source-note{font-size:.72rem;color:#667085;margin-top:6px;font-weight:650}
+    .remove-line{width:34px;height:34px;border:0;border-radius:8px;background:#fff1f2;color:#be123c;font-size:1rem}.reset-pack{display:block;margin-top:5px;border:1px solid #f59e0b;border-radius:7px;background:#fffbeb;color:#92400e;padding:4px 7px;font-size:.67rem;font-weight:850;white-space:nowrap}.reset-pack:hover:not(:disabled){background:#fef3c7}.reset-pack:disabled{opacity:.55;cursor:wait}
+    .plan-details-row td{padding:0;background:#fbfcfd}.item-details{padding:7px 10px}.item-details summary{cursor:pointer;color:#475467;font-size:.75rem;font-weight:800;list-style:none;width:max-content}.item-details summary::-webkit-details-marker{display:none}.detail-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:9px;padding-bottom:3px}.detail-grid .field label{font-size:.66rem}.detail-grid .field input,.detail-grid .field select,.detail-grid .field textarea{padding:7px 8px;min-height:36px;font-size:.84rem}.detail-grid .field textarea{min-height:36px}.barcode-guidance{grid-column:1/-1;border:1px solid #d0d5dd;border-radius:9px;padding:9px 10px;display:flex;align-items:center;gap:10px;background:#fff}.barcode-guidance>div{flex:1;min-width:0}.barcode-guidance strong{display:block;font-size:.82rem}.barcode-guidance span{display:block;color:#667085;font-size:.74rem;margin-top:2px}.barcode-guidance.manufacturer_barcode{border-color:#86efac;background:#f0fdf4}.barcode-guidance.amazon_barcode{border-color:#fca5a5;background:#fff1f2}.barcode-guidance.checking{border-color:#bfdbfe;background:#eff6ff}
+    .action-foot{border-top:1px solid #eef0f3;padding:12px 15px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.action-foot .spacer{flex:1}.warning-note{font-size:.76rem;color:#667085;max-width:520px}
+    .review-toolbar{display:flex;gap:7px;flex-wrap:wrap}.filter{border:1px solid #d0d5dd;background:#fff;color:#475467;border-radius:8px;padding:7px 10px;font-weight:750}.filter.active{background:#172033;color:#fff;border-color:#172033}
+    .review-list,.history-list{display:flex;flex-direction:column;gap:10px;padding:13px}
+    .review-card{border:1px solid #e4e7ec;border-left:4px solid #f59e0b;border-radius:11px;padding:12px;background:#fff}.review-card.reviewed{border-left-color:#10b981;opacity:.78}.review-top{display:flex;justify-content:space-between;gap:12px}.review-title{font-weight:800}.review-meta{font-size:.76rem;color:#667085;margin-top:3px}.review-grid{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:10px;margin-top:10px}.review-box{background:#f8fafc;border-radius:8px;padding:9px;font-size:.78rem}.review-box strong{display:block;font-size:.68rem;text-transform:uppercase;color:#667085;margin-bottom:5px}.reason-list{display:flex;gap:5px;flex-wrap:wrap}.reason{background:#fff0d8;color:#92400e;border-radius:999px;padding:4px 7px;font-weight:750;font-size:.7rem}.link-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.market-link{font-size:.74rem;color:#175cd3;text-decoration:none;font-weight:750}.review-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:10px}.review-note{flex:1;min-width:180px;border:1px solid #d0d5dd;border-radius:8px;padding:7px 9px}
+    .batch{border:1px solid #e4e7ec;border-radius:11px;background:#fff;overflow:hidden}.batch summary{list-style:none;cursor:pointer;padding:13px 14px;display:flex;gap:10px;justify-content:space-between;align-items:center}.batch summary::-webkit-details-marker{display:none}.batch-name{font-weight:850}.batch-meta{font-size:.75rem;color:#667085;margin-top:3px}.batch-totals{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.batch-items{border-top:1px solid #eef0f3}.batch-line{display:grid;grid-template-columns:minmax(180px,1.3fr) 90px 1fr 1fr;gap:10px;padding:10px 13px;border-bottom:1px solid #f0f2f5;font-size:.78rem}.batch-line:last-child{border-bottom:0}.batch-line strong{display:block}.muted{color:#667085}.danger{color:#b42318}.success{color:#047857}
+    .loading{padding:28px;text-align:center;color:#667085}.spinner{display:inline-block;width:18px;height:18px;border:2px solid #e4e7ec;border-top-color:#d97706;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:7px}@keyframes spin{to{transform:rotate(360deg)}}
+    .flow-rail{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:0 0 14px;background:#fff;border:1px solid var(--line);border-radius:15px;padding:8px;box-shadow:var(--shadow)}
+    .flow-step{position:relative;display:flex;align-items:center;gap:8px;padding:9px;border-radius:10px;color:#98a2b3;min-width:0}.flow-step:after{content:'';position:absolute;right:-6px;top:50%;width:6px;border-top:2px solid #e4e7ec}.flow-step:last-child:after{display:none}.flow-step.done{background:#ecfdf3;color:#047857}.flow-step.current{background:#fff3d7;color:#92400e;box-shadow:inset 0 0 0 1px #f5c36b}.flow-num{width:25px;height:25px;border-radius:999px;background:#f2f4f7;display:grid;place-items:center;font-size:.72rem;font-weight:900;flex:none}.flow-step.done .flow-num{background:#10b981;color:#fff}.flow-step.current .flow-num{background:#f59e0b;color:#fff}.flow-copy{min-width:0}.flow-copy strong{display:block;font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.flow-copy span{display:block;font-size:.65rem;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .amazon-card{border-color:#f5c36b}.amazon-head{background:linear-gradient(135deg,#fffaf0,#fff3d7)}.amazon-head-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.amazon-state{display:flex;align-items:center;gap:7px;font-size:.75rem;font-weight:800;color:#92400e}.state-dot{width:9px;height:9px;border-radius:999px;background:#f59e0b}.printer-pill{border:1px solid #d0d5dd;border-radius:999px;padding:5px 8px;background:#fff;color:#475467;text-decoration:none;font-size:.7rem;font-weight:850}.printer-pill.ready{border-color:#86efac;background:#ecfdf3;color:#047857}.printer-pill.error{border-color:#fecaca;background:#fff1f2;color:#b42318}.amazon-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.7fr);gap:14px}.stage-pane{border:1px solid #e4e7ec;border-radius:12px;background:#fff;padding:14px}.stage-pane h3{margin:0;font-size:1rem}.stage-pane p{color:#667085;font-size:.8rem;line-height:1.45;margin:5px 0 12px}.stage-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.stage-actions input,.stage-actions select{border:1.5px solid #d0d5dd;border-radius:9px;padding:9px 10px;min-height:40px}.stage-note{margin-top:10px;border-radius:9px;padding:9px 10px;background:#f8fafc;color:#475467;font-size:.76rem;line-height:1.4}.stage-note.warn{background:#fff7ed;color:#9a3412}.stage-note.danger{background:#fff1f2;color:#be123c}.stage-note.ok{background:#ecfdf3;color:#047857}.workflow-summary{display:flex;flex-direction:column;gap:8px}.summary-row{border:1px solid #e4e7ec;border-radius:10px;padding:9px 10px;background:#f8fafc}.summary-row span{display:block;font-size:.67rem;color:#667085;text-transform:uppercase;font-weight:850;letter-spacing:.05em}.summary-row strong{display:block;margin-top:3px;font-size:.84rem;word-break:break-word}.amazon-error{display:none;margin-bottom:12px;padding:10px 11px;border-radius:9px;background:#fff1f2;color:#be123c;font-size:.8rem;font-weight:700}.amazon-error.show{display:block}
+    .setup-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.setup-form .field.wide{grid-column:span 2}.setup-toggle{border:0;background:transparent;color:#2563eb;padding:0;font-size:.78rem;font-weight:800}.setup-panel{display:none;border-top:1px solid #eef0f3;margin-top:12px;padding-top:12px}.setup-panel.open{display:block}
+    .option-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}.option-card{border:1.5px solid #d0d5dd;border-radius:11px;padding:11px;background:#fff}.option-card.selected{border-color:#f59e0b;background:#fffbeb}.option-top{display:flex;justify-content:space-between;gap:10px}.option-title{font-weight:850}.option-meta{font-size:.74rem;color:#667085;margin-top:3px}.money{font-weight:850;color:#b45309;white-space:nowrap}.option-shipments{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.destination-pill{border-radius:999px;background:#eef2ff;color:#3730a3;padding:4px 7px;font-size:.69rem;font-weight:800}
+    .pack-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.active-box-banner{flex:1;min-width:220px;border:1px solid #f5c36b;background:#fffbeb;color:#92400e;border-radius:10px;padding:9px 11px;font-weight:850}.box-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.box-card{border:2px solid #e4e7ec;border-radius:12px;background:#fff;overflow:hidden}.box-card.active{border-color:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.12)}.box-head{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:10px 11px;background:#f8fafc}.box-name{font-weight:900}.box-group{font-size:.7rem;color:#667085;margin-top:2px}.box-body{padding:10px 11px}.box-dims{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.box-dims input{width:100%;border:1px solid #d0d5dd;border-radius:8px;padding:7px 6px}.box-dims label{font-size:.62rem;color:#667085;text-transform:uppercase;font-weight:850}.box-flags{display:flex;gap:10px;flex-wrap:wrap;margin-top:9px}.box-flags label{display:flex;align-items:flex-start;gap:5px;font-size:.7rem;font-weight:750;color:#475467}.box-flags input{margin-top:1px;accent-color:#d97706}.box-compliance{margin-top:8px;padding:7px 8px;border-radius:8px;background:#f8fafc;color:#475467;font-size:.71rem;font-weight:700;line-height:1.35}.box-compliance.ok{background:#ecfdf3;color:#047857}.box-compliance.warn{background:#fff7ed;color:#9a3412}.box-compliance.error{background:#fff1f2;color:#be123c}.box-items{margin-top:9px;display:flex;flex-direction:column;gap:4px}.box-item{display:flex;justify-content:space-between;gap:8px;font-size:.74rem;padding:5px 7px;border-radius:7px;background:#f8fafc}.pack-progress{height:8px;background:#e4e7ec;border-radius:999px;overflow:hidden;margin-top:9px}.pack-progress>span{display:block;height:100%;background:#10b981}.scan-mode{font-size:.72rem;font-weight:850;color:#92400e;margin-bottom:7px;text-transform:uppercase;letter-spacing:.05em}.route-callout{display:none;margin-top:10px;padding:14px;border-radius:11px;background:#172033;color:#fff;font-size:1.05rem;font-weight:900;text-align:center}.route-callout.show{display:block}.route-callout.error,.route-callout.sort-rejected{background:#b91c1c}.route-callout.warn,.route-callout.sort-fnsku_needed{background:#b45309}.route-callout.ok,.route-callout.sort-ready{background:#047857}.sort-headline{display:block;font-size:1.35rem;letter-spacing:.035em}.sort-instruction{display:block;margin-top:5px;font-size:.82rem;font-weight:750}.pile-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 15px;background:#f8fafc;border-bottom:1px solid #e4e7ec}.pile-key{border-radius:9px;padding:8px 10px;color:#fff;font-size:.72rem;font-weight:900;text-align:center}.pile-key.red{background:#b91c1c}.pile-key.amber{background:#b45309}.pile-key.green{background:#047857}
+    .sound-btn.ready{border-color:#86efac;background:#ecfdf3;color:#047857}.sound-btn.needs-tap{border-color:#fdba74;background:#fff7ed;color:#9a3412}
+    .plan-item-row.fba-failed td{background:#fff1f2}.fba-state{display:inline-flex;align-items:center;gap:5px;margin-top:6px;border-radius:999px;padding:4px 7px;font-size:.69rem;font-weight:850}.fba-state.ready{background:#dcfce7;color:#166534}.fba-state.needs_enablement,.fba-state.needs_safety_info{background:#fef3c7;color:#92400e}.fba-state.enabling,.fba-state.checking{background:#dbeafe;color:#1d4ed8}.fba-state.failed{background:#fee2e2;color:#b42318}.inbound-warning{margin-top:5px;color:#b42318;font-size:.72rem;font-weight:800}.battery-choice{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px;color:#475467;font-size:.7rem;font-weight:800}.battery-choice-label{margin-right:2px}.battery-option{border:1px solid #d0d5dd;border-radius:7px;background:#fff;color:#475467;padding:5px 9px;font-size:.69rem;font-weight:850}.battery-option.selected.no{border-color:#86efac;background:#ecfdf3;color:#047857}.battery-option.selected.yes{border-color:#fdba74;background:#fff7ed;color:#9a3412}
+    .locked{opacity:.78}.ready-finish{border:1px solid #86efac;background:#f0fdf4;border-radius:11px;padding:12px;color:#166534}.danger-confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.danger-confirm input{flex:1;min-width:170px;text-transform:uppercase;font-weight:850}
+    @media(max-width:860px){.flow-rail{grid-template-columns:repeat(3,1fr)}.flow-step:nth-child(3):after,.flow-step:last-child:after{display:none}.amazon-layout{grid-template-columns:1fr}.setup-form,.meta-grid,.detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.session-row{grid-template-columns:1fr 1fr}.session-row .btn{width:100%}.item-main{grid-template-columns:1fr 115px 1fr 36px}.review-grid{grid-template-columns:1fr 1fr}.batch-line{grid-template-columns:1fr 80px 1fr}.batch-line>div:last-child{grid-column:1/-1}}
+    @media(max-width:620px){.page{padding:10px 8px 60px}.topbar-inner{padding:9px 8px}.brand p{display:none}.flow-rail{grid-template-columns:repeat(2,1fr)}.flow-step:nth-child(2n):after{display:none}.flow-copy span{display:none}.setup-form,.meta-grid,.detail-grid{grid-template-columns:1fr 1fr}.setup-form .field.wide,.field.wide{grid-column:1/-1}.box-grid{grid-template-columns:1fr}.box-dims{grid-template-columns:repeat(2,1fr)}.session-row{grid-template-columns:1fr 1fr}.session-row select,.session-row input{grid-column:1/-1}.session-row .btn{width:100%}.working-add{flex-direction:column}.working-add .btn{width:100%}.working-foot .btn-amazon{width:100%;order:2}.scan-row{flex-direction:column}.scan-row .btn{width:100%}.pile-legend{grid-template-columns:1fr}.item-main{grid-template-columns:1fr 80px 34px}.item-ident{grid-column:1/2}.qty-block{grid-column:2/3}.remove-line{grid-column:3/4}.source-block{grid-column:1/-1}.thumb{width:50px;height:50px}.review-grid{grid-template-columns:1fr}.review-top{flex-direction:column}.batch-line{grid-template-columns:1fr 75px}.batch-line>div:nth-child(n+3){grid-column:1/-1}.tab{padding:9px 10px;font-size:.82rem}.card-body,.card-head{padding-left:12px;padding-right:12px}}
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="back" href="/store-manager">&#8592; Store Manager</a>
+      <div class="brand"><h1>Amazon FBA Prep</h1><p>Scan every unit to build the count, then scan again while packing each carton.</p></div>
+    </div>
+  </header>
+
+  <main class="page">
+    <nav class="tabs" aria-label="FBA prep sections">
+      <button class="tab active" data-tab="prep" type="button">&#128230; Prepare batch</button>
+      <button class="tab" data-tab="review" type="button">&#128269; Listing review <span class="count-badge" id="reviewCount">0</span></button>
+      <button class="tab" data-tab="history" type="button">&#128203; Batch history</button>
+      <a class="tab" href="/fba-labels" style="text-decoration:none">&#127991; Label scanner</a>
+    </nav>
+
+    <section class="panel active" id="panel-prep">
+      <div class="flow-rail" aria-label="Inbound workflow progress">
+        <div class="flow-step current" data-flow-step="0"><span class="flow-num">1</span><span class="flow-copy"><strong>Scan counts</strong><span>Every unit</span></span></div>
+        <div class="flow-step" data-flow-step="1"><span class="flow-num">2</span><span class="flow-copy"><strong>Amazon plan</strong><span>Lock quantities</span></span></div>
+        <div class="flow-step" data-flow-step="2"><span class="flow-num">3</span><span class="flow-copy"><strong>Pack boxes</strong><span>Scan once</span></span></div>
+        <div class="flow-step" data-flow-step="3"><span class="flow-num">4</span><span class="flow-copy"><strong>Placement</strong><span>Choose split</span></span></div>
+        <div class="flow-step" data-flow-step="4"><span class="flow-num">5</span><span class="flow-copy"><strong>Shipping</strong><span>Buy transport</span></span></div>
+        <div class="flow-step" data-flow-step="5"><span class="flow-num">6</span><span class="flow-copy"><strong>Finish</strong><span>Print labels</span></span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">Saved sessions</div><div class="card-sub">Drafts autosave on this server and can be resumed from another device.</div></div></div>
+        <div class="card-body">
+          <div class="session-row">
+            <select id="sessionSelect" aria-label="Saved FBA session"><option value="">New unsaved session</option></select>
+            <input id="sessionName" aria-label="Session and batch name" placeholder="Session name">
+            <button class="btn btn-ghost btn-sm" id="newSessionBtn" type="button">New</button>
+            <button class="btn btn-blue btn-sm" id="saveSessionBtn" type="button">Save now</button>
+            <button class="btn btn-red btn-sm session-delete" id="deleteSessionBtn" type="button" disabled>Delete</button>
+          </div>
+          <div class="collab-row" id="collabRow"><span class="collab-dot"></span><input id="operatorName" autocomplete="name" placeholder="Your name or station"><span class="collab-status" id="collabStatus">Save or open a session to start live sharing.</span></div>
+          <div class="field" style="margin-top:10px"><label for="batchNotes">Notes</label><textarea id="batchNotes" placeholder="Carton, routing, appointment, or prep notes"></textarea></div>
+          <div class="save-state" id="saveState">Scan items to create an autosaved counting session.</div>
+          <input id="shipmentId" type="hidden"><input id="destinationFc" type="hidden"><input id="boxesPlanned" type="hidden">
+          <select id="prepOwner" hidden><option value="SELLER">Seller</option></select><select id="labelOwner" hidden><option value="SELLER">Seller</option></select>
+        </div>
+      </div>
+
+      <div class="card" id="workingLocationsCard" hidden>
+        <div class="card-head"><div><div class="card-title">Working shelves / bins</div><div class="card-sub">Scanning a shelf includes every associated bin. Each scanner activates its own source locations, so several people can pack from different areas at once.</div></div></div>
+        <div class="card-body">
+          <div class="working-add">
+            <input id="workingLocationInput" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Scan one location or paste comma-separated locations">
+            <button class="btn btn-ghost" id="addWorkingLocationBtn" type="button">Add location</button>
+          </div>
+          <div class="working-list" id="workingLocationList"><span class="working-empty">No working locations added yet.</span></div>
+          <div class="working-foot">
+            <span class="working-summary" id="workingLocationSummary">0 active locations</span>
+            <button class="btn btn-ghost btn-sm" id="activateAllLocationsBtn" type="button">Select all</button>
+            <button class="btn btn-ghost btn-sm" id="clearWorkingLocationsBtn" type="button">Clear locations</button>
+          </div>
+          <div class="location-status" id="workingLocationStatus">During packing, one unit is removed from an active shelf/bin each time its item is scanned.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="scan-mode" id="scanModeLabel">Step 1 · Scan every physical unit to count it</div>
+          <div class="scan-row" id="packingScanRow">
+            <input id="scanInput" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Scan an item UPC and press Enter">
+            <button class="btn btn-amazon" id="scanBtn" type="button">Count one unit</button>
+            <button class="btn btn-ghost sound-btn needs-tap" id="soundTestBtn" type="button">🔊 Enable / test sound</button>
+          </div>
+          <div class="route-callout" id="routeCallout" aria-live="assertive"></div>
+          <div class="status" id="statusBar" role="status"></div>
+        </div>
+      </div>
+
+      <div class="card" id="plannedItemsCard">
+        <div class="card-head">
+          <div><div class="card-title">Scanned item counts</div><div class="card-sub" id="queueHelp">Scan every physical unit. Repeated barcodes automatically increase that item’s quantity.</div></div>
+          <div class="queue-summary"><label class="auto-print-toggle" title="Print a required Amazon label immediately when a planned unit is scanned into a box"><input id="autoPrintToggle" type="checkbox" checked> Auto print labels</label><span class="summary-pill" id="skuCount">0 item types</span><span class="summary-pill" id="unitCount">0 units</span></div>
+        </div>
+        <div class="pile-legend" aria-label="Step-one scan sounds"><div class="pile-key green">SHORT BEEP<br>Counted</div><div class="pile-key red">BAD BEEP + “REJECTED”<br>Do not include</div></div>
+        <div class="queue-list" id="queueList"></div>
+        <div class="action-foot">
+          <div class="warning-note" id="queueLockNote">Review the scanned barcode quantities before creating the Amazon plan.</div>
+          <div class="spacer"></div>
+          <button class="btn btn-ghost" id="allNoBatteriesBtn" type="button">Set all: No batteries</button>
+          <button class="btn btn-ghost" id="clearBtn" type="button">Clear</button>
+        </div>
+      </div>
+
+      <div class="card amazon-card">
+        <div class="card-head amazon-head">
+          <div><div class="card-title">Send to Amazon</div><div class="card-sub">Amazon's packing groups, destinations, shipping choices, and labels stay in this one session.</div></div>
+          <div class="amazon-head-actions"><a class="printer-pill" id="fbaPrinterStatus" href="/printer-settings?return=/fba-prep">🖨️ Checking Item Prep printer</a><div class="amazon-state"><span class="state-dot"></span><span id="amazonStateLabel">Not started</span></div></div>
+        </div>
+        <div class="card-body">
+          <div class="amazon-error" id="amazonError"></div>
+          <div class="amazon-layout">
+            <div>
+              <div class="stage-pane" id="amazonStagePane"><div class="loading"><span class="spinner"></span>Loading Amazon setup…</div></div>
+              <button class="setup-toggle" id="setupToggle" type="button">Edit ship-from address</button>
+              <div class="setup-panel" id="setupPanel">
+                <div class="card-sub">Amazon uses this address to create the plan and quote shipping.</div>
+                <div class="setup-form">
+                  <div class="field"><label for="shipFromName">Contact name</label><input id="shipFromName" autocomplete="name"></div>
+                  <div class="field"><label for="shipFromCompany">Company</label><input id="shipFromCompany" autocomplete="organization"></div>
+                  <div class="field wide"><label for="shipFromAddress1">Address</label><input id="shipFromAddress1" autocomplete="address-line1"></div>
+                  <div class="field wide"><label for="shipFromAddress2">Address line 2</label><input id="shipFromAddress2" autocomplete="address-line2"></div>
+                  <div class="field"><label for="shipFromCity">City</label><input id="shipFromCity" autocomplete="address-level2"></div>
+                  <div class="field"><label for="shipFromState">State</label><input id="shipFromState" maxlength="3" autocapitalize="characters" autocomplete="address-level1"></div>
+                  <div class="field"><label for="shipFromPostal">ZIP code</label><input id="shipFromPostal" autocomplete="postal-code"></div>
+                  <div class="field"><label for="shipFromCountry">Country</label><input id="shipFromCountry" value="US" maxlength="2" autocapitalize="characters" autocomplete="country"></div>
+                  <div class="field"><label for="shipFromPhone">Phone</label><input id="shipFromPhone" autocomplete="tel"></div>
+                  <div class="field"><label for="shipFromEmail">Email</label><input id="shipFromEmail" type="email" autocomplete="email"></div>
+                </div>
+                <div class="stage-actions" style="margin-top:10px"><button class="btn btn-blue" id="saveShipFromBtn" type="button">Save address</button><button class="btn btn-ghost" id="setupCloseBtn" type="button">Close</button></div>
+              </div>
+            </div>
+            <aside class="workflow-summary" aria-label="Amazon workflow summary">
+              <div class="summary-row"><span>Plan</span><strong id="planIdSummary">Not created</strong></div>
+              <div class="summary-row"><span>Contents</span><strong id="amazonSkuSummary">0 SKUs · 0 units</strong></div>
+              <div class="summary-row"><span>Boxes</span><strong id="boxCountSummary">Not packed</strong></div>
+              <div class="summary-row"><span>Destinations</span><strong id="destinationSummary">Pending Amazon</strong></div>
+              <div class="summary-row"><span>Shipping</span><strong id="shippingSummary">Not purchased</strong></div>
+            </aside>
+          </div>
+        </div>
+        <div class="action-foot">
+          <div class="warning-note" id="finishNote">Inventory stays on the shelves until the Amazon workflow is ready and you finish this batch.</div>
+          <div class="spacer"></div>
+          <button class="btn btn-amazon" id="completeBtn" type="button">Finish shipment &amp; update inventory</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-review">
+      <div class="card">
+        <div class="card-head">
+          <div><div class="card-title">Listing agent review</div><div class="card-sub">Items sent to FBA that still exist elsewhere or have an active marketplace listing.</div></div>
+          <div class="review-toolbar"><button class="filter active" data-review-filter="open" type="button">Open</button><button class="filter" data-review-filter="reviewed" type="button">Reviewed</button><button class="filter" data-review-filter="all" type="button">All</button></div>
+        </div>
+        <div class="review-list" id="reviewList"><div class="loading"><span class="spinner"></span>Loading review list…</div></div>
+      </div>
+    </section>
+
+    <section class="panel" id="panel-history">
+      <div class="card">
+        <div class="card-head"><div><div class="card-title">Completed FBA batches</div><div class="card-sub">A clean removal ledger with current warehouse and marketplace status.</div></div><button class="btn btn-ghost btn-sm" id="refreshHistory" type="button">Refresh</button></div>
+        <div class="history-list" id="historyList"><div class="loading"><span class="spinner"></span>Loading batches…</div></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/location-preview.js?v=20260317a"></script>
+  <script>
+    const emptyAmazonWorkflow=()=>({stage:'draft',inbound_plan_id:'',boxes:[],packing_options:[],packing_groups:[],placement_options:[],shipments:[],transportation_options:[]});
+    const readAutoPrintPreference=()=>{try{return localStorage.getItem('fba_auto_print_labels')!=='off'}catch(_){return true}};
+    const readSharedClientId=()=>{try{let value=sessionStorage.getItem('fba_shared_client_id')||'';if(!/^[A-Za-z0-9._:-]{6,64}$/.test(value)){value='scanner-'+((window.crypto&&window.crypto.randomUUID)?window.crypto.randomUUID():Date.now()+'-'+Math.random().toString(16).slice(2));sessionStorage.setItem('fba_shared_client_id',value)}return value}catch(_){return 'scanner-'+Date.now()+'-'+Math.random().toString(16).slice(2)}};
+    const readOperatorName=()=>{try{return localStorage.getItem('fba_operator_name')||''}catch(_){return ''}};
+    const state={queue:[],workingLocations:[],seq:1,busy:false,locationBusy:false,submissionToken:null,reviewFilter:'open',sessionId:null,sessions:[],saveTimer:null,saveSerial:Promise.resolve(),dirty:false,loadingSession:false,changeVersion:0,amazon:emptyAmazonWorkflow(),readiness:null,amazonBusy:false,fbaBatchProgress:'',fbaEnableBusy:false,fbaEnableTimer:null,activeBoxId:'',boxSaveTimer:null,syncTimer:null,printerStatus:null,labelPrintBusyUid:null,autoPrintEnabled:readAutoPrintPreference(),clientId:readSharedClientId(),liveTimer:null,liveBusy:false,lastLiveScanId:0,countRevision:0,workers:[],scanSequence:0};
+    const $=id=>document.getElementById(id);
+    const noImage="data:image/svg+xml;utf8,"+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="60" height="60"><rect width="100%" height="100%" fill="#f2f4f7"/><text x="50%" y="52%" dominant-baseline="middle" text-anchor="middle" fill="#98a2b3" font-size="8">No image</text></svg>');
+    const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const barcodeKey=v=>{let s=String(v||'').trim();if(s.includes('-')){const [b,x]=s.split('-',2);return /^\d+$/.test(b)?((b.replace(/^0+/,'')||'0')+'-'+x):s.toLowerCase()}return /^\d+$/.test(s)?(s.replace(/^0+/,'')||'0'):s.toLowerCase()};
+    const fmtDate=v=>{if(!v)return '';const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString()};
+    const prepLabel=v=>({none:'No special prep',poly_bag:'Poly bag',bubble_wrap:'Bubble wrap',taping:'Taping',opaque_bag:'Opaque bag',suffocation_label:'Suffocation label',set_bundle:'Set / bundle',other:'Other'})[v]||v||'No special prep';
+    const touch=()=>{state.submissionToken=null;state.dirty=true;state.changeVersion+=1;scheduleSessionSave()};
+    const restoreActionScroll=top=>requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo({top:Number(top)||0,left:0,behavior:'auto'})));
+    const setStatus=(type,msg)=>{const el=$('statusBar');el.textContent=msg||'';el.className='status'+(msg?' show '+type:'')};
+    const setSaveStatus=(type,msg)=>{const el=$('saveState');el.textContent=msg||'';el.className='save-state'+(type?' '+type:'')};
+    const selectedCapacity=row=>(row.locations||[]).filter(l=>(row.selectedLocations||[]).includes(String(l.location_key||''))).reduce((sum,l)=>sum+Number(l.quantity||0),0);
+    const totalUnits=()=>state.queue.reduce((sum,row)=>sum+Number(row.quantity||0),0);
+    const safetyAnswerError=row=>{const text=String(row?.fba_enablement_error||'').toLowerCase().replaceAll('\\_','_');return text.includes('supplier_declared_dg_hz_regulation')||text.includes('batteries_required')||text.includes('are batteries required')};
+    const fbaEnablementStatus=row=>{const value=String(row?.fba_enablement_status||'').toLowerCase();if(value==='failed'&&safetyAnswerError(row))return'needs_safety_info';if(['ready','needs_enablement','needs_safety_info','enabling','failed','checking'].includes(value))return value;if(row?.inbound_eligible===true)return'ready';return String(row?.seller_sku||row?.fba?.amazon_listing?.seller_sku||'').trim()?'needs_enablement':''};
+    const batteryRequired=row=>row?.batteries_required===true||['1','true','yes','on'].includes(String(row?.batteries_required??'').toLowerCase());
+    function fbaEnablementSummary(){const priority={failed:6,needs_safety_info:5,needs_enablement:4,checking:3,enabling:2,ready:1};const bySku=new Map();state.queue.forEach(row=>{const sku=String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||'').trim();if(!sku)return;const status=fbaEnablementStatus(row)||'needs_enablement',key=sku.toLowerCase(),current=bySku.get(key);if(!current||priority[status]>priority[current.status])bySku.set(key,{sku,status,error:String(row.fba_enablement_error||''),batteries_required:batteryRequired(row),strategy:String(row.fba_offer_strategy||''),source_sku:String(row.fbm_seller_sku||sku),target_sku:String(row.proposed_fba_seller_sku||sku),local_before:Number(row.local_inventory_before_fba||0),planned:Number(row.planned_fba_quantity||row.quantity||0),remaining:Number(row.local_inventory_remaining_after_fba||0)})});const result={total:bySku.size,ready:0,needs_enablement:0,needs_safety_info:0,enabling:0,failed:0,checking:0,items:[...bySku.values()]};result.items.forEach(row=>result[row.status]=(result[row.status]||0)+1);result.all_ready=result.total>0&&result.ready===result.total;return result}
+    function fbaEnablementBadge(row){const status=fbaEnablementStatus(row);if(!status)return'';const fnsku=String(row.amazon_fnsku||row.fnsku||'').trim(),labels={ready:fnsku?`GREEN · READY · ${fnsku}`:'GREEN · READY · fully okay',needs_enablement:'AMBER · NEED LABEL · set aside',needs_safety_info:batteryRequired(row)?'AMBER · BATTERY DETAILS NEEDED':'AMBER · AMAZON SETUP NEEDED',enabling:'AMBER · NEED LABEL · Amazon assigning',checking:'AMBER · CHECKING · set aside',failed:'RED · REJECTED / REMOVE'};return `<div class="fba-state ${esc(status)}">${esc(labels[status]||status)}</div>${status==='failed'&&row.fba_enablement_error?`<div class="inbound-warning">${esc(row.fba_enablement_error)}</div>`:''}`}
+    function fbaOfferStrategyNote(row){const strategy=String(row.fba_offer_strategy||'');if(strategy==='separate_fba_sku')return `<div class="stock-text"><strong>Keep FBM:</strong> ${esc(row.local_inventory_remaining_after_fba||0)} local unit${Number(row.local_inventory_remaining_after_fba||0)===1?' remains':'s remain'} · create ${esc(row.proposed_fba_seller_sku||'separate FBA SKU')}</div>`;return''}
+    const amazonPlanCreated=()=>Boolean(state.amazon&&state.amazon.inbound_plan_id);
+    const amazonPlanFailed=()=>String(state.amazon?.stage||'')==='plan_failed'||String(state.amazon?.plan?.status||'').toUpperCase()==='ERRORED';
+    const amazonPackingMode=()=>amazonPlanCreated()&&Boolean(state.amazon.packing_confirmed)&&!Boolean(state.amazon.boxes_submitted);
+    const amazonOperationPending=()=>{const s=String(state.amazon?.operation?.status||'').toUpperCase();return Boolean(s&&!['SUCCESS','FAILED'].includes(s))};
+    const amazonStageName=stage=>({draft:'Not started',plan_creating:'Creating plan',plan_created:'Plan created',plan_failed:'Plan needs correction',packing_generating:'Loading packing choices',packing_options:'Choose packing',packing_confirming:'Confirming packing',packing:'Pack boxes',boxes_submitting:'Sending box contents',boxes_submitted:'Boxes accepted',placement_generating:'Loading destinations',placement_options:'Choose destinations',placement_confirming:'Confirming destinations',placement_confirmed:'Destinations confirmed',transport_generating:'Loading shipping quotes',transport_options:'Choose shipping',transport_confirming:'Buying shipping',transport_confirmed:'Ready to finish'})[stage]||String(stage||'Not started').replaceAll('_',' ');
+    const localDate=()=>{const date=new Date(),offset=date.getTimezoneOffset()*60000;return new Date(date-offset).toISOString().slice(0,10)};
+
+    function stageIndex(){
+      const stage=String(state.amazon?.stage||'draft');
+      if(state.amazon?.transport_confirmed)return 5;
+      if(state.amazon?.placement_confirmed||stage.startsWith('transport'))return 4;
+      if(state.amazon?.boxes_submitted||stage.startsWith('placement'))return 3;
+      if(state.amazon?.packing_confirmed||stage==='packing'||stage.startsWith('boxes_'))return 2;
+      if(amazonPlanCreated())return 1;
+      return 0;
+    }
+    function renderFlowRail(){const current=stageIndex();document.querySelectorAll('[data-flow-step]').forEach((step,index)=>{step.classList.toggle('done',index<current);step.classList.toggle('current',index===current)})}
+    function feeText(rows){if(!Array.isArray(rows)||!rows.length)return '$0.00';return rows.map(row=>{const code=row.currency||row.code||'USD';const amount=Number(row.amount||0);return code==='USD'?amount.toLocaleString(undefined,{style:'currency',currency:'USD'}):`${amount.toFixed(2)} ${code}`}).join(' + ')}
+    function quoteText(quote){
+      const values=[];const visit=value=>{if(!value||typeof value!=='object')return;if(('amount' in value||'value' in value)&&('code' in value||'currencyCode' in value)){const amount=Number(value.amount??value.value);if(Number.isFinite(amount))values.push({amount,code:value.code||value.currencyCode||'USD'});return}Object.values(value).forEach(visit)};visit(quote);
+      return values.length?feeText(values):'Quote unavailable';
+    }
+    function workflowDestinations(workflow=state.amazon){const seen=new Set();return (workflow.shipments||[]).map(row=>row.destination?.warehouseId||[row.destination?.city,row.destination?.stateOrProvinceCode].filter(Boolean).join(', ')).filter(value=>value&&!seen.has(value)&&seen.add(value))}
+    function planItems(){return (state.amazon?.plan_items||[]).map(item=>({msku:String(item.msku||item.seller_sku||''),quantity:Number(item.quantity||0),fnsku:String(item.fnsku||'').trim().toUpperCase(),asin:String(item.asin||''),labelOwner:String(item.labelOwner||item.label_owner||''),prepInstructions:item.prepInstructions||item.prep_instructions||[]})).filter(item=>item.msku)}
+    function planItemForMsku(msku){return planItems().find(item=>item.msku.toLowerCase()===String(msku||'').toLowerCase())}
+    function hydrateFbaQueueFromPlan(){state.queue.forEach(row=>{const msku=String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||'').trim();const planItem=planItemForMsku(msku);if(planItem?.fnsku)row.fnsku=planItem.fnsku})}
+    function rowNeedsAmazonLabel(row){const msku=String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||'').trim(),planItem=planItemForMsku(msku),planRequires=String(planItem?.labelOwner||'').toUpperCase()==='SELLER'&&(planItem?.prepInstructions||[]).some(instruction=>String(instruction?.prepType||'').toUpperCase()==='ITEM_LABELING');return Boolean(planRequires||authoritativeAmazonBarcodeRequired(row))}
+    function expectedByMsku(){const result=new Map();planItems().forEach(item=>result.set(item.msku.toLowerCase(),(result.get(item.msku.toLowerCase())||0)+item.quantity));return result}
+    function packedByMsku(){const result=new Map();(state.amazon?.boxes||[]).forEach(box=>(box.contents||[]).forEach(item=>{const key=String(item.msku||'').toLowerCase();result.set(key,(result.get(key)||0)+Number(item.quantity||0))}));return result}
+    function packedUnits(){return [...packedByMsku().values()].reduce((sum,value)=>sum+value,0)}
+    function findPackedRow(msku){const key=String(msku||'').trim().toLowerCase(),row=document.querySelector(`[data-packed-msku="${CSS.escape(key)}"]`);if(!row)return false;row.classList.remove('packed-find');void row.offsetWidth;row.classList.add('packed-find');row.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});setTimeout(()=>row.classList.remove('packed-find'),2200);return true}
+    function boxTotalsComplete(){const expected=expectedByMsku(),packed=packedByMsku();return expected.size>0&&[...new Set([...expected.keys(),...packed.keys()])].every(key=>(expected.get(key)||0)===(packed.get(key)||0))}
+    function boxCompliance(box){
+      const values=['length_in','width_in','height_in'].map(field=>Number(box?.[field])),weight=Number(box?.weight_lb);if(values.some(value=>!Number.isFinite(value)||value<=0)||!Number.isFinite(weight)||weight<=0)return {ready:false,kind:'',message:'Enter all three dimensions and the actual packed weight.'};
+      const dimensions=values.sort((a,b)=>b-a),unitCount=(box.contents||[]).reduce((sum,item)=>sum+Number(item.quantity||0),0);
+      if(box.contains_jewelry_or_watches&&weight>40)return {ready:false,kind:'error',message:'Jewelry/watch cartons cannot exceed 40 lb.'};
+      const exceeds=dimensions[0]>36||dimensions[1]>25||dimensions[2]>25||weight>50;if(exceeds&&!box.single_oversize_exception)return {ready:false,kind:'error',message:'Over the standard 36 × 25 × 25 in / 50 lb limit. Split the carton or use the single oversized-unit exception.'};
+      if(box.single_oversize_exception&&unitCount!==1)return {ready:false,kind:'error',message:`The oversized exception requires exactly one unit; this carton has ${unitCount}.`};
+      if(box.single_oversize_exception&&weight>100)return {ready:true,kind:'warn',message:'Single oversized unit: attach Mechanical Lift labels to the top and sides; verify Amazon accepts the item dimensions.'};
+      if(box.single_oversize_exception&&weight>50)return {ready:true,kind:'warn',message:'Single oversized unit: attach Team Lift labels to the top and sides; verify Amazon accepts the item dimensions.'};
+      if(box.single_oversize_exception)return {ready:true,kind:'warn',message:'Single oversized-unit exception selected. Keep the carton closely fitted to the item and verify its Amazon classification.'};
+      if(dimensions[0]<6||dimensions[1]<4||dimensions[2]<1||weight<1)return {ready:true,kind:'warn',message:'Amazon recommends at least 6 × 4 × 1 in and 1 lb to reduce receiving delays.'};
+      return {ready:true,kind:'ok',message:'Within the standard U.S. FBA carton size and weight limits.'};
+    }
+    function boxMeasuresComplete(){return Boolean((state.amazon?.boxes||[]).length)&&(state.amazon.boxes||[]).every(box=>boxCompliance(box).ready)}
+    function setAmazonError(message=''){const el=$('amazonError');el.textContent=message;el.className='amazon-error'+(message?' show':'')}
+    function setRouteCallout(message='',type='ok'){const el=$('routeCallout');el.textContent=message;el.className='route-callout'+(message?' show '+type:'')}
+    function setScanSortResult(result={},barcode=''){const el=$('routeCallout'),kind=String(result.kind||''),headline=String(result.headline||''),instruction=String(result.instruction||'');if(!headline){setRouteCallout('');return}el.innerHTML=`<span class="sort-headline">${esc(headline)}</span><span class="sort-instruction">${esc(barcode?barcode+' · '+instruction:instruction)}</span>`;el.className=`route-callout show sort-${esc(kind||'rejected')}`}
+    const scanSound={ctx:null,ready:false};
+    function updateSoundButton(){const btn=$('soundTestBtn');if(!btn)return;const ready=Boolean(scanSound.ready&&scanSound.ctx?.state==='running');btn.textContent=ready?'🔊 Sound ready':'🔊 Enable / test sound';btn.classList.toggle('ready',ready);btn.classList.toggle('needs-tap',!ready)}
+    function unlockScanAudio(){try{const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx){updateSoundButton();return Promise.resolve(false)}if(!scanSound.ctx){scanSound.ctx=new AudioCtx();scanSound.ctx.onstatechange=()=>{scanSound.ready=scanSound.ctx.state==='running';updateSoundButton()}}const ctx=scanSound.ctx,resume=ctx.state==='running'?Promise.resolve():ctx.resume();return resume.then(()=>{const gain=ctx.createGain(),osc=ctx.createOscillator();gain.gain.value=.00001;gain.connect(ctx.destination);osc.connect(gain);osc.start();osc.stop(ctx.currentTime+.02);scanSound.ready=true;updateSoundButton();try{window.speechSynthesis?.getVoices()}catch(_){}return true}).catch(()=>{scanSound.ready=false;updateSoundButton();return false})}catch(_){scanSound.ready=false;updateSoundButton();return Promise.resolve(false)}}
+    function playTones(tones){const ctx=scanSound.ctx;if(!ctx||ctx.state!=='running'){scanSound.ready=false;updateSoundButton();return false}try{const gain=ctx.createGain();gain.gain.setValueAtTime(.22,ctx.currentTime);gain.connect(ctx.destination);tones.forEach(([delay,frequency,duration])=>{const osc=ctx.createOscillator();osc.type='square';osc.frequency.value=frequency;osc.connect(gain);osc.start(ctx.currentTime+delay);osc.stop(ctx.currentTime+delay+duration)});return true}catch(_){return false}}
+    function successBeep(){playTones([[0,560,.1],[.13,820,.13]])}
+    function countBeep(){playTones([[0,760,.08]])}
+    function warningBeep(){playTones([[0,470,.12],[.16,470,.12]])}
+    function errorBeep(){playTones([[0,360,.14],[.19,230,.18],[.42,230,.18]])}
+    function testSound(){unlockScanAudio().then(ready=>{if(!ready){setStatus('error','Sound is blocked. Tap Enable / test sound again and check the iPad volume.');return}playTones([[0,520,.12],[.16,720,.16]]);speakRoute('Scanner sound ready.');setStatus('ok','Sound is ready on this device.')})}
+    function speakRoute(message){try{if(!('speechSynthesis'in window))return;window.speechSynthesis.cancel();window.speechSynthesis.resume();const utterance=new SpeechSynthesisUtterance(message);utterance.volume=1;utterance.rate=.95;setTimeout(()=>{window.speechSynthesis.resume();window.speechSynthesis.speak(utterance)},70)}catch(_){}}
+    const operatorName=()=>String($('operatorName')?.value||'').trim()||`Scanner ${state.clientId.slice(-4).toUpperCase()}`;
+    function renderCollaboration(type=''){
+      const row=$('collabRow'),status=$('collabStatus');if(!row||!status)return;row.className='collab-row'+(type?' '+type:'');
+      if(!state.sessionId){status.textContent='Save or open a session to start live sharing.';return}
+      const names=(state.workers||[]).map(worker=>String(worker.operator_name||`Scanner ${String(worker.client_id||'').slice(-4).toUpperCase()}`)).filter(Boolean),unique=[...new Set(names)];
+      status.textContent=unique.length?`Live shared session · ${unique.length} active scanner${unique.length===1?'':'s'} · ${unique.slice(0,4).join(', ')}${unique.length>4?' +'+(unique.length-4):''}`:'Connecting this shared session…';
+    }
+    function stopSharedSync(){if(state.liveTimer){clearTimeout(state.liveTimer);state.liveTimer=null}state.liveBusy=false;state.workers=[];renderCollaboration()}
+    function scheduleSharedSync(delay=250){
+      if(state.liveTimer)clearTimeout(state.liveTimer);state.liveTimer=null;if(!state.sessionId)return;
+      state.liveTimer=setTimeout(syncSharedSession,Math.max(100,Number(delay)||250));
+    }
+    async function syncSharedSession(){
+      if(!state.sessionId||state.liveBusy)return;if(state.busy||state.amazonBusy||state.boxSaveTimer){scheduleSharedSync(700);return}
+      const sessionId=state.sessionId;let keepSyncing=true;state.liveBusy=true;
+      try{
+        const res=await fetch(`/api/fba-prep/sessions/${sessionId}/live`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({client_id:state.clientId,operator_name:operatorName(),active_box_id:state.activeBoxId,after_scan_id:state.lastLiveScanId})}),data=await res.json();
+        if(res.status===404){keepSyncing=false;stopSharedSync();setSaveStatus('error','This shared session was removed on another device.');return}if(!res.ok||!data.success)throw new Error(data.error||'Shared-session sync failed');if(Number(sessionId)!==Number(state.sessionId))return;
+        if(data.session_status!=='open'){keepSyncing=false;stopSharedSync();setSaveStatus('error','This shared session was completed on another device.');return}
+        state.workers=data.workers||[];state.lastLiveScanId=Math.max(state.lastLiveScanId,Number(data.latest_scan_id||0));
+        if(Number(data.count_revision||0)>state.countRevision&&!amazonPlanCreated()){applySharedCountItems(data.items||[]);state.countRevision=Number(data.count_revision||0);renderQueue();if(fbaEnablementSummary().enabling)scheduleFbaEnablementPoll(1800)}
+        const remote=data.amazon_workflow||{},remoteRevision=Number(remote.revision||0),localRevision=Number(state.amazon?.revision||0);
+        if(remoteRevision>localRevision){state.amazon=Object.assign(emptyAmazonWorkflow(),remote);hydrateFbaQueueFromPlan();if(state.activeBoxId&&!(state.amazon.boxes||[]).some(box=>box.local_id===state.activeBoxId))state.activeBoxId='';renderQueue()}
+        renderCollaboration('live');
+      }catch(error){if(Number(sessionId)===Number(state.sessionId)){renderCollaboration('error');const status=$('collabStatus');if(status)status.textContent='Live sharing reconnecting… '+(error.message||'')}}
+      finally{state.liveBusy=false;if(keepSyncing&&Number(sessionId)===Number(state.sessionId))scheduleSharedSync(document.hidden?5000:1500)}
+    }
+
+    async function loadFbaPrinterStatus(force=false){
+      const pill=$('fbaPrinterStatus');pill.textContent='🖨️ Checking Item Prep printer';pill.className='printer-pill';
+      try{const res=await fetch('/api/printer/status'+(force?'?ts='+Date.now():''));const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Printer status unavailable');state.printerStatus=data.status||{};const ready=Boolean(state.printerStatus.can_print);pill.textContent=`🖨️ ${ready?'Ready':'Not ready'} · ${state.printerStatus.display_name||data.config?.printer_name||'Item Prep printer'}`;pill.className='printer-pill '+(ready?'ready':'error');pill.title=state.printerStatus.detail||'';return ready}
+      catch(error){state.printerStatus={can_print:false,detail:error.message};pill.textContent='🖨️ Item Prep printer unavailable';pill.className='printer-pill error';pill.title=error.message||'';return false}
+    }
+    async function printAmazonItemLabel(row,msku,scanToken=''){
+      const planItem=planItemForMsku(msku);if(!planItem?.fnsku)throw new Error(`Amazon has not returned the FNSKU for ${msku}; refresh the plan`);row.fnsku=planItem.fnsku;
+      if(!state.printerStatus?.can_print){const ready=await loadFbaPrinterStatus(true);if(!ready)throw new Error(state.printerStatus?.detail||'The Item Prep printer is not ready')}
+      setStatus('info',`Printing Amazon label ${planItem.fnsku}…`);
+      const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/amazon/print-item-label`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({msku,scan_token:scanToken||undefined})});const data=await res.json();if(data.barcode_guidance){row.fba=row.fba||{};row.fba.barcode_guidance=data.barcode_guidance;touch()}if(!res.ok||!data.success)throw new Error(data.error||'FNSKU label did not print');if(data.amazon_workflow)state.amazon=Object.assign(emptyAmazonWorkflow(),data.amazon_workflow);else state.amazon.printed_item_label_counts=Object.assign({},state.amazon.printed_item_label_counts||{},{[msku]:Number(data.printed_count||0)});return data;
+    }
+    async function printAmazonLabelForRow(uid){
+      const row=state.queue.find(candidate=>candidate.uid===uid);if(!row||state.labelPrintBusyUid!==null)return;const msku=String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||'').trim();state.labelPrintBusyUid=uid;renderQueue();
+      try{const data=await printAmazonItemLabel(row,msku);setStatus('ok',`${row.title||msku}: Amazon barcode printed on ${data.printer||'Item Prep printer'}.`)}catch(error){setStatus('error',error.message||'Amazon barcode did not print')}finally{state.labelPrintBusyUid=null;renderQueue();$('scanInput').focus()}
+    }
+
+    async function loadAmazonReadiness(){
+      try{const res=await fetch('/api/fba-prep/amazon/readiness');const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not load Amazon setup');state.readiness=data;fillShipFrom(data.source_address||{});renderAmazonWorkflow()}
+      catch(error){state.readiness={configured:false,missing_for_plan:['Amazon connection'],missing_for_transport:['Amazon connection'],error:error.message};renderAmazonWorkflow()}
+    }
+    function fillShipFrom(source){const fields={shipFromName:'name',shipFromCompany:'companyName',shipFromAddress1:'addressLine1',shipFromAddress2:'addressLine2',shipFromCity:'city',shipFromState:'stateOrProvinceCode',shipFromPostal:'postalCode',shipFromCountry:'countryCode',shipFromPhone:'phoneNumber',shipFromEmail:'email'};Object.entries(fields).forEach(([id,key])=>{$(id).value=source[key]||($(id).value||'')})}
+    function shipFromPayload(){return {name:$('shipFromName').value.trim(),companyName:$('shipFromCompany').value.trim(),addressLine1:$('shipFromAddress1').value.trim(),addressLine2:$('shipFromAddress2').value.trim(),city:$('shipFromCity').value.trim(),stateOrProvinceCode:$('shipFromState').value.trim().toUpperCase(),postalCode:$('shipFromPostal').value.trim(),countryCode:($('shipFromCountry').value.trim()||'US').toUpperCase(),phoneNumber:$('shipFromPhone').value.trim(),email:$('shipFromEmail').value.trim()}}
+    async function saveShipFrom(){
+      $('saveShipFromBtn').disabled=true;setAmazonError('');
+      try{const res=await fetch('/api/fba-prep/amazon/readiness',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source_address:shipFromPayload()})});const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not save ship-from address');state.readiness=data;fillShipFrom(data.source_address||{});$('setupPanel').classList.remove('open');renderAmazonWorkflow()}
+      catch(error){setAmazonError(error.message||'Could not save ship-from address')}
+      finally{$('saveShipFromBtn').disabled=false}
+    }
+
+    async function amazonAction(action,payload={}){
+      if(state.amazonBusy)return null;
+      const actionScrollTop=window.scrollY;
+      try{await saveSession({manual:true})}catch(error){setAmazonError('Save the session first: '+(error.message||'save failed'));return null}
+      if(!state.sessionId){setAmazonError('Save this session before continuing.');return null}
+      state.amazonBusy=true;setAmazonError('');renderAmazonWorkflow();
+      try{const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/amazon/${action}`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Amazon action failed');state.amazon=Object.assign(emptyAmazonWorkflow(),data.amazon_workflow||{});hydrateFbaQueueFromPlan();renderQueue();if(data.operation_id||amazonOperationPending())scheduleAmazonSync();return data}
+      catch(error){setAmazonError(error.message||'Amazon action failed');return null}
+      finally{state.amazonBusy=false;renderAmazonWorkflow();restoreActionScroll(actionScrollTop);$('scanInput').focus()}
+    }
+    function scheduleFbaEnablementPoll(delay=4000){if(state.fbaEnableTimer)clearTimeout(state.fbaEnableTimer);state.fbaEnableTimer=null;if(!state.sessionId||amazonPlanCreated()||!fbaEnablementSummary().enabling)return;state.fbaEnableTimer=setTimeout(()=>pollFbaEnablement(false),Math.max(1200,Number(delay)||4000))}
+    async function resolveFbaSafety(){
+      if(!state.sessionId||state.amazonBusy)return;const rows=fbaEnablementSummary().items.filter(row=>row.status==='needs_safety_info'&&!row.batteries_required);if(!rows.length)return;
+      const actionScrollTop=window.scrollY;let continueToFba=false;
+      const message=`Continue Amazon setup for ${rows.length} non-battery item${rows.length===1?'':'s'}? Items marked “Yes — contains batteries” are excluded.`;if(!confirm(message))return;
+      if(document.activeElement&&typeof document.activeElement.blur==='function')document.activeElement.blur();
+      try{await saveSession({manual:true})}catch(error){setAmazonError('Save the session first: '+(error.message||'save failed'));return}
+      state.amazonBusy=true;state.fbaBatchProgress=`Saving Amazon setup · 0 of ${rows.length} SKUs`;setAmazonError('');renderAmazonWorkflow();
+      try{
+        const pendingSkus=rows.map(row=>row.sku),chunkSize=4;let processed=0,data=null;
+        while(pendingSkus.length){
+          const sellerSkus=pendingSkus.splice(0,chunkSize);state.fbaBatchProgress=`Saving Amazon setup ${processed+1}–${processed+sellerSkus.length} of ${rows.length}`;renderAmazonWorkflow();restoreActionScroll(actionScrollTop);
+          const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/resolve-fba-safety`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({confirm_not_dangerous_goods:true,seller_skus:sellerSkus,client_id:state.clientId,operator_name:operatorName()})});data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||`Amazon listing setup stopped after ${processed} of ${rows.length} SKUs`);if(data.session){applySharedCountItems(data.session.items||[]);state.countRevision=Number(data.session.count_revision||state.countRevision);updateSessionOption(data.session)}processed+=sellerSkus.length;state.fbaBatchProgress=`Saved Amazon setup for ${processed} of ${rows.length} SKUs`;renderQueue();restoreActionScroll(actionScrollTop);
+        }
+        const progress=data?.enablement||fbaEnablementSummary(),nextCount=Number(progress.needs_enablement||0)+Number(progress.failed||0)+Number(progress.checking||0);continueToFba=nextCount>0;if(continueToFba){setStatus('info',`Amazon listing setup saved. Continuing FBA setup for ${nextCount} SKU${nextCount===1?'':'s'}…`)}else if(progress.needs_safety_info){setStatus('info',`${progress.needs_safety_info} battery SKU${progress.needs_safety_info===1?' needs':'s need'} additional Amazon details.`);warningBeep()}else{setStatus('ok','Amazon listing setup saved.');successBeep();speakRoute('Amazon listing setup saved.')}
+      }
+      catch(error){setAmazonError(error.message||'Amazon listing update failed');errorBeep()}
+      finally{state.amazonBusy=false;state.fbaBatchProgress='';renderAmazonWorkflow();restoreActionScroll(actionScrollTop)}
+      if(continueToFba)await enableFbaListings({skipConfirm:true,skipSave:true,actionScrollTop});else scheduleSharedSync(50);
+    }
+    async function enableFbaListings(options={}){
+      const continuation=Boolean(options.skipConfirm);if(!state.sessionId||(!continuation&&state.amazonBusy)||state.fbaEnableBusy)return;const summary=fbaEnablementSummary(),count=summary.needs_enablement+summary.failed+summary.checking;if(!count)return;
+      const actionScrollTop=Number.isFinite(Number(options.actionScrollTop))?Number(options.actionScrollTop):window.scrollY;
+      const actionable=summary.items.filter(row=>['needs_enablement','failed','checking'].includes(row.status)),separate=actionable.filter(row=>row.strategy==='separate_fba_sku').length,standard=Math.max(0,count-separate);
+      const details=[separate?`${separate}: keep the existing FBM SKU and create a separate FBA SKU.`:'',standard?`${standard}: continue standard FBA setup.`:''].filter(Boolean).join('\n');
+      const message=`Set up ${count} Amazon Seller SKU${count===1?'':'s'} for FBA?\n\n${details}\n\nThe app checks warehouse inventory again immediately before each Amazon change.`;if(!options.skipConfirm&&!confirm(message))return;
+      if(document.activeElement&&typeof document.activeElement.blur==='function')document.activeElement.blur();
+      if(!options.skipSave){try{await saveSession({manual:true})}catch(error){setAmazonError('Save the session first: '+(error.message||'save failed'));return}}
+      state.amazonBusy=true;state.fbaBatchProgress=`Starting FBA setup · 0 of ${count} SKUs`;setAmazonError('');renderAmazonWorkflow();
+      try{
+        const pendingSkus=actionable.map(row=>row.sku),chunkSize=4,strategies={separate_fba_sku:0,convert_existing:0};let data=null,processed=0;
+        while(pendingSkus.length){
+          const sellerSkus=pendingSkus.splice(0,chunkSize);state.fbaBatchProgress=`Setting up SKUs ${processed+1}–${processed+sellerSkus.length} of ${count}`;renderAmazonWorkflow();restoreActionScroll(actionScrollTop);
+          const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/enable-fba`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({confirm:true,seller_skus:sellerSkus,client_id:state.clientId,operator_name:operatorName()})});data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||`Amazon FBA setup stopped after ${processed} of ${count} SKUs`);if(data.session){applySharedCountItems(data.session.items||[]);state.countRevision=Number(data.session.count_revision||state.countRevision);updateSessionOption(data.session)}processed+=sellerSkus.length;strategies.separate_fba_sku+=Number(data.offer_strategies?.separate_fba_sku||0);strategies.convert_existing+=Number(data.offer_strategies?.convert_existing||0);state.fbaBatchProgress=`Saved ${processed} of ${count} SKUs`;renderQueue();restoreActionScroll(actionScrollTop);
+        }
+        scheduleSharedSync(50);const progress=data?.enablement||fbaEnablementSummary(),preserved=Number(strategies.separate_fba_sku||0);if(progress.failed){setStatus('error',`${progress.failed} Seller SKU${progress.failed===1?' needs':'s need'} listing attention. See the red item message.`);errorBeep();speakRoute('Amazon listing needs attention.')}else if(progress.enabling){setStatus('info',`Amazon accepted FBA setup for ${progress.enabling} SKU${progress.enabling===1?'':'s'}.${preserved?` ${preserved} existing FBM SKU${preserved===1?' was':'s were'} preserved.`:''} Waiting for FNSKUs…`);warningBeep();speakRoute('Amazon accepted F B A setup. Waiting for F N S K U.')}else if(progress.all_ready){setStatus('ok','All Seller SKUs are FBA ready.');successBeep();speakRoute('All Seller SKUs are F B A ready.')}scheduleFbaEnablementPoll(2500)
+      }
+      catch(error){setAmazonError(error.message||'Amazon FBA enablement failed');errorBeep()}
+      finally{state.amazonBusy=false;state.fbaBatchProgress='';renderAmazonWorkflow();restoreActionScroll(actionScrollTop)}
+    }
+    async function pollFbaEnablement(manual=false){
+      if(!state.sessionId||amazonPlanCreated()||state.fbaEnableBusy)return;state.fbaEnableBusy=true;if(manual)setAmazonError('');renderAmazonWorkflow();
+      try{const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/enable-fba-status`,{method:'POST',headers:{'Accept':'application/json'}}),data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not refresh FBA status');if(data.session){applySharedCountItems(data.session.items||[]);state.countRevision=Number(data.session.count_revision||state.countRevision);updateSessionOption(data.session)}renderQueue();scheduleSharedSync(50);const progress=data.enablement||fbaEnablementSummary();if(progress.all_ready){setStatus('ok','Amazon assigned every FNSKU. You can create the inbound plan now.');successBeep();speakRoute('All F N S K U labels are ready. You can create the Amazon plan.')}else if(progress.failed){setStatus('error',`${progress.failed} Seller SKU${progress.failed===1?' needs':'s need'} listing attention before plan creation.`);if(manual)errorBeep()}else if(manual)setStatus('info',`Still waiting for Amazon to assign ${progress.enabling||0} FNSKU${progress.enabling===1?'':'s'}.`);scheduleFbaEnablementPoll(progress.enabling?4000:0)}
+      catch(error){if(manual)setAmazonError(error.message||'Could not refresh FBA status');scheduleFbaEnablementPoll(7000)}
+      finally{state.fbaEnableBusy=false;renderAmazonWorkflow()}
+    }
+    function scheduleAmazonSync(){if(state.syncTimer)clearTimeout(state.syncTimer);state.syncTimer=setTimeout(()=>syncAmazonWorkflow(),1800)}
+    async function syncAmazonWorkflow(manual=false){
+      if(!state.sessionId||!amazonPlanCreated()||state.amazonBusy)return;
+      state.amazonBusy=true;if(manual)setAmazonError('');renderAmazonWorkflow();
+      try{const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/amazon/sync`);const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not refresh Amazon');state.amazon=Object.assign(emptyAmazonWorkflow(),data.amazon_workflow||{});hydrateFbaQueueFromPlan();renderQueue();if(amazonOperationPending())scheduleAmazonSync()}
+      catch(error){setAmazonError(error.message||'Could not refresh Amazon')}
+      finally{state.amazonBusy=false;renderAmazonWorkflow()}
+    }
+
+    async function createBox(groupId){
+      const data=await amazonAction('create-box',{packing_group_id:groupId,defaults:state.readiness?.box_defaults||{}});if(!data)return;state.activeBoxId=data.created_box_id||'';renderAmazonWorkflow();scheduleSharedSync(100);$('scanInput').focus();
+    }
+    async function removeBox(localId){const box=(state.amazon.boxes||[]).find(row=>row.local_id===localId);if(!box)return;if((box.contents||[]).length){setAmazonError(`${localId} contains saved physical scans and cannot be removed.`);return}const data=await amazonAction('remove-box',{box_id:localId});if(!data)return;if(state.activeBoxId===localId)state.activeBoxId='';renderAmazonWorkflow();scheduleSharedSync(100)}
+    async function resetPackedUnit(msku,title){
+      if(!state.sessionId||state.busy||state.amazonBusy)return;
+      const display=title||msku;if(!confirm(`Reset the most recent packed unit for ${display}? It will be removed from its carton and any warehouse inventory deduction will be restored. If a label printed, discard that label before rescanning.`))return;
+      state.busy=true;setAmazonError('');setStatus('info',`Resetting the last packed ${msku}…`);renderQueue();
+      try{const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/amazon/reset-pack-scan`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({msku,client_id:state.clientId,operator_name:operatorName()})}),data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not reset this packing scan');state.amazon=Object.assign(emptyAmazonWorkflow(),data.amazon_workflow||{});const reset=data.reset_scan||{},restored=reset.inventory_restored?(reset.source_location?` Inventory was restored to ${reset.source_location}.`:' Warehouse inventory was restored.'):' No warehouse inventory had been removed.';setStatus('ok',`${display} is ready to scan again.${restored}`);setRouteCallout(`${msku} reset · scan this unit again`,'warn');speakRoute('Item reset. Scan it again.');renderQueue();renderAmazonWorkflow();scheduleSharedSync(50);$('scanInput').value=''}
+      catch(error){setStatus('error',error.message||'Could not reset this packing scan');setRouteCallout(error.message||'Reset failed','error');speakRoute('Reset failed. Check item.')}
+      finally{state.busy=false;renderQueue();renderAmazonWorkflow();$('scanInput').focus()}
+    }
+    function decrementPacked(localId,msku){const box=(state.amazon.boxes||[]).find(row=>row.local_id===localId);const item=box?.contents?.find(row=>String(row.msku).toLowerCase()===String(msku).toLowerCase());if(!item)return;item.quantity=Number(item.quantity||0)-1;if(item.quantity<=0)box.contents=box.contents.filter(row=>row!==item);renderAmazonWorkflow();scheduleBoxSave()}
+    function scheduleBoxSave(){if(state.boxSaveTimer)clearTimeout(state.boxSaveTimer);state.boxSaveTimer=setTimeout(()=>saveAmazonBoxes(),500)}
+    async function saveAmazonBoxes(){if(!state.sessionId||!amazonPlanCreated()||state.amazonBusy)return;if(state.boxSaveTimer){clearTimeout(state.boxSaveTimer);state.boxSaveTimer=null}await amazonAction('save-boxes',{boxes:state.amazon.boxes||[]})}
+    function updateBoxField(localId,field,value){const box=(state.amazon.boxes||[]).find(row=>row.local_id===localId);if(!box)return;box[field]=value;scheduleBoxSave()}
+
+    function renderPackingWorkspace(){
+      const groups=state.amazon.packing_groups||[],boxes=state.amazon.boxes||[],expected=expectedByMsku(),packed=packedByMsku(),totalExpected=[...expected.values()].reduce((sum,value)=>sum+value,0),totalPacked=packedUnits();
+      if(!groups.length)return `<h3>Amazon is preparing the packing groups</h3><p>Refresh after the confirmation operation completes. Keep unlike packing groups separate.</p><div class="stage-actions"><button class="btn btn-ghost" data-amz-sync type="button">Refresh Amazon</button></div>`;
+      const groupButtons=groups.map(group=>`<button class="btn btn-ghost btn-sm" data-add-box="${esc(group.packing_group_id)}" type="button">+ Box for ${esc(group.label||'group')}</button>`).join('');
+      const boxCards=boxes.map(box=>{const compliance=boxCompliance(box);return `<article class="box-card${state.activeBoxId===box.local_id?' active':''}"><div class="box-head"><div><div class="box-name">${esc(box.local_id)}</div><div class="box-group">${esc(groups.find(group=>group.packing_group_id===box.packing_group_id)?.label||box.packing_group_id)}</div></div><div class="stage-actions"><button class="btn btn-ghost btn-sm" data-use-box="${esc(box.local_id)}" type="button">${state.activeBoxId===box.local_id?'Active':'Use this box'}</button><button class="btn btn-red btn-sm" data-remove-box="${esc(box.local_id)}" type="button" ${(box.contents||[]).length?'disabled':''}>Remove</button></div></div><div class="box-body"><div class="box-dims">${[['length_in','Length in'],['width_in','Width in'],['height_in','Height in'],['weight_lb','Weight lb']].map(([field,label])=>`<label>${label}<input type="number" min="0.01" step="0.01" data-box-field="${field}" data-box-id="${esc(box.local_id)}" value="${esc(box[field]??'')}"></label>`).join('')}</div><div class="box-flags"><label title="Use only when this carton contains one item that Amazon classifies as oversized"><input type="checkbox" data-box-flag="single_oversize_exception" data-box-id="${esc(box.local_id)}" ${box.single_oversize_exception?'checked':''}> Single oversized unit</label><label><input type="checkbox" data-box-flag="contains_jewelry_or_watches" data-box-id="${esc(box.local_id)}" ${box.contains_jewelry_or_watches?'checked':''}> Jewelry / watches</label></div><div class="box-compliance ${compliance.kind}">${esc(compliance.message)}</div><div class="box-items">${(box.contents||[]).length?(box.contents||[]).map(item=>`<div class="box-item"><span>${esc(item.msku)}</span><span><strong>${esc(item.quantity)}</strong> scanned</span></div>`).join(''):'<span class="muted">No units scanned into this box yet.</span>'}</div></div></article>`}).join('');
+      const problems=[...new Set([...expected.keys(),...packed.keys()])].filter(key=>(expected.get(key)||0)!==(packed.get(key)||0)).map(key=>`${key}: ${packed.get(key)||0}/${expected.get(key)||0}`);
+      const canSubmit=boxTotalsComplete()&&boxMeasuresComplete()&&!state.amazonBusy;
+      return `<h3>Scan each physical unit once</h3><p>Amazon created ${groups.length} packing group${groups.length===1?'':'s'}. Each scan checks the UPC against the plan, removes one unit from an active working shelf/bin when found, records FBA Removed, prints a required FNSKU, and routes the unit to its carton.</p><div class="stage-note"><strong>U.S. FBA carton rules:</strong> use a rigid six-sided carton. Amazon recommends at least 6 × 4 × 1 in and 1 lb to reduce receiving delays. Standard maximum: 36 × 25 × 25 in and 50 lb; jewelry/watch cartons: 40 lb. A larger or heavier carton is allowed only for one Amazon-classified oversized unit. Over 50 lb needs Team Lift labels; over 100 lb needs Mechanical Lift labels on the top and sides. <a href="https://sellercentral.amazon.com/help/hub/reference/G200141510" target="_blank" rel="noopener">Amazon requirements ↗</a></div><div class="pack-toolbar"><div class="active-box-banner">${state.activeBoxId?`Active carton: ${esc(state.activeBoxId)}`:'Choose or add a carton; the scanner will also route to the latest carton in the correct group.'}</div>${groupButtons}</div><div class="pack-progress"><span style="width:${totalExpected?Math.min(100,totalPacked/totalExpected*100):0}%"></span></div><div class="stage-note ${boxTotalsComplete()?'ok':'warn'}">Packed ${totalPacked} of ${totalExpected} units${problems.length?' · '+esc(problems.slice(0,6).join(' · ')):' · counts match'}.</div><div class="box-grid" style="margin-top:10px">${boxCards||'<div class="stage-note warn">Add a box for each packing group, then scan the physical units.</div>'}</div><div class="stage-actions" style="margin-top:12px"><button class="btn btn-amazon" data-submit-boxes type="button" ${canSubmit?'':'disabled'}>Send box contents to Amazon</button><button class="btn btn-ghost" data-amz-sync type="button">Refresh Amazon</button></div>${!boxMeasuresComplete()?'<div class="stage-note warn">Complete every measurement and fix the highlighted carton-rule issues before sending.</div>':''}`;
+    }
+
+    function packingOptionHtml(){
+      const options=state.amazon.packing_options||[];
+      if(!options.length)return `<h3>Choose how Amazon should group the items</h3><p>Ask Amazon to calculate compatible packing groups from the locked item list.</p><div class="stage-actions"><button class="btn btn-amazon" data-amz-action="generate-packing" type="button">Generate packing options</button></div>`;
+      return `<h3>Choose a packing option</h3><p>Packing groups cannot share a carton. The chosen option determines how the scanner separates your items.</p><div class="option-list">${options.map((option,index)=>`<label class="option-card"><div class="option-top"><div><div class="option-title">Option ${index+1} · ${(option.packingGroups||[]).length} group${(option.packingGroups||[]).length===1?'':'s'}</div><div class="option-meta">${esc(option.status||'AVAILABLE')}${option.expiration?' · expires '+esc(fmtDate(option.expiration)):''}</div></div><div class="money">${feeText(option.fee_totals)}</div></div><div class="option-shipments">${(option.packingGroups||[]).map((_,groupIndex)=>`<span class="destination-pill">Packing group ${groupIndex+1}</span>`).join('')}</div><div class="stage-actions" style="margin-top:9px"><button class="btn btn-amazon" data-confirm-packing="${esc(option.packingOptionId)}" type="button">Use this packing</button></div></label>`).join('')}</div>`;
+    }
+    function placementOptionHtml(){
+      const options=state.amazon.placement_options||[];
+      if(!options.length)return `<h3>Get Amazon destinations</h3><p>Your complete box contents are saved. Amazon can now calculate fulfillment-center splits and placement fees.</p><div class="stage-actions"><button class="btn btn-amazon" data-amz-action="generate-placement" type="button">Generate destination options</button><button class="btn btn-ghost" data-amz-sync type="button">Refresh Amazon</button></div>`;
+      const shipments=state.amazon.shipments||[];
+      return `<h3>Choose the destination split</h3><p>Review every destination and fee carefully. Amazon says placement confirmation cannot be undone.</p><div class="option-list">${options.map((option,index)=>{const rows=(option.shipmentIds||[]).map(id=>shipments.find(row=>row.shipmentId===id)||{shipmentId:id,destination:{}});return `<label class="option-card"><div class="option-top"><div><div class="option-title">Option ${index+1} · ${rows.length} shipment${rows.length===1?'':'s'}</div><div class="option-meta">${esc(option.status||'AVAILABLE')}</div></div><div class="money">${feeText(option.fee_totals)}</div></div><div class="option-shipments">${rows.map(row=>`<span class="destination-pill">${esc(row.destination?.warehouseId||[row.destination?.city,row.destination?.stateOrProvinceCode].filter(Boolean).join(', ')||row.shipmentId)}</span>`).join('')}</div><div class="danger-confirm" style="margin-top:10px"><input data-placement-confirm-text="${esc(option.placementOptionId)}" placeholder="Type CONFIRM SPLIT"><button class="btn btn-amazon" data-confirm-placement="${esc(option.placementOptionId)}" type="button">Confirm this split</button></div></label>`}).join('')}</div>`;
+    }
+    function transportationHtml(){
+      const options=state.amazon.transportation_options||[];
+      if(!options.length){const missing=state.readiness?.missing_for_transport||[];return `<h3>Get carrier quotes</h3><p>Choose the date the packed cartons will be ready for pickup or drop-off.</p>${missing.length?`<div class="stage-note warn">Shipping contact setup needed: ${esc(missing.join(', '))}. Update the ship-from address below.</div>`:''}<div class="stage-actions"><input id="transportReadyDate" type="date" min="${localDate()}" value="${esc(state.amazon.ready_date||localDate())}"><button class="btn btn-amazon" data-generate-transport type="button" ${missing.length?'disabled':''}>Generate shipping options</button><button class="btn btn-ghost" data-amz-sync type="button">Refresh Amazon</button></div>`}
+      const shipmentIds=[...new Set(options.map(row=>row.shipmentId).filter(Boolean))];
+      return `<h3>Choose shipping for every destination</h3><p>Pick one carrier option per shipment. Confirming may purchase shipping and create charges.</p>${shipmentIds.map((shipmentId,index)=>{const shipment=(state.amazon.shipments||[]).find(row=>row.shipmentId===shipmentId)||{};return `<div class="option-list"><strong>Shipment ${index+1} · ${esc(shipment.destination?.warehouseId||shipmentId)}</strong>${options.filter(row=>row.shipmentId===shipmentId).map((option,optionIndex)=>`<label class="option-card"><div class="option-top"><div><div class="option-title"><input type="radio" name="transport-${esc(shipmentId)}" value="${esc(option.transportationOptionId)}" ${optionIndex===0?'checked':''}> ${esc(option.carrier?.name||option.carrier?.alphaCode||option.shippingSolution||'Carrier option')}</div><div class="option-meta">${esc(option.shippingMode||'')} ${option.shippingSolution?'· '+esc(option.shippingSolution):''}</div></div><div class="money">${esc(quoteText(option.quote))}</div></div></label>`).join('')}</div>`}).join('')}<div class="danger-confirm" style="margin-top:12px"><input id="buyShippingText" placeholder="Type BUY SHIPPING"><button class="btn btn-amazon" data-confirm-transport type="button">Buy selected shipping</button></div>`;
+    }
+    function finishedAmazonHtml(){
+      const shipments=state.amazon.shipments||[];
+      return `<div class="ready-finish"><strong>Amazon workflow is ready.</strong><div style="margin-top:4px;font-size:.8rem">Print a carton label for every shipment, attach labels to the correct boxes, then finish the ledger. Warehouse removals were already recorded during the physical packing scans.</div></div><div class="stage-actions" style="margin-top:12px">${shipments.map((shipment,index)=>`<a class="btn btn-blue" href="/api/fba-prep/sessions/${state.sessionId}/amazon/box-labels/${encodeURIComponent(shipment.shipmentId)}" target="_blank" rel="noopener">Print labels · ${esc(shipment.destination?.warehouseId||'Shipment '+(index+1))}</a>`).join('')}<button class="btn btn-ghost" data-amz-sync type="button">Refresh Amazon</button></div>`;
+    }
+    function renderAmazonWorkflow(){
+      if(!$('amazonStagePane'))return;const amazon=state.amazon||emptyAmazonWorkflow(),stage=amazon.stage||'draft',pending=amazonOperationPending(),pane=$('amazonStagePane');
+      $('amazonStateLabel').textContent=amazonStageName(stage);$('planIdSummary').textContent=amazon.inbound_plan_id||'Not created';const itemCount=planItems().length||state.queue.length;const unitCount=planItems().reduce((sum,row)=>sum+row.quantity,0)||totalUnits();$('amazonSkuSummary').textContent=`${itemCount} SKU${itemCount===1?'':'s'} · ${unitCount} units`;$('boxCountSummary').textContent=(amazon.boxes||[]).length?`${amazon.boxes.length} box${amazon.boxes.length===1?'':'es'} · ${packedUnits()}/${unitCount} units`:'Not packed';const destinations=workflowDestinations();$('destinationSummary').textContent=destinations.length?destinations.join(' · '):'Pending Amazon';$('shippingSummary').textContent=amazon.transport_confirmed?'Purchased':((amazon.transportation_options||[]).length?'Quotes ready':'Not purchased');
+      renderFlowRail();const locked=amazonPlanCreated(),packing=amazonPackingMode(),counting=!locked;$('queueHelp').textContent=locked?'Amazon locked these scanned quantities. Packed and warehouse-removal totals update with each packing scan.':'Scan every physical unit once. Repeated barcodes automatically increase the quantity.';$('queueLockNote').textContent=locked?'Plan quantities are locked. Each packing scan now handles inventory, labeling, and carton routing.':'Only scanned units are included in the Amazon plan.';$('clearBtn').disabled=locked;$('allNoBatteriesBtn').disabled=locked||!state.queue.length;$('deleteSessionBtn').disabled=locked||!state.sessionId;
+      $('packingScanRow').hidden=!counting&&!packing;$('workingLocationsCard').hidden=!packing;$('scanModeLabel').textContent=packing?'Step 2 · Scan each physical unit into its carton':(locked?'Amazon is preparing the packing step':'Step 1 · Scan every physical unit to count it');$('scanBtn').textContent=packing?'Pack one unit':'Count one unit';$('scanInput').disabled=!counting&&!packing;$('scanBtn').disabled=state.busy||state.amazonBusy||(!counting&&!packing);$('scanInput').placeholder=packing?'Scan one physical UPC: remove stock, print label, and route carton':'Scan one physical UPC to add it to the count';if(locked&&!packing)setRouteCallout('');
+      const completeReady=Boolean(amazon.transport_confirmed);$('completeBtn').disabled=state.busy||!completeReady;$('completeBtn').textContent=completeReady?'Finish shipment ledger':'Finish after Amazon shipping';$('finishNote').textContent=completeReady?'Inventory removals were already recorded by packing scans. Finishing creates the clean batch and listing-review records without deducting stock again.':'Finish becomes available after every planned unit is packed and Amazon shipping is confirmed.';
+      if(state.amazonBusy||pending){const operation=amazon.operation||{},busyMessage=state.fbaBatchProgress||'Contacting Amazon…';pane.innerHTML=`<div class="loading"><span class="spinner"></span>${esc(pending?`Amazon is processing ${String(operation.kind||'the request').replaceAll('_',' ')}…`:busyMessage)}</div><div class="stage-actions"><button class="btn btn-ghost" data-amz-sync type="button">Refresh now</button></div>`;attachAmazonHandlers();return}
+      if(amazonPlanFailed())pane.innerHTML=`<h3>Amazon did not create a usable plan</h3><div class="stage-note danger">${esc(amazon.last_error||'Amazon marked this inbound plan as errored.')}</div><p>The packing-options step is unavailable because plan creation failed. Reset this failed attempt, then create the plan again. Items marked “No special prep” will automatically be registered with Amazon as not requiring prep before the retry.</p><div class="stage-actions"><button class="btn btn-amazon" data-reset-failed-plan type="button">Reset failed plan and retry</button><button class="btn btn-ghost" data-amz-sync type="button">Refresh Amazon</button></div>`;
+      else if(amazon.transport_confirmed)pane.innerHTML=finishedAmazonHtml();
+      else if(amazon.placement_confirmed||stage.startsWith('transport'))pane.innerHTML=transportationHtml();
+      else if(amazon.boxes_submitted||stage.startsWith('placement'))pane.innerHTML=placementOptionHtml();
+      else if(amazon.packing_confirmed||stage==='packing'||stage.startsWith('boxes_'))pane.innerHTML=renderPackingWorkspace();
+      else if(amazonPlanCreated())pane.innerHTML=packingOptionHtml();
+      else{
+        const missingSku=state.queue.filter(row=>!String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||'').trim()),enablement=fbaEnablementSummary(),needsAction=enablement.needs_enablement+enablement.failed+enablement.checking,pendingEnablement=enablement.enabling,safetyRows=enablement.items.filter(row=>row.status==='needs_safety_info'),nonBatterySafety=safetyRows.filter(row=>!row.batteries_required).length,batterySafety=safetyRows.length-nonBatterySafety;const missingAddress=state.readiness?.missing_for_plan||[];const ready=Boolean(state.readiness?.configured)&&!missingAddress.length&&state.queue.length&&!missingSku.length&&enablement.all_ready;
+        const safetyPanel=safetyRows.length?`<div class="stage-note warn"><strong>${safetyRows.length} Seller SKU${safetyRows.length===1?' needs':'s need'} Amazon listing setup — these items are not rejected.</strong> Batteries default to <strong>No</strong>. ${nonBatterySafety?`${nonBatterySafety} non-battery SKU${nonBatterySafety===1?' is':'s are'} ready to continue.`:''}${batterySafety?` ${batterySafety} item${batterySafety===1?' is':'s are'} explicitly marked “Yes — contains batteries” and need${batterySafety===1?'s':''} battery details in Amazon.`:''}</div>${nonBatterySafety?`<div class="stage-actions" style="margin-top:9px"><button class="btn btn-blue" data-resolve-safety type="button">Continue Amazon setup for ${nonBatterySafety}</button></div>`:''}`:'';
+        const strategyRows=enablement.items.filter(row=>['needs_enablement','failed','checking'].includes(row.status)),separateCount=strategyRows.filter(row=>row.strategy==='separate_fba_sku').length,strategyText=separateCount?`${separateCount} will keep the existing FBM SKU and use a new FBA SKU.`:'Amazon setup is ready to continue.';
+        const enablementPanel=needsAction?`<div class="stage-note warn"><strong>${needsAction} Seller SKU${needsAction===1?' needs':'s need'} FBA setup.</strong> ${esc(strategyText||'Live warehouse inventory will be checked before Amazon is changed.')}</div><div class="stage-actions" style="margin-top:9px"><button class="btn btn-blue" data-enable-fba type="button" ${state.fbaEnableBusy?'disabled':''}>${enablement.failed?'Review / retry':'Set up'} ${needsAction} SKU${needsAction===1?'':'s'} for FBA</button></div>`:pendingEnablement?`<div class="stage-note warn"><strong>Amazon is activating ${pendingEnablement} SKU${pendingEnablement===1?'':'s'}.</strong> Plan creation unlocks automatically after Amazon assigns every FNSKU.</div><div class="stage-actions" style="margin-top:9px"><button class="btn btn-ghost" data-refresh-fba type="button" ${state.fbaEnableBusy?'disabled':''}>${state.fbaEnableBusy?'Checking…':'Refresh FBA status'}</button></div>`:enablement.all_ready?`<div class="stage-note ok">All ${enablement.ready} Seller SKU${enablement.ready===1?' is':'s are'} FBA ready.</div>`:'';
+        pane.innerHTML=`<h3>Create the inbound plan from the scanned counts</h3><p>This sends each matched Amazon Seller SKU and the quantity counted by physical scans. Packing scans begin after Amazon returns and you confirm a packing option.</p>${missingAddress.length?`<div class="stage-note warn">Ship-from setup needed: ${esc(missingAddress.join(', '))}. Use “Edit ship-from address” below.</div>`:''}${missingSku.length?`<div class="stage-note warn">${missingSku.length} scanned item type${missingSku.length===1?' needs':'s need'} an Amazon Seller SKU before creating the plan.</div>`:''}${safetyPanel}${enablementPanel}${!state.queue.length?'<div class="stage-note">Scan at least one physical item above.</div>':''}<div class="stage-actions" style="margin-top:12px"><button class="btn btn-amazon" data-create-plan type="button" ${ready&&!state.amazonBusy?'':'disabled'}>Create Amazon plan</button></div><div class="stage-note danger">Creating a plan adds an active inbound plan in Seller Central and locks these scanned quantities.</div>`;
+      }
+      attachAmazonHandlers();
+    }
+    function attachAmazonHandlers(){
+      document.querySelectorAll('[data-amz-sync]').forEach(button=>button.onclick=()=>syncAmazonWorkflow(true));document.querySelectorAll('[data-amz-action]').forEach(button=>button.onclick=()=>amazonAction(button.dataset.amzAction));
+      document.querySelectorAll('[data-add-box]').forEach(button=>button.onclick=()=>createBox(button.dataset.addBox));document.querySelectorAll('[data-use-box]').forEach(button=>button.onclick=()=>{state.activeBoxId=button.dataset.useBox;renderAmazonWorkflow();$('scanInput').focus()});document.querySelectorAll('[data-remove-box]').forEach(button=>button.onclick=()=>removeBox(button.dataset.removeBox));document.querySelectorAll('[data-unpack]').forEach(button=>button.onclick=()=>decrementPacked(button.dataset.unpack,button.dataset.msku));document.querySelectorAll('[data-box-field]').forEach(input=>input.oninput=()=>updateBoxField(input.dataset.boxId,input.dataset.boxField,input.value));document.querySelectorAll('[data-box-flag]').forEach(input=>input.onchange=()=>{updateBoxField(input.dataset.boxId,input.dataset.boxFlag,input.checked);renderAmazonWorkflow()});
+      const enableFba=document.querySelector('[data-enable-fba]');if(enableFba)enableFba.onclick=enableFbaListings;const resolveSafety=document.querySelector('[data-resolve-safety]');if(resolveSafety)resolveSafety.onclick=resolveFbaSafety;const refreshFba=document.querySelector('[data-refresh-fba]');if(refreshFba)refreshFba.onclick=()=>pollFbaEnablement(true);
+      const create=document.querySelector('[data-create-plan]');if(create)create.onclick=()=>{if(confirm(`Create an Amazon inbound plan for ${totalUnits()} units? The SKU list and quantities will lock.`))amazonAction('create-plan',{confirm:true})};
+      const resetFailed=document.querySelector('[data-reset-failed-plan]');if(resetFailed)resetFailed.onclick=async()=>{if(!confirm('Reset this unusable Amazon plan and recreate it now? Your saved item list and quantities will remain.'))return;const reset=await amazonAction('reset-failed-plan');if(reset)await amazonAction('create-plan',{confirm:true})};
+      document.querySelectorAll('[data-confirm-packing]').forEach(button=>button.onclick=()=>{if(confirm('Use this Amazon packing option and separate cartons by its packing groups?'))amazonAction('confirm-packing',{packing_option_id:button.dataset.confirmPacking,confirm:true})});
+      const submit=document.querySelector('[data-submit-boxes]');if(submit)submit.onclick=async()=>{await saveAmazonBoxes();if(boxTotalsComplete()&&boxMeasuresComplete()&&confirm('Send these exact carton contents and measurements to Amazon?'))amazonAction('submit-boxes',{boxes:state.amazon.boxes||[]})};
+      document.querySelectorAll('[data-confirm-placement]').forEach(button=>button.onclick=()=>{const input=document.querySelector(`[data-placement-confirm-text="${CSS.escape(button.dataset.confirmPlacement)}"]`);amazonAction('confirm-placement',{placement_option_id:button.dataset.confirmPlacement,confirmation:input?.value||''})});
+      const generate=document.querySelector('[data-generate-transport]');if(generate)generate.onclick=()=>amazonAction('generate-transportation',{ready_date:$('transportReadyDate').value});
+      const confirmTransport=document.querySelector('[data-confirm-transport]');if(confirmTransport)confirmTransport.onclick=()=>{const shipmentIds=[...new Set((state.amazon.transportation_options||[]).map(row=>row.shipmentId).filter(Boolean))];const selections=shipmentIds.map(shipmentId=>({shipment_id:shipmentId,transportation_option_id:document.querySelector(`input[name="transport-${CSS.escape(shipmentId)}"]:checked`)?.value||''}));amazonAction('confirm-transportation',{selections,confirmation:$('buyShippingText').value})};
+    }
+
+    async function packScannedUnit(code){
+      state.busy=true;$('scanBtn').disabled=true;setStatus('info',`Routing ${code}…`);setRouteCallout('');
+      try{
+        const lookupRes=await fetch('/api/movelocation_lookup?include_fba=listing_only&barcode='+encodeURIComponent(code)),lookup=await lookupRes.json();if(!lookupRes.ok||!lookup.success||!lookup.found||!lookup.item)throw new Error(lookup.error||'This barcode was not found in warehouse inventory or Macy BOL');
+        const item=lookup.item,listing=item.fba?.amazon_listing||{},scannedKey=String(item.barcode_key||barcodeKey(item.barcode||code)).toLowerCase();let row=state.queue.find(candidate=>String(candidate.barcode_key||barcodeKey(candidate.barcode||candidate.barcode_display)).toLowerCase()===scannedKey),msku=String(row?.seller_sku||row?.fba?.amazon_listing?.seller_sku||listing.seller_sku||'').trim();if(!row&&msku)row=state.queue.find(candidate=>String(candidate.seller_sku||candidate.fba?.amazon_listing?.seller_sku||'').trim().toLowerCase()===msku.toLowerCase());if(!row)throw new Error(`Barcode ${item.barcode_display||item.barcode||code} is not in this Amazon plan`);msku=String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||msku).trim();if(!msku)throw new Error('This planned barcode is missing its saved Amazon Seller SKU');
+        const savedFba=row.fba||{},lookupFba=item.fba||{},savedListing=savedFba.amazon_listing||{};row.barcode=item.barcode||code;row.barcode_display=item.barcode_display||item.barcode||code;row.barcode_key=item.barcode_key||barcodeKey(code);row.title=item.title||listing.title||row.title||msku;row.image=item.image||row.image||'';row.total_available=Number(item.total_available||0);row.locations=item.locations||[];row.inventory_found=Boolean(item.inventory_found);row.macy_bol_found=Boolean(item.macy_bol_found);row.macy_bol=item.macy_bol||{};row.asin=row.asin||listing.asin||'';row.condition=row.condition||listing.condition||'';row.fba=Object.assign({},savedFba,lookupFba,{amazon_listing:Object.keys(listing).length?listing:savedListing});
+        const group=(state.amazon.packing_groups||[]).find(candidate=>(candidate.items||[]).some(groupItem=>String(groupItem.msku||groupItem.seller_sku||'').toLowerCase()===msku.toLowerCase()));if(!group)throw new Error(`Amazon did not assign ${msku} to a packing group`);
+        const expected=expectedByMsku().get(msku.toLowerCase())||Number(row.quantity||0),already=packedByMsku().get(msku.toLowerCase())||0;if(already>=expected){findPackedRow(msku);const alreadyPacked=new Error(`${msku} is already fully packed (${already}/${expected}). Its completed row is highlighted in green.`);alreadyPacked.alreadyPacked=true;throw alreadyPacked}
+        const labelRequired=rowNeedsAmazonLabel(row),sourceLocations=state.workingLocations.filter(location=>location.active).map(location=>location.code),uniquePart=String(newToken()).replace(/[^A-Za-z0-9._:-]/g,'').slice(0,45),scanToken=`fba:${state.sessionId}:${state.clientId.slice(-12)}:${uniquePart}`;
+        const packRes=await fetch(`/api/fba-prep/sessions/${state.sessionId}/amazon/pack-scan`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({scan_token:scanToken,barcode:item.barcode||code,msku,title:row.title||msku,active_box_id:state.activeBoxId,source_locations:sourceLocations,label_printed:false,client_id:state.clientId,operator_name:operatorName()})}),packed=await packRes.json();if(!packRes.ok||!packed.success)throw new Error(packed.error||'Packing scan could not be saved');
+        state.amazon=Object.assign(emptyAmazonWorkflow(),packed.amazon_workflow||{});const scan=packed.scan||{};state.activeBoxId=scan.box_id||state.activeBoxId;
+        let labelResult=null,labelError='';if(labelRequired&&state.autoPrintEnabled){try{labelResult=await printAmazonItemLabel(row,msku,scanToken)}catch(error){labelError=error.message||'FNSKU label did not print'}}
+        const packedNow=packedByMsku().get(msku.toLowerCase())||already+1,labelMessage=labelResult?.printed?'Label printed · ':(labelRequired?(labelError?'LABEL PRINT FAILED · ':'Label still needed · '):''),sourceMessage=scan.inventory_removed?`Removed from ${scan.source_location} · `:(packed.warning?'No warehouse removal · ':'');const message=`${labelMessage}${sourceMessage}${scan.box_id||'box'} · ${group.label||'packing group'} · ${packedNow} of ${expected}`,warn=Boolean(packed.warning||labelError||labelRequired&&!labelResult?.printed);setRouteCallout(message,warn?'warn':'ok');setStatus(warn?'info':'ok',`${row.title||msku} → ${message}${packed.warning?' · '+packed.warning:''}${labelError?' · '+labelError+'. The unit is packed; print its label before closing the carton.':''}`);speakRoute(`${labelResult?.printed?'Label printed. ':labelError?'Label print failed. ':''}${scan.inventory_removed?'Inventory removed. ':''}Box ${(scan.box_id||'').replace(/[^0-9]/g,'')||scan.box_id}`);touch();renderQueue();scheduleSharedSync(100);$('scanInput').value='';
+      }catch(error){if(error.alreadyPacked){setRouteCallout(error.message,'warn');setStatus('info',error.message);speakRoute('Already fully packed. Green row highlighted.')}else{setRouteCallout(error.message||'Cannot pack this scan','error');setStatus('error',error.message||'Cannot pack this scan');speakRoute('Stop. Check item.')}}
+      finally{state.busy=false;renderAmazonWorkflow();$('scanInput').focus()}
+    }
+
+    function sessionSnapshot(){
+      return {id:state.sessionId,count_revision:state.countRevision,session_name:$('sessionName').value.trim(),batch_name:$('sessionName').value.trim(),shipment_id:$('shipmentId').value.trim(),destination_fc:$('destinationFc').value.trim(),prep_owner:$('prepOwner').value,label_owner:$('labelOwner').value,boxes_planned:$('boxesPlanned').value,notes:$('batchNotes').value.trim(),working_locations:state.workingLocations,items:state.queue};
+    }
+    function hasSessionContent(){return Boolean(state.sessionId||state.queue.length||state.workingLocations.length||$('sessionName').value.trim()||$('shipmentId').value.trim()||$('destinationFc').value.trim()||$('boxesPlanned').value||$('batchNotes').value.trim())}
+    function scheduleSessionSave(){
+      if(state.loadingSession||!hasSessionContent())return;
+      if(state.saveTimer)clearTimeout(state.saveTimer);
+      setSaveStatus('saving','Unsaved changes…');
+      state.saveTimer=setTimeout(()=>saveSession(),700);
+    }
+    function saveSession(options={}){
+      const manual=Boolean(options.manual);
+      if(state.loadingSession||(!manual&&!state.dirty)||(!manual&&!hasSessionContent()))return state.saveSerial;
+      if(state.saveTimer){clearTimeout(state.saveTimer);state.saveTimer=null}
+      state.saveSerial=state.saveSerial.catch(()=>{}).then(async()=>{
+        if(!manual&&!state.dirty)return;
+        const version=state.changeVersion;const payload=sessionSnapshot();
+        setSaveStatus('saving','Saving session…');$('saveSessionBtn').disabled=true;
+        try{
+          const res=await fetch('/api/fba-prep/sessions',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not save session');
+          const wasNew=!state.sessionId;state.sessionId=Number(data.session.id);$('sessionName').value=data.session.session_name||$('sessionName').value;try{localStorage.setItem('fba_prep_active_session_id',String(state.sessionId))}catch(_){}
+          if(data.session.amazon_workflow)state.amazon=Object.assign(emptyAmazonWorkflow(),data.session.amazon_workflow);if(Number(data.session.count_revision||0)>state.countRevision){applySharedCountItems(data.session.items||[]);state.countRevision=Number(data.session.count_revision||0);renderQueue()}
+          if(state.changeVersion===version){state.dirty=false;setSaveStatus('saved','Saved '+new Date(data.session.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'}))}else{scheduleSessionSave()}
+          if(wasNew)await refreshSessions(state.sessionId);else updateSessionOption(data.session);
+          scheduleSharedSync(50);
+          $('deleteSessionBtn').disabled=false;
+          return data.session;
+        }catch(err){setSaveStatus('error',err.message||'Autosave failed');if(manual)throw err;return null}
+        finally{$('saveSessionBtn').disabled=false}
+      });
+      return state.saveSerial;
+    }
+    function updateSessionOption(session){
+      const option=$('sessionSelect').querySelector(`option[value="${Number(session.id)}"]`);if(option){option.textContent=`${session.session_name} · ${session.item_count} types / ${session.total_units} units`;option.selected=true}
+    }
+    async function refreshSessions(preferredId){
+      try{const res=await fetch('/api/fba-prep/sessions?status=open&limit=100');const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not load saved sessions');state.sessions=data.sessions||[];const select=$('sessionSelect');select.innerHTML='<option value="">New unsaved session</option>'+state.sessions.map(session=>`<option value="${session.id}">${esc(session.session_name)} · ${esc(session.item_count)} types / ${esc(session.total_units)} units</option>`).join('');const selected=preferredId||state.sessionId;if(selected&&state.sessions.some(session=>Number(session.id)===Number(selected)))select.value=String(selected);else select.value=''}catch(err){setSaveStatus('error',err.message||'Could not load saved sessions')}
+    }
+    async function refreshSavedItem(saved){
+      const row=Object.assign({},saved,{uid:state.seq++});
+      if(!String(saved.barcode||'').trim()){row.locations=[];row.selectedLocations=[];row.inventory_refresh_error='';return row}
+      const selectedCodes=new Set((saved.locations||[]).filter(loc=>(saved.selectedLocations||[]).includes(String(loc.location_key||''))).map(loc=>String(loc.code||'').toLowerCase()));
+      try{const res=await fetch('/api/movelocation_lookup?include_fba=1&barcode='+encodeURIComponent(saved.barcode||''));const data=await res.json();if(!res.ok||!data.success||!data.found||!data.item)throw new Error(data.error||'Inventory item not found');const current=data.item;row.barcode=current.barcode||saved.barcode;row.barcode_display=current.barcode_display||saved.barcode_display||row.barcode;row.barcode_key=current.barcode_key||saved.barcode_key||barcodeKey(row.barcode);row.title=saved.title||current.title||row.barcode;row.image=saved.image||current.image||'';row.total_available=Number(current.total_available||0);row.locations=current.locations||[];row.selectedLocations=row.locations.filter(loc=>selectedCodes.has(String(loc.code||'').toLowerCase())).map(loc=>String(loc.location_key||''));if(!row.selectedLocations.length&&row.locations.length===1)row.selectedLocations=[String(row.locations[0].location_key||'')];row.inventory_found=Boolean(current.inventory_found);row.macy_bol_found=Boolean(current.macy_bol_found);row.macy_bol=current.macy_bol||saved.macy_bol||{};row.fba=Object.assign({},saved.fba||{},current.fba||{});row.inventory_refresh_error=''}catch(err){row.total_available=Number(saved.total_available||0);row.locations=saved.locations||[];row.selectedLocations=saved.selectedLocations||[];row.inventory_refresh_error=err.message||'Inventory could not be refreshed'}
+      return row;
+    }
+    async function loadSession(sessionId){
+      const id=Number(sessionId||0);if(!id)return;
+      state.loadingSession=true;setSaveStatus('saving','Loading saved session…');
+      try{
+        const res=await fetch('/api/fba-prep/sessions/'+id);const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not load session');
+        const session=data.session;$('sessionName').value=session.session_name||session.batch_name||'';$('shipmentId').value=session.shipment_id||'';$('destinationFc').value=session.destination_fc||'';$('prepOwner').value=session.prep_owner||'SELLER';$('labelOwner').value=session.label_owner||'SELLER';$('boxesPlanned').value=session.boxes_planned||'';$('batchNotes').value=session.notes||'';
+        state.workingLocations=(session.working_locations||[]).map(location=>({code:String(location.code||'').trim(),active:Boolean(location.active),items_count:Number(location.items_count||0),total_units:Number(location.total_units||0)})).filter(location=>location.code);
+        applySharedCountItems(session.items||[]);state.countRevision=Number(session.count_revision||0);state.sessionId=id;state.amazon=Object.assign(emptyAmazonWorkflow(),session.amazon_workflow||{});hydrateFbaQueueFromPlan();state.activeBoxId=state.amazon.boxes?.[0]?.local_id||'';state.submissionToken=null;state.lastLiveScanId=0;state.workers=[];state.dirty=false;state.changeVersion+=1;$('sessionSelect').value=String(id);$('deleteSessionBtn').disabled=amazonPlanCreated();try{localStorage.setItem('fba_prep_active_session_id',String(id))}catch(_){}
+        renderWorkingLocations();renderQueue();renderAmazonWorkflow();await resolveAmazonSkus();await validateSavedInboundItems();scheduleSharedSync(50);if(amazonOperationPending())scheduleAmazonSync();if(fbaEnablementSummary().enabling)scheduleFbaEnablementPoll(1800)
+      }catch(err){setSaveStatus('error',err.message||'Could not load saved session')}
+      finally{state.loadingSession=false;$('scanInput').focus()}
+    }
+    function resetSessionForm(){
+      if(state.saveTimer){clearTimeout(state.saveTimer);state.saveTimer=null}if(state.syncTimer){clearTimeout(state.syncTimer);state.syncTimer=null}if(state.liveTimer){clearTimeout(state.liveTimer);state.liveTimer=null}if(state.fbaEnableTimer){clearTimeout(state.fbaEnableTimer);state.fbaEnableTimer=null}state.loadingSession=true;state.queue=[];state.workingLocations=[];state.sessionId=null;state.amazon=emptyAmazonWorkflow();state.activeBoxId='';state.submissionToken=null;state.lastLiveScanId=0;state.workers=[];state.dirty=false;state.changeVersion+=1;$('sessionSelect').value='';$('sessionName').value='';$('shipmentId').value='';$('destinationFc').value='';$('prepOwner').value='SELLER';$('labelOwner').value='SELLER';$('boxesPlanned').value='';$('batchNotes').value='';$('workingLocationInput').value='';try{localStorage.removeItem('fba_prep_active_session_id')}catch(_){}renderWorkingLocations();renderQueue();renderAmazonWorkflow();renderCollaboration();setStatus('','');setWorkingLocationStatus('','Each packing scan removes one matching unit from an active shelf/bin.');setSaveStatus('','Scan items to create an autosaved counting session.');state.loadingSession=false;$('deleteSessionBtn').disabled=true
+    }
+    async function startNewSession(){try{if(state.dirty&&hasSessionContent())await saveSession({manual:true});resetSessionForm()}catch(err){setSaveStatus('error',err.message||'Could not save current session')}
+    }
+    async function deleteSession(){if(!state.sessionId)return;if(!confirm('Remove this saved FBA session? Completed batch history will not be affected.'))return;try{const res=await fetch('/api/fba-prep/sessions/'+state.sessionId,{method:'DELETE'});const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not remove session');resetSessionForm();await refreshSessions()}catch(err){setSaveStatus('error',err.message||'Could not remove session')}}
+    async function initializeSessions(){await refreshSessions();let last='';try{last=localStorage.getItem('fba_prep_active_session_id')||''}catch(_){}if(last&&state.sessions.some(session=>String(session.id)===String(last)))await loadSession(last);else{$('deleteSessionBtn').disabled=true}}
+
+    const locationCodeKey=value=>String(value||'').trim().toLowerCase();
+    const activeWorkingCodes=()=>new Set(state.workingLocations.filter(location=>location.active).map(location=>locationCodeKey(location.code)));
+    function setWorkingLocationStatus(type,message){const el=$('workingLocationStatus');el.textContent=message||'';el.className='location-status'+(type?' '+type:'')}
+    function setWorkingBusy(value){state.locationBusy=Boolean(value);['addWorkingLocationBtn','activateAllLocationsBtn','clearWorkingLocationsBtn'].forEach(id=>$(id).disabled=state.locationBusy)}
+    function automaticLocationKeys(locations){
+      const rows=locations||[];const active=activeWorkingCodes();const matches=rows.filter(location=>active.has(locationCodeKey(location.code))).map(location=>String(location.location_key||''));
+      if(matches.length)return matches;
+      return state.workingLocations.length===0&&rows.length===1?[String(rows[0].location_key||'')]:[];
+    }
+    function applyWorkingCodeToQueue(code,active){
+      const codeKey=locationCodeKey(code);if(!codeKey)return;
+      state.queue.forEach(row=>{const selected=new Set(row.selectedLocations||[]);(row.locations||[]).forEach(location=>{if(locationCodeKey(location.code)!==codeKey)return;const key=String(location.location_key||'');active?selected.add(key):selected.delete(key)});row.selectedLocations=[...selected]});
+    }
+    function renderWorkingLocations(){
+      const root=$('workingLocationList');const activeCount=state.workingLocations.filter(location=>location.active).length;const activeUnits=state.workingLocations.filter(location=>location.active).reduce((sum,location)=>sum+Number(location.total_units||0),0);
+      $('workingLocationSummary').textContent=`${activeCount} active location${activeCount===1?'':'s'}${activeCount?' · '+activeUnits+' warehouse units':''}`;
+      if(!state.workingLocations.length){root.innerHTML='<span class="working-empty">No working locations added yet.</span>';return}
+      root.innerHTML=state.workingLocations.map((location,index)=>`<div class="working-pill${location.active?' active':''}"><button class="working-toggle" data-working-index="${index}" type="button" aria-pressed="${location.active?'true':'false'}">${esc(location.code)}<span class="working-count">${esc(location.items_count||0)} SKU / ${esc(location.total_units||0)} units</span></button><button class="working-remove" data-working-remove="${index}" type="button" title="Remove ${esc(location.code)}">×</button></div>`).join('');
+      root.querySelectorAll('[data-working-index]').forEach(button=>button.onclick=()=>toggleWorkingLocation(Number(button.dataset.workingIndex)));
+      root.querySelectorAll('[data-working-remove]').forEach(button=>button.onclick=()=>removeWorkingLocation(Number(button.dataset.workingRemove)));
+    }
+    function toggleWorkingLocation(index){const location=state.workingLocations[index];if(!location)return;location.active=!location.active;applyWorkingCodeToQueue(location.code,location.active);touch();renderWorkingLocations();renderQueue();setWorkingLocationStatus('info',`${location.code} is now ${location.active?'active and applied to matching items':'inactive and removed from matching item sources'}.`)}
+    function removeWorkingLocation(index){const location=state.workingLocations[index];if(!location)return;if(location.active)applyWorkingCodeToQueue(location.code,false);state.workingLocations.splice(index,1);touch();renderWorkingLocations();renderQueue();setWorkingLocationStatus('info',`${location.code} removed from working locations.`)}
+    function activateAllWorkingLocations(){if(!state.workingLocations.length)return;state.workingLocations.forEach(location=>{location.active=true;applyWorkingCodeToQueue(location.code,true)});touch();renderWorkingLocations();renderQueue();setWorkingLocationStatus('info','All working locations are active and applied to matching items.')}
+    function clearWorkingLocations(){if(!state.workingLocations.length)return;state.workingLocations.filter(location=>location.active).forEach(location=>applyWorkingCodeToQueue(location.code,false));state.workingLocations=[];touch();renderWorkingLocations();renderQueue();setWorkingLocationStatus('info','Working locations cleared. Existing items remain in the draft for review.')}
+    async function fetchWorkingLocation(code){
+      const res=await fetch('/api/movelocation_lookup_shelf?include_fba=1&shelf='+encodeURIComponent(code));const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||`Could not load ${code}`);return data;
+    }
+    async function expandWorkingLocation(code){
+      const res=await fetch('/api/fba-prep/location-family?location='+encodeURIComponent(code));const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||`Could not expand ${code}`);return data;
+    }
+    async function addWorkingLocations(){
+      const input=$('workingLocationInput');const requested=[...new Map(input.value.split(/[\n,;]+/).map(value=>value.trim()).filter(Boolean).map(value=>[locationCodeKey(value),value])).values()];if(!requested.length||state.locationBusy)return;
+      setWorkingBusy(true);setWorkingLocationStatus('info',`Checking ${requested.length} location${requested.length===1?'':'s'}…`);
+      try{
+        const results=await Promise.all(requested.map(async code=>{try{return {code,data:await expandWorkingLocation(code)}}catch(error){return {code,error}}}));const included=new Set();const expanded=[];const failed=[];
+        results.forEach(result=>{
+          if(result.error){failed.push(`${result.code}: ${result.error.message}`);return}
+          const data=result.data;if(data.expanded)expanded.push(`${data.parent_code} + ${data.bin_count} bin${Number(data.bin_count)===1?'':'s'}`);
+          (data.locations||[]).forEach(entry=>{const canonical=String(entry.code||'').trim();const key=locationCodeKey(canonical);if(!key)return;included.add(key);let location=state.workingLocations.find(row=>locationCodeKey(row.code)===key);if(!location){location={code:canonical,active:true,items_count:0,total_units:0};state.workingLocations.push(location)}location.code=canonical;location.active=true;location.items_count=Number(entry.items_count||0);location.total_units=Number(entry.total_units||0);applyWorkingCodeToQueue(canonical,true)});
+        });
+        input.value='';if(included.size){touch();renderWorkingLocations();renderQueue()}const expansionNote=expanded.length?' Included '+expanded.join(', ')+'.':'';setWorkingLocationStatus(failed.length?'error':'ok',`${included.size} working location${included.size===1?'':'s'} added or refreshed.${expansionNote}${failed.length?' '+failed.join(' · '):''}`);
+      }finally{setWorkingBusy(false);input.focus()}
+    }
+    async function importWorkingLocations(){
+      const active=state.workingLocations.filter(location=>location.active);if(!active.length||state.locationBusy){setWorkingLocationStatus('error','Select at least one active shelf or bin first.');return}
+      setWorkingBusy(true);setWorkingLocationStatus('info',`Loading inventory from ${active.length} active location${active.length===1?'':'s'}…`);
+      try{
+        const results=await Promise.all(active.map(async location=>{try{return {location,data:await fetchWorkingLocation(location.code)}}catch(error){return {location,error}}}));const buckets=new Map();const failures=[];
+        results.forEach(result=>{
+          if(result.error){failures.push(`${result.location.code}: ${result.error.message}`);return}
+          const data=result.data;result.location.items_count=Number(data.items_count||0);result.location.total_units=Number(data.total_units||0);
+          (data.items||[]).forEach(item=>{const key=String(item.barcode_key||barcodeKey(item.barcode));let bucket=buckets.get(key);if(!bucket){bucket={item,locations:new Map()};buckets.set(key,bucket)}(item.locations||[]).forEach(location=>bucket.locations.set(locationCodeKey(location.code),location));bucket.item.fba=Object.assign({},bucket.item.fba||{},item.fba||{})});
+        });
+        let importedUnits=0;
+        buckets.forEach((bucket,key)=>{
+          const item=bucket.item;const importedLocations=[...bucket.locations.values()];importedUnits+=importedLocations.reduce((sum,location)=>sum+Number(location.quantity||0),0);let row=state.queue.find(candidate=>String(candidate.barcode_key||'')===key);
+          if(row){const locationsByCode=new Map((row.locations||[]).map(location=>[locationCodeKey(location.code),location]));importedLocations.forEach(location=>locationsByCode.set(locationCodeKey(location.code),location));row.locations=[...locationsByCode.values()];row.total_available=row.locations.reduce((sum,location)=>sum+Number(location.quantity||0),0);const selected=new Set(row.selectedLocations||[]);importedLocations.forEach(location=>selected.add(String(location.location_key||'')));row.selectedLocations=[...selected];row.fba=Object.assign({},row.fba||{},item.fba||{});const amazon=item.fba?.amazon_listing||{};row.asin=row.asin||amazon.asin||'';row.seller_sku=row.seller_sku||amazon.seller_sku||'';row.condition=row.condition||amazon.condition||'';row.quantity=Math.max(Number(row.quantity||1),selectedCapacity(row));row.inventory_refresh_error=''}
+          else{const amazon=item.fba?.amazon_listing||{};const quantity=importedLocations.reduce((sum,location)=>sum+Number(location.quantity||0),0);row={uid:state.seq++,barcode:item.barcode,barcode_display:item.barcode_display||item.barcode,barcode_key:key,title:item.title||item.barcode,image:item.image||'',total_available:quantity,locations:importedLocations,selectedLocations:importedLocations.map(location=>String(location.location_key||'')),quantity,fba:item.fba||{},asin:amazon.asin||'',seller_sku:amazon.seller_sku||'',fnsku:'',condition:amazon.condition||'',prep_type:'none',label_owner:$('labelOwner').value||'SELLER',expiration_date:'',box_number:'',notes:'',inventory_refresh_error:''};state.queue.push(row)}
+        });
+        touch();renderWorkingLocations();renderQueue();setWorkingLocationStatus(failures.length?'error':'ok',`Loaded ${buckets.size} SKU${buckets.size===1?'':'s'} and ${importedUnits} units into this draft.${failures.length?' '+failures.join(' · '):' Review quantities, then complete the batch when ready.'}`);
+      }catch(error){setWorkingLocationStatus('error',error.message||'Could not load working-location inventory')}
+      finally{setWorkingBusy(false);$('scanInput').focus()}
+    }
+
+    function barcodeGuidanceFor(row){
+      const fba=row.fba||{};const guidance=fba.barcode_guidance||{};const a=fba.amazon_listing||{};const sellerSku=String(row.seller_sku||a.seller_sku||'').trim();const asin=String(row.asin||a.asin||'').trim();const identifier=String(guidance.identifier||'').trim();const identifierType=String(guidance.identifier_type||'').trim();
+      if(identifier&&((identifierType==='seller_sku'&&identifier.toLowerCase()!==sellerSku.toLowerCase())||(identifierType==='asin'&&(sellerSku||identifier.toLowerCase()!==asin.toLowerCase()))))return {status:'stale',label:'Recheck barcode rule',detail:'The Amazon SKU or ASIN changed after the last check.'};
+      const status=String(guidance.status||'').toLowerCase(),instruction=String(guidance.instruction||'').toLowerCase(),verified=guidance.checked===true&&guidance.source==='amazon_sp_api'&&((status==='amazon_barcode'&&instruction==='requiresfnskulabel')||(status==='manufacturer_barcode'&&instruction==='canuseoriginalbarcode'));if((status==='amazon_barcode'||status==='manufacturer_barcode')&&!verified)return {status:'unavailable',label:'Recheck barcode rule',detail:'The saved barcode rule is not an authoritative Amazon response.'};
+      return Object.assign({status:'unavailable',label:'Barcode rule unavailable',detail:'Check in Send to Amazon before labeling.'},guidance);
+    }
+    function authoritativeAmazonBarcodeRequired(row){
+      const guidance=barcodeGuidanceFor(row),msku=String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||'').trim(),asin=String(row.asin||row.fba?.amazon_listing?.asin||'').trim();const type=String(guidance.identifier_type||'').toLowerCase(),identifier=String(guidance.identifier||'').trim();const identifierMatches=(type==='seller_sku'&&msku&&identifier.toLowerCase()===msku.toLowerCase())||(type==='asin'&&!msku&&asin&&identifier.toLowerCase()===asin.toLowerCase());return guidance.status==='amazon_barcode'&&guidance.checked===true&&guidance.source==='amazon_sp_api'&&String(guidance.instruction||'').toLowerCase()==='requiresfnskulabel'&&Boolean(identifierMatches);
+    }
+    function printedAmazonLabelCount(row){const msku=String(row.seller_sku||row.fba?.amazon_listing?.seller_sku||'').trim().toLowerCase();const counts=state.amazon?.printed_item_label_counts||{};const key=Object.keys(counts).find(value=>value.toLowerCase()===msku);return key?Number(counts[key]||0):0}
+    function amazonLabelControl(row){
+      const guidance=barcodeGuidanceFor(row),required=rowNeedsAmazonLabel(row),printed=printedAmazonLabelCount(row),busy=state.labelPrintBusyUid===row.uid;
+      if(required&&printed){const planItem=planItemForMsku(row.seller_sku||row.fba?.amazon_listing?.seller_sku),fnsku=String(planItem?.fnsku||'').trim().toUpperCase(),canReprint=Boolean(state.sessionId&&amazonPlanCreated()&&/^[A-Z0-9]{10}$/.test(fnsku)&&!state.amazonBusy&&!busy);return `<button class="amazon-label-printed" data-print-amazon-label="${row.uid}" type="button" title="${esc(canReprint?'Click to reprint this Amazon label':'Reprint is available after Amazon assigns the FNSKU')}" ${canReprint?'':'disabled'}>${busy?'Printing…':'✓ Label printed'}</button>`}
+      if(required){const planItem=planItemForMsku(row.seller_sku||row.fba?.amazon_listing?.seller_sku),fnsku=String(planItem?.fnsku||'').trim().toUpperCase(),readyToPrint=Boolean(state.sessionId&&amazonPlanCreated()&&/^[A-Z0-9]{10}$/.test(fnsku)&&!state.amazonBusy);if(!readyToPrint)return '<span class="label-status needed">Waiting for Amazon plan and FNSKU</span>';if(!state.autoPrintEnabled)return `<button class="amazon-label-manual" data-print-amazon-label="${row.uid}" type="button" ${busy?'disabled':''}>${busy?'Printing…':'Print label'}</button>`;return '<span class="label-status needed">Auto prints immediately when scanned</span>'}
+      if(guidance.status==='manufacturer_barcode')return '<span class="label-status ok">Use regular UPC</span>';
+      if(guidance.status==='checking')return '<span class="label-status">Checking Amazon…</span>';
+      return '<span class="label-status">Pending Amazon check</span>';
+    }
+    function barcodeGuidanceCallout(row){
+      const guidance=barcodeGuidanceFor(row);const checking=guidance.status==='checking';const automatic=rowNeedsAmazonLabel(row)?` ${row.fnsku?(state.autoPrintEnabled?`FNSKU ${row.fnsku} prints immediately when the unit is scanned for packing.`:`Auto print is off; use Print label in the table for FNSKU ${row.fnsku}.`):'The real FNSKU becomes printable after Amazon creates the plan.'}`:'';return `<div class="barcode-guidance ${esc(guidance.status||'unavailable')}"><div><strong>${esc(guidance.label||'Barcode rule unavailable')}</strong><span>${esc((guidance.detail||'Check in Send to Amazon before labeling.')+automatic)}</span></div><button class="btn btn-ghost btn-sm" data-barcode-check="${row.uid}" type="button" ${checking?'disabled':''}>${checking?'Checking Amazon…':'Recheck with Amazon'}</button></div>`;
+    }
+    function setRowBatteryRequired(row,required){
+      if(!row)return;const wasBatteryMessage=String(row.fba_enablement_error||'').startsWith('Battery item:');row.batteries_required=Boolean(required);
+      if(required){row.fba_enablement_status='needs_safety_info';row.fba_enablement_error='Battery item: complete the battery type, count, and compliance details in Amazon before FBA.';row.inbound_eligible=null;return}
+      if(String(row.amazon_fnsku||row.fnsku||'').trim()){row.fba_enablement_status='ready';row.fba_enablement_error='';row.inbound_eligible=true}
+      else if(row.dg_not_applicable_confirmed){row.fba_enablement_status='needs_enablement';row.fba_enablement_error='';row.inbound_eligible=null}
+      else if(wasBatteryMessage||fbaEnablementStatus(row)==='needs_safety_info'){row.fba_enablement_status='needs_safety_info';row.fba_enablement_error='No batteries selected. Continue Amazon setup below.';row.inbound_eligible=null}
+    }
+    function renderQueue(){
+      $('skuCount').textContent=`${state.queue.length} item type${state.queue.length===1?'':'s'}`;
+      $('unitCount').textContent=`${totalUnits()} unit${totalUnits()===1?'':'s'}`;
+      const root=$('queueList');const locked=amazonPlanCreated();
+      if(!state.queue.length){root.innerHTML='<div class="empty"><strong>No items scanned yet</strong>Scan every physical unit once. Matching barcodes will combine into a clean quantity list.</div>';renderAmazonWorkflow();return}
+      if(!locked){
+        root.innerHTML=`<table class="plan-sheet"><thead><tr><th>Barcode</th><th>Scanned quantity</th><th>Amazon Seller SKU / FBA status</th><th aria-label="Remove"></th></tr></thead>${state.queue.map(row=>`<tbody><tr class="plan-item-row${fbaEnablementStatus(row)==='failed'?' fba-failed':''}">
+          <td><div class="item-copy"><div class="upc">${esc(row.barcode_display||row.barcode)}</div></div></td>
+          <td><div class="qty-block"><div class="qty-step"><button type="button" data-qty="${row.uid}" data-delta="-1" title="Correct one extra scan">−</button><span class="qty-value">${esc(row.quantity)}</span></div><div class="qty-max">units scanned</div></div></td>
+          <td><input data-field="seller_sku" data-row="${row.uid}" value="${esc(row.seller_sku||'')}" placeholder="Add before Amazon plan">${fbaEnablementBadge(row)}${fbaOfferStrategyNote(row)}<div class="battery-choice" role="group" aria-label="Does this item contain or require batteries?"><span class="battery-choice-label">Batteries?</span><button class="battery-option no ${batteryRequired(row)?'':'selected'}" data-battery-choice="no" data-row="${row.uid}" type="button" aria-pressed="${batteryRequired(row)?'false':'true'}">No (default)</button><button class="battery-option yes ${batteryRequired(row)?'selected':''}" data-battery-choice="yes" data-row="${row.uid}" type="button" aria-pressed="${batteryRequired(row)?'true':'false'}">Yes — contains batteries</button></div></td>
+          <td><button class="remove-line" data-remove="${row.uid}" type="button" title="Remove barcode">×</button></td>
+        </tr></tbody>`).join('')}</table>`;
+        root.querySelectorAll('[data-qty]').forEach(btn=>btn.onclick=()=>adjustQty(Number(btn.dataset.qty),Number(btn.dataset.delta)));
+        root.querySelectorAll('[data-remove]').forEach(btn=>btn.onclick=()=>{state.queue=state.queue.filter(row=>row.uid!==Number(btn.dataset.remove));touch();renderQueue();$('scanInput').focus()});
+        root.querySelectorAll('[data-field]').forEach(input=>input.oninput=()=>{const row=state.queue.find(r=>r.uid===Number(input.dataset.row));if(row){row.seller_sku=input.value;row.fba_enablement_status=String(input.value||'').trim()?'needs_enablement':'';row.fba_enablement_error='';row.amazon_fnsku='';row.inbound_eligible=null;row.fba=row.fba||{};row.fba.amazon_listing=Object.assign({},row.fba.amazon_listing||{},{seller_sku:input.value});touch()}});
+        root.querySelectorAll('[data-battery-choice]').forEach(button=>button.onclick=()=>{const row=state.queue.find(r=>r.uid===Number(button.dataset.row));if(!row)return;setRowBatteryRequired(row,button.dataset.batteryChoice==='yes');touch();renderQueue();$('scanInput').focus()});
+        renderAmazonWorkflow();return;
+      }
+      const packed=packedByMsku(),removed=state.amazon?.inventory_removed_by_msku||{};
+      root.innerHTML=`<table class="plan-sheet"><thead><tr><th>Item / barcode</th><th>Seller SKU</th><th>Scanned quantity</th><th>Packed</th><th>Warehouse removed</th><th>Amazon label</th><th aria-label="Remove"></th></tr></thead>${state.queue.map(row=>{
+        const a=(row.fba&&row.fba.amazon_listing)||{},msku=String(row.seller_sku||a.seller_sku||'').trim(),packedQty=Number(packed.get(msku.toLowerCase())||0),plannedQty=Number(row.quantity||0),packedComplete=plannedQty>0&&packedQty===plannedQty,removedQty=Number(removed[msku]||0);
+        return `<tbody class="${locked?'locked ':''}${packedComplete?'packed-complete':''}" data-packed-msku="${esc(msku.toLowerCase())}"><tr class="plan-item-row">
+            <td><div class="item-copy"><div class="item-title">${esc(row.title||'Scanned item')}</div><div class="upc">${esc(row.barcode_display||row.barcode||'No barcode')}</div></div></td>
+            <td><strong class="${msku?'':'danger'}">${esc(msku||'Needs Amazon SKU')}</strong>${row.macy_bol_found?'<div class="stock-text">MacyBol matched</div>':''}</td>
+            <td><div class="qty-block"><div class="qty-step"><button type="button" data-qty="${row.uid}" data-delta="-1" ${locked?'disabled':''} title="Correct one extra scan">−</button><span class="qty-value">${esc(row.quantity)}</span></div><div class="qty-max">${locked?'locked by Amazon':'units scanned'}</div></div></td>
+            <td><strong class="packed-count">${packedComplete?'✓ ':''}${esc(packedQty)} / ${esc(row.quantity)}</strong>${packedQty>0&&!state.amazon?.boxes_submitted?`<button class="reset-pack" data-reset-packed="${esc(msku)}" data-reset-title="${esc(row.title||msku)}" type="button" ${state.busy?'disabled':''}>Reset last scan</button>`:''}</td>
+            <td><strong>${esc(removedQty)}</strong><div class="stock-text">${removedQty<packedQty?'Some scans had no stock in active locations':'FBA Removed'}</div></td>
+            <td>${amazonLabelControl(row)}</td>
+            <td><button class="remove-line" data-remove="${row.uid}" type="button" title="Remove item" ${locked?'disabled':''}>×</button></td>
+          </tr><tr class="plan-details-row"><td colspan="7"><details class="item-details"><summary>${msku?'Optional details':'Add the missing Amazon SKU'} · ${esc(prepLabel(row.prep_type))}${row.fnsku?' · FNSKU '+esc(row.fnsku):''}</summary><div class="detail-grid">
+            <div class="field"><label>Seller SKU</label><input data-field="seller_sku" data-row="${row.uid}" value="${esc(msku)}" placeholder="Required for Amazon plan" ${locked?'disabled':''}></div>
+            <div class="field"><label>ASIN</label><input data-field="asin" data-row="${row.uid}" value="${esc(row.asin||a.asin||'')}" placeholder="Optional" ${locked?'disabled':''}></div>
+            <div class="field"><label>FNSKU</label><input data-field="fnsku" data-row="${row.uid}" value="${esc(row.fnsku||'')}" placeholder="Optional" ${locked?'disabled':''}></div>
+            <div class="field"><label>Condition</label><input data-field="condition" data-row="${row.uid}" value="${esc(row.condition||a.condition||'')}" placeholder="e.g. New" ${locked?'disabled':''}></div>
+            <div class="field"><label>Prep type</label><select data-field="prep_type" data-row="${row.uid}" ${locked?'disabled':''}>${['none','poly_bag','bubble_wrap','taping','opaque_bag','suffocation_label','set_bundle','other'].map(v=>`<option value="${v}" ${row.prep_type===v?'selected':''}>${prepLabel(v)}</option>`).join('')}</select></div>
+            <div class="field"><label>Label owner</label><input value="Seller (US requirement)" disabled></div>
+            <div class="field"><label>Expiration date</label><input type="date" data-field="expiration_date" data-row="${row.uid}" value="${esc(row.expiration_date||'')}" ${locked?'disabled':''}></div>
+            <div class="field wide"><label>Item prep note</label><textarea data-field="notes" data-row="${row.uid}" placeholder="Special prep or listing note" ${locked?'disabled':''}>${esc(row.notes||'')}</textarea></div>
+          </div></details></td></tr></tbody>`;
+      }).join('')}</table>`;
+
+      root.querySelectorAll('[data-qty]').forEach(btn=>btn.onclick=()=>adjustQty(Number(btn.dataset.qty),Number(btn.dataset.delta)));
+      root.querySelectorAll('[data-remove]').forEach(btn=>btn.onclick=()=>{state.queue=state.queue.filter(row=>row.uid!==Number(btn.dataset.remove));touch();renderQueue();$('scanInput').focus()});
+      root.querySelectorAll('[data-reset-packed]').forEach(btn=>btn.onclick=()=>resetPackedUnit(btn.dataset.resetPacked,btn.dataset.resetTitle));
+      root.querySelectorAll('[data-print-amazon-label]').forEach(btn=>btn.onclick=()=>printAmazonLabelForRow(Number(btn.dataset.printAmazonLabel)));
+      root.querySelectorAll('[data-field]').forEach(input=>{input.oninput=()=>{const row=state.queue.find(r=>r.uid===Number(input.dataset.row));if(row){row[input.dataset.field]=input.value;if(input.dataset.field==='seller_sku'){row.fba=row.fba||{};row.fba.amazon_listing=Object.assign({},row.fba.amazon_listing||{},{seller_sku:input.value})}touch()}};if(input.dataset.field==='seller_sku')input.onchange=()=>renderQueue()});
+      renderAmazonWorkflow();
+    }
+
+    function applySharedCountItems(items){
+      const current=new Map(state.queue.map(row=>[String(row.barcode_key||barcodeKey(row.barcode)).toLowerCase(),row]));
+      state.queue=(items||[]).map(saved=>{const key=String(saved.barcode_key||barcodeKey(saved.barcode)).toLowerCase(),existing=current.get(key);return Object.assign({},existing||{},saved,{uid:existing?.uid||state.seq++})});
+    }
+    async function resolveAmazonSkus(){
+      if(!state.sessionId||amazonPlanCreated())return;
+      try{const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/resolve-amazon-skus`,{method:'POST',headers:{'Accept':'application/json'}}),data=await res.json();if(!res.ok||!data.success)return;if(data.session){applySharedCountItems(data.session.items||[]);state.countRevision=Number(data.session.count_revision||state.countRevision);renderQueue();updateSessionOption(data.session)}}catch(_){}
+    }
+    async function validateSavedInboundItems(){
+      if(!state.sessionId||amazonPlanCreated()||!state.queue.length)return;
+      setSaveStatus('saving','Loading saved FBA status…');
+      try{const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/validate-inbound`,{method:'POST',headers:{'Accept':'application/json'}}),data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not load FBA status');if(data.session){applySharedCountItems(data.session.items||[]);state.countRevision=Number(data.session.count_revision||state.countRevision);renderQueue();updateSessionOption(data.session)}const progress=data.enablement||fbaEnablementSummary();if(progress.enabling)scheduleFbaEnablementPoll(1500);setSaveStatus('saved',`Session loaded · ${progress.ready||0} of ${progress.total||0} Seller SKUs FBA ready`)}catch(error){setSaveStatus('error',error.message||'Could not load saved Amazon items')}
+    }
+
+    function adjustQty(uid,delta){const row=state.queue.find(r=>r.uid===uid);if(!row)return;row.quantity=Math.max(1,Math.min(10000,Number(row.quantity||1)+delta));touch();renderQueue();$('scanInput').focus()}
+    function toggleLocation(uid,key,checked){const row=state.queue.find(r=>r.uid===uid);if(!row)return;const set=new Set(row.selectedLocations||[]);checked?set.add(key):set.delete(key);row.selectedLocations=[...set];touch();renderQueue();$('scanInput').focus()}
+    function openPreview(location){const code=String(location||'').trim();if(!code)return;if(window.SSLocationPreview){window.SSLocationPreview.openForLocation(code,'',`Location: ${code}`)}}
+
+    async function countScannedUnit(code){
+      state.busy=true;setScanSortResult();renderAmazonWorkflow();setStatus('info',`Counting ${code}…`);
+      try{
+        if(!state.sessionId)await saveSession({manual:true});if(!state.sessionId)throw new Error('Could not create the saved counting session');
+        const uniquePart=String(newToken()).replace(/[^A-Za-z0-9._:-]/g,'').slice(0,60),scanToken=`count:${state.sessionId}:${state.clientId.slice(-12)}:${uniquePart}`;
+        const res=await fetch(`/api/fba-prep/sessions/${state.sessionId}/count-scan`,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({scan_token:scanToken,barcode:code,client_id:state.clientId,operator_name:operatorName()})}),data=await res.json();if(!res.ok||!data.success){const scanError=new Error(data.error||'Could not save this count');scanError.notAdded=Boolean(data.not_added);scanError.voiceMessage=String(data.voice_message||'');scanError.sortResult=data.sort_result||null;throw scanError}
+        applySharedCountItems(data.session.items||[]);state.countRevision=Number(data.session.count_revision||state.countRevision);const row=state.queue.find(candidate=>String(candidate.barcode_key||barcodeKey(candidate.barcode)).toLowerCase()===String(barcodeKey(code)).toLowerCase()),feedback=data.count_feedback||{},kind=String(feedback.kind||fbaEnablementStatus(row));renderQueue();setRouteCallout('COUNTED','ok');updateSessionOption(data.session);scheduleSharedSync(50);$('scanInput').value='';setStatus('ok',`${code}: ${row?.quantity||1} counted`);countBeep();if(kind==='enabling')scheduleFbaEnablementPoll(2000);
+      }catch(error){const message=error.message||'Could not count this barcode',sortResult=error.sortResult||{kind:'rejected',headline:error.notAdded?'REJECTED':'SCAN ERROR — NOT COUNTED',instruction:error.notAdded?'Do not include this item.':'Scan it again before moving the item.'};setScanSortResult(sortResult,code);setStatus('error',message);errorBeep();speakRoute(error.notAdded?'Rejected.':'Scan error.');$('scanInput').select()}
+      finally{state.busy=false;renderAmazonWorkflow();$('scanInput').focus()}
+    }
+
+    async function recheckBarcodeGuidance(uid){
+      const row=state.queue.find(candidate=>candidate.uid===uid);if(!row)return;const a=(row.fba&&row.fba.amazon_listing)||{};const sellerSku=String(row.seller_sku||a.seller_sku||'').trim();const asin=String(row.asin||a.asin||'').trim();row.fba=row.fba||{};row.fba.barcode_guidance={status:'checking',label:'Checking Amazon…',detail:'Requesting the current item-label rule from Amazon.',identifier_type:sellerSku?'seller_sku':(asin?'asin':''),identifier:sellerSku||asin};renderQueue();
+      try{const params=new URLSearchParams({seller_sku:sellerSku,asin,refresh:'1'});const res=await fetch('/api/fba-prep/barcode-guidance?'+params.toString());const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Barcode check failed');row.fba.barcode_guidance=data.barcode_guidance||{};touch();renderQueue();setStatus(data.barcode_guidance?.checked?'ok':'info',`${row.title}: ${data.barcode_guidance?.label||'Barcode rule unavailable'}`)}catch(error){row.fba.barcode_guidance={status:'unavailable',label:'Barcode rule unavailable',detail:error.message||'Could not ask Amazon for the barcode rule.',identifier_type:sellerSku?'seller_sku':(asin?'asin':''),identifier:sellerSku||asin};touch();renderQueue();setStatus('error',error.message||'Could not check the Amazon barcode rule')}
+    }
+
+    async function scanItem(){
+      const input=$('scanInput');const code=input.value.trim();if(!code||state.busy)return;
+      if(amazonPackingMode()){await packScannedUnit(code);return}
+      if(!amazonPlanCreated()){await countScannedUnit(code);return}
+      setStatus('error','Amazon is preparing the packing step. Scanning resumes after a packing option is confirmed.');
+    }
+
+    function newToken(){return (crypto&&crypto.randomUUID)?crypto.randomUUID():('fba-'+Date.now()+'-'+Math.random().toString(16).slice(2))}
+    function buildPayload(){const removed=state.amazon?.inventory_removed_by_msku||{},locations=state.amazon?.removed_locations_by_msku||{};return state.queue.map(row=>{const msku=String(row.seller_sku||'').trim();return {barcode:row.barcode||msku,title:row.title||msku,image:row.image,quantity:Number(row.quantity||1),from_locations:[],inventory_already_removed:Number(removed[msku]||0),removed_location_details:locations[msku]||[],asin:row.asin||'',seller_sku:msku,fnsku:row.fnsku||'',condition:row.condition||'',prep_type:row.prep_type||'none',label_owner:row.label_owner||$('labelOwner').value||'SELLER',expiration_date:row.expiration_date||'',box_number:row.box_number||'',notes:row.notes||''}})}
+
+    async function completeBatch(){
+      if(!state.queue.length){setStatus('error','Scan at least one physical item first.');return}
+      if(amazonPlanCreated()&&!state.amazon.transport_confirmed){setStatus('error','Finish Amazon placement and shipping before removing this inventory.');return}
+      if(amazonPlanCreated()){$('shipmentId').value=state.amazon.inbound_plan_id;$('destinationFc').value=workflowDestinations().join(', ');$('boxesPlanned').value=String((state.amazon.boxes||[]).length||'')}
+      const units=totalUnits(),removed=Object.values(state.amazon?.inventory_removed_by_msku||{}).reduce((sum,value)=>sum+Number(value||0),0),untrackedUnits=Math.max(0,units-removed);const message=`Amazon shipping is confirmed. Finish ${units} FBA unit${units===1?'':'s'}? ${removed} unit${removed===1?' was':'s were'} already removed from warehouse during packing scans.${untrackedUnits?` ${untrackedUnits} packed unit${untrackedUnits===1?' had':'s had'} no stock in the active locations.`:''}`;if(!confirm(message))return;
+      try{await saveSession({manual:true})}catch(err){setStatus('error','Save the session before completing: '+(err.message||'save failed'));return}
+      state.submissionToken=state.submissionToken||newToken();state.busy=true;$('completeBtn').disabled=true;$('scanBtn').disabled=true;setStatus('info','Completing the FBA ledger…');
+      try{
+        const completedSessionId=state.sessionId;const payload={workflow:'amazon_fba',clear_location:true,fba:{client_token:state.submissionToken,session_id:state.sessionId,batch_name:$('sessionName').value.trim(),shipment_id:$('shipmentId').value.trim(),destination_fc:$('destinationFc').value.trim(),prep_owner:$('prepOwner').value,label_owner:$('labelOwner').value,boxes_planned:$('boxesPlanned').value,notes:$('batchNotes').value.trim()},items:buildPayload()};
+        const res=await fetch('/api/fba-prep/complete',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'FBA batch failed');
+        const results=data.item_results||[];state.queue=state.queue.map((row,index)=>{const result=results.find(r=>Number(r.index)===index);if(!result)return row;const completed=Number(result.completed_qty??result.moved_qty??0);const left=Math.max(0,Number(row.quantity||0)-completed);row.quantity=left;return row}).filter(row=>row.quantity>0);
+        const reviewItems=(data.fba_batch?.items||[]).filter(item=>(item.review_reasons||[]).length);
+        setStatus('ok',`Completed ${data.completed_units??units} FBA unit${Number(data.completed_units??units)===1?'':'s'}; ${data.moved_units||0} unit${Number(data.moved_units||0)===1?' was':'s were'} removed from warehouse inventory. ${reviewItems.length?reviewItems.length+' item(s) added to listing review.':'No listing conflicts found.'}`);
+        state.submissionToken=null;renderQueue();
+        if(!state.queue.length&&completedSessionId){state.sessionId=null;state.amazon=emptyAmazonWorkflow();state.activeBoxId='';state.dirty=false;stopSharedSync();$('sessionSelect').value='';$('deleteSessionBtn').disabled=true;try{localStorage.removeItem('fba_prep_active_session_id')}catch(_){}setSaveStatus('saved',`Session completed and linked to FBA batch #${data.fba_batch?.id||''}.`);await refreshSessions()}
+        else if(state.queue.length){touch();await saveSession({manual:true})}
+        await loadReviews();await loadHistory();
+        if(reviewItems.length)switchTab('review');
+      }catch(err){setStatus('error',err.message||'FBA batch failed')}
+      finally{state.busy=false;renderAmazonWorkflow();$('scanInput').focus()}
+    }
+
+    function listingLinks(row){const links=row.listing_links||[];if(!links.length)return '<span class="muted">No active links</span>';return links.map(link=>`<a class="market-link" href="${esc(link.url||'#')}" target="_blank" rel="noopener">${esc((link.platform||'listing').toUpperCase())} ${esc(link.listing_id||'open')} &#8599;</a>`).join('')}
+    function locationText(locations){return (locations||[]).map(loc=>`${loc.code} (${loc.quantity})`).join(', ')||'None'}
+
+    async function loadReviews(){
+      const root=$('reviewList');root.innerHTML='<div class="loading"><span class="spinner"></span>Loading review list…</div>';
+      try{const res=await fetch('/api/fba-prep/reviews?status='+encodeURIComponent(state.reviewFilter));const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not load reviews');$('reviewCount').textContent=Number(data.counts?.open||0);const items=data.items||[];
+        if(!items.length){root.innerHTML='<div class="empty"><strong>No '+esc(state.reviewFilter)+' review items</strong>Listing conflicts and remaining warehouse stock will appear here after an FBA batch.</div>';return}
+        root.innerHTML=items.map(row=>`<article class="review-card ${row.status==='reviewed'?'reviewed':''}"><div class="review-top"><div><div class="review-title">${esc(row.title||row.barcode)}</div><div class="review-meta">${esc(row.barcode)} · ${esc(row.batch_name)} · removed ${esc(row.quantity_removed)} · ${esc(fmtDate(row.created_at))}</div></div><div class="reason-list">${(row.reasons||row.original_reasons||[]).map(reason=>`<span class="reason">${esc(reason)}</span>`).join('')}</div></div><div class="review-grid"><div class="review-box"><strong>Inventory still in warehouse</strong><span class="${Number(row.remaining_inventory_qty)>0?'danger':'success'}">${esc(row.remaining_inventory_qty)} units</span><div class="muted">${esc(locationText(row.remaining_locations))}</div></div><div class="review-box"><strong>Marketplace status</strong>${row.listed_ebay?'<span class="badge ebay">eBay active</span> ':'<span class="muted">eBay not active</span> '}${row.listed_amazon?'<span class="badge amazon">Amazon active</span>':'<span class="muted">Amazon not active</span>'}<div class="link-row">${listingLinks(row)}</div></div><div class="review-box"><strong>FBA identifiers</strong><div>ASIN: ${esc(row.asin||'—')}</div><div>SKU: ${esc(row.seller_sku||'—')}</div><div>FNSKU: ${esc(row.fnsku||'—')}</div></div></div><div class="review-actions"><a class="btn btn-blue btn-sm" href="${esc(row.listingagent_url)}">Open in Listing Agent</a><input class="review-note" data-note="${row.id}" value="${esc(row.reviewer_note||'')}" placeholder="Review note"><button class="btn ${row.status==='reviewed'?'btn-ghost':'btn-green'} btn-sm" data-review-id="${row.id}" data-next="${row.status==='reviewed'?'open':'reviewed'}" type="button">${row.status==='reviewed'?'Reopen':'Mark reviewed'}</button></div></article>`).join('');
+        root.querySelectorAll('[data-review-id]').forEach(btn=>btn.onclick=()=>updateReview(Number(btn.dataset.reviewId),btn.dataset.next));
+      }catch(err){root.innerHTML=`<div class="empty"><strong>Could not load review list</strong>${esc(err.message||'Unknown error')}</div>`}
+    }
+
+    async function updateReview(id,status){const note=document.querySelector(`[data-note="${id}"]`)?.value||'';try{const res=await fetch('/api/fba-prep/reviews/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status,reviewer_note:note})});const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Update failed');await loadReviews()}catch(err){alert(err.message||'Review update failed')}}
+
+    async function loadHistory(){
+      const root=$('historyList');root.innerHTML='<div class="loading"><span class="spinner"></span>Loading batches…</div>';
+      try{const res=await fetch('/api/fba-prep/batches?limit=12');const data=await res.json();if(!res.ok||!data.success)throw new Error(data.error||'Could not load history');const batches=data.batches||[];if(!batches.length){root.innerHTML='<div class="empty"><strong>No completed FBA batches</strong>Your first completed prep run will appear here.</div>';return}
+        root.innerHTML=batches.map((batch,index)=>`<details class="batch" ${index===0?'open':''}><summary><div><div class="batch-name">${esc(batch.batch_name)}</div><div class="batch-meta">${esc(fmtDate(batch.completed_at||batch.created_at))}${batch.shipment_id?' · Shipment '+esc(batch.shipment_id):''}${batch.destination_fc?' · '+esc(batch.destination_fc):''}</div></div><div class="batch-totals"><span class="summary-pill">${esc(batch.total_skus)} SKUs</span><span class="summary-pill">${esc(batch.total_units)} units</span></div></summary><div class="batch-items">${(batch.items||[]).map(item=>`<div class="batch-line"><div><strong>${esc(item.title||item.barcode)}</strong><span class="muted">${esc(item.barcode)}${item.asin?' · '+esc(item.asin):''}</span></div><div><strong>${esc(item.requested_quantity)} sent</strong><span class="muted">${esc(item.quantity_removed)} removed from warehouse · ${esc(prepLabel(item.prep_type))}</span></div><div><strong>Warehouse source</strong><span class="muted">${esc(locationText(item.source_locations))}</span></div><div><strong>${esc(item.remaining_inventory_qty)} remain</strong><span class="muted">${esc(locationText(item.remaining_locations))}</span><div class="badges">${item.listed_ebay?'<span class="badge ebay">eBay active</span>':''}${item.listed_amazon?'<span class="badge amazon">Amazon active</span>':''}</div></div></div>`).join('')}</div></details>`).join('');
+      }catch(err){root.innerHTML=`<div class="empty"><strong>Could not load batch history</strong>${esc(err.message||'Unknown error')}</div>`}
+    }
+
+    function switchTab(name){document.querySelectorAll('.tab').forEach(btn=>btn.classList.toggle('active',btn.dataset.tab===name));document.querySelectorAll('.panel').forEach(panel=>panel.classList.toggle('active',panel.id==='panel-'+name));history.replaceState(null,'','#'+name);if(name==='review')loadReviews();if(name==='history')loadHistory()}
+    document.querySelectorAll('.tab').forEach(btn=>btn.onclick=()=>switchTab(btn.dataset.tab));
+    document.querySelectorAll('[data-review-filter]').forEach(btn=>btn.onclick=()=>{state.reviewFilter=btn.dataset.reviewFilter;document.querySelectorAll('[data-review-filter]').forEach(b=>b.classList.toggle('active',b===btn));loadReviews()});
+    ['sessionName','shipmentId','destinationFc','prepOwner','labelOwner','boxesPlanned','batchNotes'].forEach(id=>$(id).addEventListener('input',touch));
+    $('sessionSelect').addEventListener('change',async()=>{const target=$('sessionSelect').value;try{if(state.dirty&&hasSessionContent())await saveSession({manual:true});if(target)await loadSession(target);else resetSessionForm()}catch(err){setSaveStatus('error',err.message||'Could not switch sessions')}});
+    $('newSessionBtn').onclick=startNewSession;$('saveSessionBtn').onclick=()=>{saveSession({manual:true}).catch(()=>{})};$('deleteSessionBtn').onclick=deleteSession;
+    $('operatorName').value=readOperatorName();$('operatorName').addEventListener('input',()=>{try{localStorage.setItem('fba_operator_name',$('operatorName').value.trim())}catch(_){}scheduleSharedSync(100)});document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(scanSound.ctx?.state!=='running')scanSound.ready=false;updateSoundButton();scheduleSharedSync(100)}});
+    $('workingLocationInput').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addWorkingLocations()}});$('addWorkingLocationBtn').onclick=addWorkingLocations;$('activateAllLocationsBtn').onclick=activateAllWorkingLocations;$('clearWorkingLocationsBtn').onclick=clearWorkingLocations;
+    $('autoPrintToggle').checked=state.autoPrintEnabled;$('autoPrintToggle').addEventListener('change',event=>{state.autoPrintEnabled=event.target.checked;try{localStorage.setItem('fba_auto_print_labels',state.autoPrintEnabled?'on':'off')}catch(_){}renderQueue();setStatus('info',state.autoPrintEnabled?'Auto printing is on. Required Amazon labels print immediately when planned units are scanned.':'Auto printing is off. Use Print label in the Amazon label column when needed.')});
+    document.addEventListener('pointerdown',unlockScanAudio,{capture:true,passive:true});document.addEventListener('touchend',unlockScanAudio,{capture:true,passive:true});document.addEventListener('keydown',unlockScanAudio,{capture:true});
+    $('soundTestBtn').onclick=testSound;$('scanInput').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();unlockScanAudio();scanItem()}});$('scanBtn').onclick=()=>{unlockScanAudio();scanItem()};$('completeBtn').onclick=completeBatch;
+    $('clearBtn').onclick=()=>{if(state.queue.length&&confirm('Clear this prep queue?')){state.queue=[];touch();renderQueue();setStatus('','');$('scanInput').focus()}};
+    $('allNoBatteriesBtn').onclick=()=>{const changed=state.queue.filter(batteryRequired).length;state.queue.forEach(row=>setRowBatteryRequired(row,false));touch();renderQueue();setStatus('ok',changed?`${changed} item${changed===1?' was':'s were'} corrected to No batteries.`:'All items already default to No batteries.');$('scanInput').focus()};
+    $('setupToggle').onclick=()=>{$('setupPanel').classList.toggle('open')};$('setupCloseBtn').onclick=()=>{$('setupPanel').classList.remove('open')};$('saveShipFromBtn').onclick=saveShipFrom;
+    $('refreshHistory').onclick=loadHistory;
+    const initial=(location.hash||'#prep').slice(1);updateSoundButton();renderCollaboration();renderWorkingLocations();renderQueue();loadReviews();loadAmazonReadiness();loadFbaPrinterStatus();fetch('/api/printer/wake',{method:'POST'}).catch(()=>{});initializeSessions();if(['prep','review','history'].includes(initial))switchTab(initial);$('scanInput').focus();
+  </script>
+</body>
+</html>

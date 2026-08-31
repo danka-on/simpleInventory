@@ -812,7 +812,7 @@ class PrinterManager:
         if isinstance(config_override, dict):
             config.update(config_override)
 
-        return {
+        layout = {
             'label_width': self._coerce_dimension(config.get('label_width'), 65, minimum=20, maximum=120),
             'label_height': self._coerce_dimension(config.get('label_height'), 30, minimum=5, maximum=300),
             'label_show_name': self._coerce_bool(config.get('label_show_name'), True),
@@ -824,6 +824,33 @@ class PrinterManager:
             'label_title_lines': self._coerce_dimension(config.get('label_title_lines'), 2, minimum=1, maximum=4),
             'label_show_barcode_text': self._coerce_bool(config.get('label_show_barcode_text'), True)
         }
+        # Advanced per-job overrides are intentionally not stored in the normal
+        # label designer.  They let standards-driven labels (such as Amazon FBA)
+        # use physical point/mm measurements without changing existing warehouse
+        # label presets, whose sizing controls predate those measurements.
+        optional_float_values = {
+            'label_title_font_size_pt': (4.0, 48.0),
+            'label_barcode_font_size_pt': (4.0, 36.0),
+            'label_barcode_height_mm': (4.0, 60.0),
+            'label_padding_x_mm': (0.0, 25.0),
+            'label_padding_y_mm': (0.0, 25.0),
+            'label_block_gap_mm': (0.0, 10.0),
+            'label_text_gap_mm': (0.0, 10.0),
+        }
+        for key, (minimum, maximum) in optional_float_values.items():
+            if config.get(key) is not None:
+                layout[key] = self._coerce_float(
+                    config.get(key), minimum, minimum=minimum, maximum=maximum
+                )
+        if config.get('label_barcode_first') is not None:
+            layout['label_barcode_first'] = self._coerce_bool(
+                config.get('label_barcode_first'), False
+            )
+        if config.get('label_barcode_protected') is not None:
+            layout['label_barcode_protected'] = self._coerce_bool(
+                config.get('label_barcode_protected'), False
+            )
+        return layout
 
     def _load_label_font(self, size):
         from PIL import ImageFont
@@ -898,18 +925,39 @@ class PrinterManager:
             px_per_mm = render_dpi / 25.4
             label_width_px = max(1, round(self._coerce_dimension(layout.get('label_width'), 65, minimum=20, maximum=120) * px_per_mm))
             label_height_px = max(1, round(self._coerce_dimension(layout.get('label_height'), 30, minimum=5, maximum=300) * px_per_mm))
-            content_width = max(40, label_width_px - (round(2.0 * px_per_mm) * 2))
+            padding_x_px = max(0, round(self._coerce_float(
+                layout.get('label_padding_x_mm'), 2.0, minimum=0.0, maximum=25.0
+            ) * px_per_mm))
+            padding_y_px = max(0, round(self._coerce_float(
+                layout.get('label_padding_y_mm'), 0.0, minimum=0.0, maximum=25.0
+            ) * px_per_mm))
+            content_width = max(40, label_width_px - (padding_x_px * 2))
+            content_height = max(1, label_height_px - (padding_y_px * 2))
 
             show_barcode = self._coerce_bool(layout.get('label_show_barcode'), True)
             show_barcode_text = self._coerce_bool(layout.get('label_show_barcode_text'), True)
             show_name = self._coerce_bool(layout.get('label_show_name'), True)
             title_text = str(item_description or '').strip() if show_name else ''
-            title_font_size_mm = self._coerce_dimension(layout.get('label_title_font_size'), 10, minimum=6, maximum=48) * 0.9
-            barcode_font_size_mm = self._coerce_dimension(layout.get('label_barcode_font_size'), 10, minimum=6, maximum=36) * 0.92
-            title_font_px = max(12, round(title_font_size_mm * px_per_mm))
-            barcode_font_px = max(10, round(barcode_font_size_mm * px_per_mm))
-            block_gap_px = max(2, round(1.4 * px_per_mm))
-            text_gap_px = max(1, round(0.45 * px_per_mm))
+            if layout.get('label_title_font_size_pt') is not None:
+                title_font_px = max(8, round(self._coerce_float(
+                    layout.get('label_title_font_size_pt'), 6.0, minimum=4.0, maximum=48.0
+                ) * render_dpi / 72.0))
+            else:
+                title_font_size_mm = self._coerce_dimension(layout.get('label_title_font_size'), 10, minimum=6, maximum=48) * 0.9
+                title_font_px = max(12, round(title_font_size_mm * px_per_mm))
+            if layout.get('label_barcode_font_size_pt') is not None:
+                barcode_font_px = max(8, round(self._coerce_float(
+                    layout.get('label_barcode_font_size_pt'), 8.0, minimum=4.0, maximum=36.0
+                ) * render_dpi / 72.0))
+            else:
+                barcode_font_size_mm = self._coerce_dimension(layout.get('label_barcode_font_size'), 10, minimum=6, maximum=36) * 0.92
+                barcode_font_px = max(10, round(barcode_font_size_mm * px_per_mm))
+            block_gap_px = max(0, round(self._coerce_float(
+                layout.get('label_block_gap_mm'), 1.4, minimum=0.0, maximum=10.0
+            ) * px_per_mm))
+            text_gap_px = max(0, round(self._coerce_float(
+                layout.get('label_text_gap_mm'), 0.45, minimum=0.0, maximum=10.0
+            ) * px_per_mm))
             def _upc_a_checksum_matches(value):
                 if not (value.isdigit() and len(value) == 12):
                     return False
@@ -1016,9 +1064,15 @@ class PrinterManager:
                 barcode_img = _crop_to_ink(barcode_img)
                 if barcode_img.width <= 0 or barcode_img.height <= 0:
                     return Image.new('RGB', (content_width, max(20, round(6 * px_per_mm))), 'white')
-                scale = content_width / float(barcode_img.width)
-                scaled_width = max(1, round(barcode_img.width * scale))
-                scaled_height = max(1, round(barcode_img.height * scale))
+                scaled_width = content_width
+                if layout.get('label_barcode_height_mm') is not None:
+                    scaled_height = max(1, round(self._coerce_float(
+                        layout.get('label_barcode_height_mm'), 10.0,
+                        minimum=4.0, maximum=60.0
+                    ) * px_per_mm))
+                else:
+                    scale = content_width / float(barcode_img.width)
+                    scaled_height = max(1, round(barcode_img.height * scale))
                 return barcode_img.resize((scaled_width, scaled_height), Image.LANCZOS).convert('RGB')
 
             block_entries = []
@@ -1032,32 +1086,48 @@ class PrinterManager:
                     'gap_before': max(0, int(gap_before or 0))
                 })
 
+            title_block = None
             if title_text:
                 title_block = _render_text_block(
                     title_text,
                     title_font_px,
                     self._coerce_dimension(layout.get('label_title_lines'), 2, minimum=1, maximum=4)
                 )
-                _add_block(title_block, protected=True)
-
+            barcode_block = None
+            barcode_text_block = None
             if show_barcode:
                 barcode_block = _render_barcode_only()
-                has_barcode_block = barcode_block is not None
+                if show_barcode_text:
+                    barcode_text_block = _render_text_block(barcode_value, barcode_font_px, 1, break_words=True)
+            elif show_barcode_text:
+                barcode_text_block = _render_text_block(barcode_value, barcode_font_px, 1, break_words=True)
+
+            barcode_first = self._coerce_bool(layout.get('label_barcode_first'), False)
+            protect_barcode = self._coerce_bool(layout.get('label_barcode_protected'), False)
+            if barcode_first:
+                _add_block(barcode_block, protected=protect_barcode)
                 _add_block(
-                    barcode_block,
+                    barcode_text_block,
+                    protected=protect_barcode,
+                    gap_before=text_gap_px if barcode_block is not None else 0
+                )
+                _add_block(
+                    title_block,
                     protected=False,
                     gap_before=block_gap_px if block_entries else 0
                 )
-                if show_barcode_text:
-                    barcode_text_block = _render_text_block(barcode_value, barcode_font_px, 1, break_words=True)
-                    _add_block(
-                        barcode_text_block,
-                        protected=True,
-                        gap_before=text_gap_px if has_barcode_block else (block_gap_px if block_entries else 0)
-                    )
-            elif show_barcode_text:
-                barcode_text_only = _render_text_block(barcode_value, barcode_font_px, 1, break_words=True)
-                _add_block(barcode_text_only, protected=True, gap_before=block_gap_px if block_entries else 0)
+            else:
+                _add_block(title_block, protected=True)
+                _add_block(
+                    barcode_block,
+                    protected=protect_barcode,
+                    gap_before=block_gap_px if block_entries else 0
+                )
+                _add_block(
+                    barcode_text_block,
+                    protected=True,
+                    gap_before=text_gap_px if barcode_block is not None else (block_gap_px if block_entries else 0)
+                )
 
             canvas = Image.new('RGB', (label_width_px, label_height_px), 'white')
             if not block_entries:
@@ -1067,9 +1137,9 @@ class PrinterManager:
                 return sum(entry['image'].height + entry.get('gap_before', 0) for entry in entries)
 
             total_height = _entries_height(block_entries)
-            if total_height > label_height_px:
+            if total_height > content_height:
                 gap_total = sum(entry.get('gap_before', 0) for entry in block_entries)
-                available_for_blocks = max(len(block_entries), label_height_px - gap_total)
+                available_for_blocks = max(len(block_entries), content_height - gap_total)
                 fitted_entries = []
                 protected_height = sum(
                     entry['image'].height for entry in block_entries
@@ -1107,17 +1177,18 @@ class PrinterManager:
                 block_entries = fitted_entries
                 total_height = _entries_height(block_entries)
 
-            start_y = max(0, (label_height_px - total_height) // 2)
+            start_y = padding_y_px + max(0, (content_height - total_height) // 2)
             cursor_y = start_y
+            content_bottom = min(label_height_px, padding_y_px + content_height)
             for entry in block_entries:
                 cursor_y += entry.get('gap_before', 0)
                 paste_block = entry['image']
                 if paste_block.width > content_width:
                     scale = content_width / float(paste_block.width)
                     paste_block = paste_block.resize((content_width, max(1, round(paste_block.height * scale))), Image.LANCZOS)
-                if cursor_y >= label_height_px:
+                if cursor_y >= content_bottom:
                     break
-                available_height = label_height_px - cursor_y
+                available_height = content_bottom - cursor_y
                 if paste_block.height > available_height:
                     paste_block = paste_block.crop((0, 0, paste_block.width, available_height))
                 x = max(0, (label_width_px - paste_block.width) // 2)

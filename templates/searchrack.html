@@ -123,6 +123,40 @@
     .location-card-title{font-size:1.1rem;font-weight:600;color:#333;margin-bottom:8px}
     .location-card-count{font-size:0.9rem;color:#666}
     .location-card-quantity{font-size:1.2rem;font-weight:700;color:#0066cc;margin-top:4px}
+    .warehouse-result-summary{
+        display:none;
+        align-items:stretch;
+        gap:8px;
+        width:100%;
+        margin-top:8px;
+    }
+    .warehouse-result-stat{
+        flex:1 1 0;
+        min-width:0;
+        padding:10px 12px;
+        border:1px solid #dbe4ee;
+        border-radius:9px;
+        background:#fff;
+        text-align:center;
+        box-shadow:0 1px 3px rgba(15,23,42,.06);
+    }
+    .warehouse-result-stat strong{
+        display:block;
+        color:#0f766e;
+        font-size:1.3rem;
+        line-height:1.1;
+    }
+    .warehouse-result-stat span{
+        display:block;
+        margin-top:3px;
+        color:#64748b;
+        font-size:.75rem;
+        font-weight:700;
+        line-height:1.15;
+    }
+    html.ss-theme-night .warehouse-result-stat{background:#111827;border-color:#334155;box-shadow:none}
+    html.ss-theme-night .warehouse-result-stat strong{color:#5eead4}
+    html.ss-theme-night .warehouse-result-stat span{color:#94a3b8}
     .breadcrumb-separator{margin:0 8px;color:#999}
     .shelf-typeahead{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
     .shelf-typeahead input{width:100%;box-sizing:border-box;font-size:1rem}
@@ -333,9 +367,10 @@
         #location-browser { display: none !important; }
         #show-location-browser-btn { display: none !important; }
 
-        /* Showing line - simplified: just db name and page on mobile */
+        /* Keep shelf scan totals prominent without crowding the results table. */
         .results-count,
         .qty-count { display: none !important; }
+        .warehouse-result-summary.is-visible { display:flex; }
         .showing-line {
             font-size: 0.85rem !important;
         }
@@ -493,6 +528,16 @@
     <div class="showing-line" style="margin-top:10px; font-size:0.95rem; color:#444; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
         <span>Showing: <span id="active-dbs">Warehouse</span> <span id="page-indicator" style="color:#00b894; font-weight:600;"></span></span>
         <button id="show-location-browser-btn" class="btn" style="padding:4px 10px; font-size:0.85rem; background:#f0f0f0; border:1px solid #ddd; display:none;">📍 Browse Locations</button>
+    </div>
+    <div id="warehouse-result-summary" class="warehouse-result-summary" role="status" aria-live="polite">
+        <div class="warehouse-result-stat">
+            <strong id="different-item-count">0</strong>
+            <span>Different items</span>
+        </div>
+        <div class="warehouse-result-stat">
+            <strong id="total-quantity-count">0</strong>
+            <span>Total quantity</span>
+        </div>
     </div>
 
     <!-- Hidden pagination placeholder for JS compatibility -->
@@ -1081,6 +1126,17 @@ function visibleResultQuantity(result) {
 function updateShowingSummary(filteredResults) {
     const results = Array.isArray(filteredResults) ? filteredResults : [];
     const activeLabel = getActiveDBs().map(db => DB_LABELS[db] || db).join(', ') || 'None';
+    const warehouseResults = results.filter(
+        result => String(result && result.source_db || '') === 'searchRack'
+    );
+    const distinctWarehouseItems = new Set(warehouseResults.map((result, index) => {
+        const barcode = String(result && result.barcode || '').trim().toLowerCase();
+        if (barcode) return `barcode:${barcode}`;
+        const itemId = String(result && result.item_id || '').trim().toLowerCase();
+        if (itemId) return `item:${itemId}`;
+        const rowId = String(result && result.id || '').trim();
+        return rowId ? `row:${rowId}` : `fallback:${index}`;
+    })).size;
     const totalQuantity = results.reduce(
         (sum, result) => sum + visibleResultQuantity(result),
         0
@@ -1089,6 +1145,17 @@ function updateShowingSummary(filteredResults) {
         `${esc(activeLabel)}`
         + `<span class="results-count"> — ${results.length.toLocaleString()} results</span>`
         + `<span class="qty-count"> — ${totalQuantity.toLocaleString()} total quantity</span>`;
+
+    const warehouseSummary = document.getElementById('warehouse-result-summary');
+    // CSS decides when the compact cards are shown; keeping the state independent
+    // of viewport width also makes rotation and desktop/mobile resizing reliable.
+    const showWarehouseSummary = warehouseResults.length > 0;
+    warehouseSummary.classList.toggle('is-visible', showWarehouseSummary);
+    document.getElementById('different-item-count').textContent = distinctWarehouseItems.toLocaleString();
+    document.getElementById('total-quantity-count').textContent = warehouseResults.reduce(
+        (sum, result) => sum + visibleResultQuantity(result),
+        0
+    ).toLocaleString();
 }
 
 function setWarehouseAgeFilter(value) {

@@ -487,10 +487,15 @@
   loadLockState();
 
     let validShelves = [];
+    let validShelvesLoaded = false;
+    let validShelvesPromise = null;
+    let positionSubmissionInFlight = false;
 
     // Fetch valid shelves from server
     function fetchValidShelves() {
-        fetch('/api/valid_shelves')
+        if (validShelvesPromise) return validShelvesPromise;
+
+        validShelvesPromise = fetch('/api/valid_shelves')
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -499,7 +504,12 @@
                     renderLocationSuggestions(document.getElementById('qrTextInput').value);
                 }
             })
-            .catch(err => console.error('Error loading valid shelves:', err));
+            .catch(err => console.error('Error loading valid shelves:', err))
+            .finally(() => {
+                validShelvesLoaded = true;
+            });
+
+        return validShelvesPromise;
     }
     
     // Load valid shelves on startup
@@ -603,8 +613,19 @@
             if (flashMsg) flashMsg.style.display = 'none';
 
             // Set delay for validation
-            debounceTimer = setTimeout(function() {
+            debounceTimer = setTimeout(async function() {
                 if (!code) return;
+
+                // A fast scan can arrive before the shelf list finishes loading.
+                // Wait for that initial lookup so valid custom shelf codes are not
+                // intermittently rejected by the fallback-only validation below.
+                if (!validShelvesLoaded) {
+                    await fetchValidShelves();
+                }
+
+                // Ignore stale validation if the operator scanned/typed another
+                // value while the shelf lookup was still in flight.
+                if (inputEl.value.trim() !== code) return;
 
                 let isValid = false;
                 if (validShelves.length > 0) {
@@ -613,6 +634,8 @@
                 if (!isValid && code.match(/^(gr[1-5]|or[1-3])s[2-6]$/i)) isValid = true;
 
                 if (isValid) {
+                    if (positionSubmissionInFlight) return;
+                    positionSubmissionInFlight = true;
                     renderLocationSuggestions('');
                     const posCode = code;
                     document.getElementById('scanned_result').value = posCode;

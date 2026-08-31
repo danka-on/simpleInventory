@@ -2446,7 +2446,13 @@ function readyToShipWarehouseMatchUrl(order) {
 }
 
 function readyToShipLocationIsLocked(order) {
-    return !!(order && (order.location_locked || String(order.stored_location || '').trim()));
+    if (!order) return false;
+    return !!(
+        order.location_locked
+        || String(order.stored_location || '').trim()
+        || String(order.finder_searchrack_id || '').trim()
+        || String(order.finder_matched_location || '').trim()
+    );
 }
 
 function readyToShipOrderIsHandled(order) {
@@ -4419,7 +4425,14 @@ function showReadyToShipLocationMenu(orderId, anchor) {
         }
 
         if (role === 'clear') {
-            if (!window.confirm('Clear this locked location?')) return;
+            const currentLocation = String(
+                order.stored_location
+                || order.finder_matched_location
+                || order.location
+                || ''
+            ).trim();
+            const locationLabel = currentLocation ? ` "${currentLocation}"` : '';
+            if (!window.confirm(`Clear location${locationLabel} from this item?`)) return;
             btn.disabled = true;
             try {
                 const response = await fetch(`/api/ready-to-ship/clear-location/${encodeURIComponent(orderId)}`, {

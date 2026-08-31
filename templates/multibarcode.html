@@ -1096,6 +1096,8 @@
         let codeReader = null;
         let selectedDeviceId = null;
         let barcodeScanQueue = Promise.resolve();
+        let barcodeSubmissionInFlight = false;
+        let scannerFocusPausedUntil = 0;
         const screeningCache = new Map();
 
         function escapeHtml(value) {
@@ -2075,6 +2077,32 @@
             return barcodeScanQueue;
         }
 
+        function pendingBarcodeInputs() {
+            return [barcodeInput, scannerInput].filter(input => input && String(input.value || '').trim());
+        }
+
+        function updateDoneButtonState() {
+            const hasQueuedItems = barcodeItems.length > 0;
+            const hasPendingInput = pendingBarcodeInputs().length > 0;
+            doneButton.disabled = barcodeSubmissionInFlight || (!hasQueuedItems && !hasPendingInput);
+        }
+
+        function queueBarcodeFromInput(input) {
+            if (!input) return barcodeScanQueue;
+            const code = String(input.value || '').trim();
+            if (!code) return barcodeScanQueue;
+            input.value = '';
+            updateDoneButtonState();
+            return queueBarcodeScan(code);
+        }
+
+        function handleBarcodeEnter(event) {
+            if (event.key !== 'Enter' && event.keyCode !== 13) return;
+            event.preventDefault();
+            event.stopPropagation();
+            queueBarcodeFromInput(event.currentTarget);
+        }
+
         if (window.NoBarcodeLabelFlow) {
             window.NoBarcodeLabelFlow.init({
                 focusTarget: barcodeInput,
@@ -2226,7 +2254,6 @@
                         <p>Scan barcodes to add them to the list</p>
                     </div>
                 `;
-                doneButton.disabled = true;
             } else {
                 const manualTitles = loadManualTitleOverrides();
                 barcodeListEl.innerHTML = barcodeItems.map((item, index) => {
@@ -2292,7 +2319,6 @@
                         </div>
                     </div>`;
                 }).reverse().join('');
-                doneButton.disabled = false;
             }
             
             // Calculate total items including quantities
@@ -2300,35 +2326,31 @@
                 ? barcodeEntryState.totalCount(barcodeItems)
                 : barcodeItems.reduce((sum, item) => sum + item.quantity, 0);
             countBadge.textContent = totalItems === 1 ? '1 item' : `${totalItems} items`;
+            updateDoneButtonState();
         }
         
-        // Manual input handler
-        barcodeInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const code = this.value.trim();
-                if (code) {
-                    queueBarcodeScan(code);
-                }
-            }
-        });
+        // Use keydown instead of keypress. Some hardware scanners and mobile
+        // browsers emit Enter on keydown/keyup only, which previously left the
+        // scanned value visible without ever adding it to the queue.
+        barcodeInput.addEventListener('keydown', handleBarcodeEnter);
+        barcodeInput.addEventListener('input', updateDoneButtonState);
         
         // External scanner input handler
-        scannerInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' || e.keyCode === 13) {
-                e.preventDefault();
-                const code = this.value.trim();
-                if (code) {
-                    queueBarcodeScan(code);
-                    this.value = '';
-                }
-            }
-        });
+        scannerInput.addEventListener('keydown', handleBarcodeEnter);
+        scannerInput.addEventListener('input', updateDoneButtonState);
         
         // Keep focus on scanner input for external scanners (only on desktop/tablet OR handheld mode)
         if (shouldPreferScannerInput()) {
+            // Do not steal focus while a tap/click is still becoming a click.
+            // Safari can otherwise cancel a slow tap on Done when this 100 ms
+            // refocus loop moves focus to the hidden scanner field mid-gesture.
+            document.addEventListener('pointerdown', () => {
+                scannerFocusPausedUntil = Date.now() + 900;
+            }, true);
             setInterval(() => {
-                if (missingTitleModalOpen || (scannerInput && scannerInput.disabled)) {
+                if (barcodeSubmissionInFlight || missingTitleModalOpen ||
+                    Date.now() < scannerFocusPausedUntil ||
+                    (scannerInput && scannerInput.disabled)) {
                     return;
                 }
                 if (document.activeElement !== barcodeInput && document.activeElement !== scannerInput) {
@@ -2389,19 +2411,27 @@
         }
 
         // Submit barcodes function for the Done button
-        let barcodeSubmissionInFlight = false;
-
         async function submitBarcodes() {
             if (barcodeSubmissionInFlight) return;
-            if (barcodeItems.length === 0) return;
+
+            // Done is also a recovery path when a scanner populated a field but
+            // its Enter terminator was not delivered by the browser.
+            pendingBarcodeInputs().forEach(queueBarcodeFromInput);
+
             barcodeSubmissionInFlight = true;
-            doneButton.disabled = true;
+            updateDoneButtonState();
 
             try {
                 await barcodeScanQueue;
+                if (barcodeItems.length === 0) {
+                    barcodeSubmissionInFlight = false;
+                    updateDoneButtonState();
+                    barcodeInput.focus();
+                    return;
+                }
                 if (missingTitleModalOpen) {
                     barcodeSubmissionInFlight = false;
-                    doneButton.disabled = false;
+                    updateDoneButtonState();
                     focusMissingTitleEntry(true);
                     return;
                 }
@@ -2420,7 +2450,7 @@
                 postBarcodeSubmission(barcodesString);
             } catch (err) {
                 barcodeSubmissionInFlight = false;
-                doneButton.disabled = false;
+                updateDoneButtonState();
                 console.error('Unable to finish barcode submission:', err);
                 alert('The barcode list is still processing. Please try Done again.');
             }
