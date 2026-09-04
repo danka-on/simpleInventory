@@ -53168,12 +53168,23 @@ def _fba_amazon_client(*, legacy=False):
 def _fba_amazon_payload(response):
     errors = getattr(response, 'errors', None)
     if errors:
-        first = errors[0] if isinstance(errors, list) and errors else errors
-        if isinstance(first, dict):
-            message = first.get('message') or first.get('code') or str(first)
-        else:
-            message = str(first)
-        raise FbaInboundValidationError('Amazon rejected the request: ' + _fba_trim(message, 700))
+        problems = errors if isinstance(errors, list) else [errors]
+        fatal = next((
+            problem for problem in problems
+            if not (
+                isinstance(problem, dict)
+                and (
+                    _fba_trim(problem.get('severity'), 20).upper() == 'WARNING'
+                    or _fba_trim(problem.get('message'), 700).upper().startswith('WARNING:')
+                )
+            )
+        ), None)
+        if fatal is not None:
+            if isinstance(fatal, dict):
+                message = fatal.get('message') or fatal.get('code') or str(fatal)
+            else:
+                message = str(fatal)
+            raise FbaInboundValidationError('Amazon rejected the request: ' + _fba_trim(message, 700))
     payload = getattr(response, 'payload', None)
     if payload is None:
         return {}
@@ -53283,6 +53294,23 @@ def _fba_amazon_option_summary(option, kind):
     return result
 
 
+def _fba_transport_option_can_purchase(option):
+    option = option if isinstance(option, dict) else {}
+    if _fba_trim(option.get('shippingSolution'), 80).upper() != 'AMAZON_PARTNERED_CARRIER':
+        return False
+    if _fba_trim(option.get('shippingMode'), 80).upper() != 'GROUND_SMALL_PARCEL':
+        return False
+    if option.get('preconditions'):
+        return False
+    quote = option.get('quote') if isinstance(option.get('quote'), dict) else {}
+    cost = quote.get('cost') if isinstance(quote.get('cost'), dict) else {}
+    try:
+        amount = Decimal(str(cost.get('amount')))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return amount.is_finite() and amount >= 0
+
+
 def _fba_amazon_transport_summary(option):
     option = option if isinstance(option, dict) else {}
     quote = option.get('quote') if isinstance(option.get('quote'), dict) else {}
@@ -53298,6 +53326,7 @@ def _fba_amazon_transport_summary(option):
         },
         'quote': quote,
         'preconditions': option.get('preconditions') if isinstance(option.get('preconditions'), list) else [],
+        'can_purchase': _fba_transport_option_can_purchase(option),
     }
 
 
@@ -53850,6 +53879,7 @@ def api_fba_prep_amazon_action(session_id, action):
                 available = {
                     (row.get('shipmentId'), row.get('transportationOptionId'))
                     for row in state.get('transportation_options') or []
+                    if row.get('can_purchase') or _fba_transport_option_can_purchase(row)
                 }
                 chosen = []
                 seen_shipments = set()

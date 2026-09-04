@@ -1,7 +1,10 @@
 import datetime
 import unittest
+from types import SimpleNamespace
 
 from app import (
+    _fba_amazon_payload,
+    _fba_amazon_transport_summary,
     _fba_inbound_activation_message,
     _fba_inbound_unavailable_skus,
     _fba_missing_prep_mskus,
@@ -32,6 +35,38 @@ ADDRESS = {
 
 
 class FbaInboundHelpersTest(unittest.TestCase):
+    def test_amazon_warning_does_not_reject_small_parcel_transport_request(self):
+        response = SimpleNamespace(
+            payload={'operationId': 'operation-1'},
+            errors=[{'severity': 'WARNING', 'message': 'WARNING: Pallet info was not provided.'}],
+        )
+        self.assertEqual(_fba_amazon_payload(response), {'operationId': 'operation-1'})
+
+    def test_amazon_error_still_rejects_request(self):
+        response = SimpleNamespace(
+            payload={}, errors=[{'severity': 'ERROR', 'message': 'ERROR: Invalid shipment'}]
+        )
+        with self.assertRaisesRegex(FbaInboundValidationError, 'Invalid shipment'):
+            _fba_amazon_payload(response)
+
+    def test_transport_summary_accepts_parcel_and_rejects_freight(self):
+        common = {
+            'shipmentId': 'shipment-1',
+            'shippingSolution': 'AMAZON_PARTNERED_CARRIER',
+            'quote': {'cost': {'amount': 15.52, 'code': 'USD'}},
+            'preconditions': [],
+        }
+        parcel = _fba_amazon_transport_summary({
+            **common, 'transportationOptionId': 'option-parcel',
+            'shippingMode': 'GROUND_SMALL_PARCEL',
+        })
+        freight = _fba_amazon_transport_summary({
+            **common, 'transportationOptionId': 'option-ltl',
+            'shippingMode': 'FREIGHT_LTL',
+        })
+        self.assertTrue(parcel['can_purchase'])
+        self.assertFalse(freight['can_purchase'])
+
     def test_missing_or_unknown_prep_details_are_classified_before_plan_creation(self):
         prep_by_msku = {
             'already-set': {'msku': 'ALREADY-SET', 'prepCategory': 'NONE'},
