@@ -8,6 +8,7 @@ can be tested without credentials or network access.
 from __future__ import annotations
 
 import datetime as _datetime
+import copy
 import math
 import re as _re
 from collections import defaultdict
@@ -427,6 +428,191 @@ def validate_box_totals(boxes, plan_items):
     return {"expected_units": sum(expected.values()), "packed_units": sum(packed.values())}
 
 
+def reduce_missing_plan_quantity(items, msku, quantity, *, packed_quantity=0, barcode_key=""):
+    """Remove only units that have not been physically scanned into a carton.
+
+    The inbound plan groups quantities by MSKU, while the prep page can retain
+    more than one barcode row for that MSKU.  Prefer the row selected by the
+    operator, then consume any remaining reduction from sibling rows.
+    """
+    requested_msku = _text(msku, 255)
+    remove_quantity = _positive_int(quantity, "Missing quantity")
+    packed_quantity = max(0, int(packed_quantity or 0))
+    preferred_barcode_key = _text(barcode_key, 160).casefold()
+    rows = copy.deepcopy(items if isinstance(items, list) else [])
+
+    matching_indexes = [
+        index for index, row in enumerate(rows)
+        if isinstance(row, dict)
+        and _text(row.get("seller_sku") or row.get("msku"), 255).casefold()
+            == requested_msku.casefold()
+    ]
+    if not requested_msku or not matching_indexes:
+        raise FbaInboundValidationError("That Seller SKU is not in the saved Amazon plan")
+
+    planned_quantity = sum(int(rows[index].get("quantity") or 0) for index in matching_indexes)
+    removable_quantity = max(0, planned_quantity - packed_quantity)
+    if remove_quantity > removable_quantity:
+        raise FbaInboundValidationError(
+            f"Only {removable_quantity} unpacked unit(s) of {requested_msku} can be removed; "
+            f"{packed_quantity} unit(s) already have saved carton scans"
+        )
+    if remove_quantity >= planned_quantity:
+        if packed_quantity:
+            raise FbaInboundValidationError(
+                f"{requested_msku} cannot be removed completely because {packed_quantity} unit(s) are packed"
+            )
+
+    def row_priority(index):
+        row_key = _text(rows[index].get("barcode_key") or rows[index].get("barcode"), 160).casefold()
+        return (0 if preferred_barcode_key and row_key == preferred_barcode_key else 1, index)
+
+    remaining = remove_quantity
+    changed_rows = []
+    for index in sorted(matching_indexes, key=row_priority):
+        if remaining <= 0:
+            break
+        row = rows[index]
+        old_quantity = max(0, int(row.get("quantity") or 0))
+        taken = min(old_quantity, remaining)
+        new_quantity = old_quantity - taken
+        remaining -= taken
+        row["quantity"] = new_quantity
+        if "planned_fba_quantity" in row:
+            row["planned_fba_quantity"] = max(
+                0, min(new_quantity, int(row.get("planned_fba_quantity") or 0) - taken)
+            )
+        changed_rows.append({
+            "barcode": _text(row.get("barcode_display") or row.get("barcode"), 160),
+            "old_quantity": old_quantity,
+            "new_quantity": new_quantity,
+        })
+
+    rows = [row for row in rows if not (
+        isinstance(row, dict)
+        and _text(row.get("seller_sku") or row.get("msku"), 255).casefold()
+            == requested_msku.casefold()
+        and int(row.get("quantity") or 0) <= 0
+    )]
+    return rows, {
+        "msku": requested_msku,
+        "removed_quantity": remove_quantity,
+        "old_quantity": planned_quantity,
+        "new_quantity": planned_quantity - remove_quantity,
+        "packed_quantity": packed_quantity,
+        "changed_rows": changed_rows,
+    }
+
+
+def remap_recovery_boxes(saved_boxes, packing_groups):
+    """Assign preserved cartons to replacement-plan packing groups.
+
+    A carton is compatible only when all of its saved physical scans belong to
+    one replacement group. Empty cartons are retained and assigned to the
+    first current group; they contain no physical work that can be invalidated.
+    """
+    group_by_msku = {}
+    group_ids = []
+    for group in packing_groups if isinstance(packing_groups, list) else []:
+        if not isinstance(group, dict):
+            continue
+        group_id = _text(group.get("packing_group_id") or group.get("packingGroupId"), 38)
+        if not group_id:
+            continue
+        group_ids.append(group_id)
+        for item in group.get("items") if isinstance(group.get("items"), list) else []:
+            if not isinstance(item, dict):
+                continue
+            item_msku = _text(item.get("msku") or item.get("seller_sku"), 255).casefold()
+            if item_msku:
+                group_by_msku[item_msku] = group_id
+
+    restored = copy.deepcopy(saved_boxes if isinstance(saved_boxes, list) else [])
+    used_ids = {
+        _text(box.get("local_id"), 40).upper()
+        for box in restored if isinstance(box, dict) and _text(box.get("local_id"), 40)
+    }
+
+    def next_box_id():
+        number = 1
+        while f"BOX-{number:02d}" in used_ids:
+            number += 1
+        value = f"BOX-{number:02d}"
+        used_ids.add(value)
+        return value
+
+    conflicts = []
+    additional_boxes = []
+    for box in list(restored):
+        if not isinstance(box, dict):
+            continue
+        carton_groups = defaultdict(list)
+        unknown_mskus = []
+        for item in box.get("contents") if isinstance(box.get("contents"), list) else []:
+            if not isinstance(item, dict) or int(item.get("quantity") or 0) <= 0:
+                continue
+            item_msku = _text(item.get("msku") or item.get("seller_sku"), 255)
+            group_id = group_by_msku.get(item_msku.casefold())
+            if group_id:
+                carton_groups[group_id].append(copy.deepcopy(item))
+            else:
+                unknown_mskus.append(item_msku or "unknown item")
+        if unknown_mskus:
+            conflicts.append({
+                "box_id": _text(box.get("local_id") or "Box", 40),
+                "packing_group_ids": sorted(carton_groups),
+                "unknown_mskus": unknown_mskus,
+                "moves": [],
+            })
+            continue
+        if len(carton_groups) > 1:
+            source_box_id = _text(box.get("local_id") or "Box", 40).upper()
+            partitions = sorted(
+                carton_groups.items(),
+                key=lambda row: (-sum(int(item.get("quantity") or 0) for item in row[1]), row[0]),
+            )
+            keep_group, keep_contents = partitions[0]
+            box["packing_group_id"] = keep_group
+            box["contents"] = keep_contents
+            box["weight_lb"] = None
+            moves = []
+            split_box_ids = [source_box_id]
+            for group_id, contents in partitions[1:]:
+                new_box_id = next_box_id()
+                additional_boxes.append({
+                    "local_id": new_box_id,
+                    "packing_group_id": group_id,
+                    "length_in": None,
+                    "width_in": None,
+                    "height_in": None,
+                    "weight_lb": None,
+                    "single_oversize_exception": False,
+                    "contains_jewelry_or_watches": False,
+                    "contents": contents,
+                })
+                split_box_ids.append(new_box_id)
+                for content in contents:
+                    moves.append({
+                        "msku": _text(content.get("msku") or content.get("seller_sku"), 255),
+                        "from_box_id": source_box_id,
+                        "to_box_id": new_box_id,
+                        "packing_group_id": group_id,
+                    })
+            conflicts.append({
+                "box_id": source_box_id,
+                "packing_group_ids": sorted(carton_groups),
+                "unknown_mskus": [],
+                "moves": moves,
+                "split_box_ids": split_box_ids,
+            })
+        elif carton_groups:
+            box["packing_group_id"] = next(iter(carton_groups))
+        elif group_ids:
+            box["packing_group_id"] = group_ids[0]
+    restored.extend(additional_boxes)
+    return restored, conflicts
+
+
 def build_set_packing_request(boxes, plan_items, *, marketplace_id=US_MARKETPLACE_ID):
     boxes = normalize_box_drafts(boxes, plan_items)
     if not boxes:
@@ -491,7 +677,17 @@ def build_transportation_request(placement_option_id, shipment_ids, ready_date, 
     shipment_ids = [_text(value, 38) for value in shipment_ids or [] if _text(value, 38)]
     if not shipment_ids:
         raise FbaInboundValidationError("Amazon did not return any shipments for this placement")
-    start = parsed_date.isoformat() + "T00:00:00Z"
+    now_utc = _datetime.datetime.now(_datetime.timezone.utc)
+    if parsed_date == _datetime.date.today():
+        # A date-only UI value previously became midnight UTC, which Amazon
+        # rejects as soon as that day has started. Keep today's selection but
+        # send a timestamp safely ahead of the current instant.
+        start_at = now_utc + _datetime.timedelta(minutes=5)
+    else:
+        start_at = _datetime.datetime.combine(
+            parsed_date, _datetime.time.min, tzinfo=_datetime.timezone.utc
+        )
+    start = start_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     contact_information = {
         "name": contact["name"],
         "phoneNumber": contact["phoneNumber"],

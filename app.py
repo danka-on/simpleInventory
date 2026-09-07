@@ -7,7 +7,7 @@ from flask_caching import Cache
 from flask_compress import Compress
 from werkzeug.exceptions import RequestEntityTooLarge
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64, gzip, hashlib, random, re, uuid
+import io, time, subprocess, os, requests, json, threading, sqlite3, sys, datetime, base64, gzip, hashlib, random, re, uuid, math
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import pytz
 import xml.etree.ElementTree as ET
@@ -24,6 +24,7 @@ from email import policy
 from email.header import decode_header
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
+from token_expiry import collect_token_statuses, expiring_token_reminders, format_token_statuses
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -39,6 +40,8 @@ from fba_inbound import (
     normalize_box_drafts,
     normalize_source_address,
     option_state,
+    reduce_missing_plan_quantity,
+    remap_recovery_boxes,
     summarize_money,
     validate_box_totals,
 )
@@ -20239,6 +20242,24 @@ def _api_credential_age_issue(label, path, *, warn_days=165, reset_days=180):
         }
     return None
 
+_TELEGRAM_TOKEN_STATUS_CACHE = {'checked_at': 0.0, 'statuses': []}
+_TELEGRAM_TOKEN_STATUS_CACHE_LOCK = threading.Lock()
+
+
+def _telegram_token_statuses(force=False):
+    """Cache provider expiry lookups so the alert worker does not poll them every pass."""
+    now = time.time()
+    with _TELEGRAM_TOKEN_STATUS_CACHE_LOCK:
+        cached_at = float(_TELEGRAM_TOKEN_STATUS_CACHE.get('checked_at') or 0)
+        cached = _TELEGRAM_TOKEN_STATUS_CACHE.get('statuses') or []
+        if cached and not force and now - cached_at < 21600:
+            return [dict(item) for item in cached]
+        statuses = collect_token_statuses(BASE_DIR)
+        _TELEGRAM_TOKEN_STATUS_CACHE['checked_at'] = now
+        _TELEGRAM_TOKEN_STATUS_CACHE['statuses'] = [dict(item) for item in statuses]
+        return statuses
+
+
 def _api_status_probe():
     """Uncached eBay/Amazon API status probe for text alerts and status UI."""
     status = {'ebay': 'ok', 'amazon': 'ok', 'details': {}}
@@ -20319,10 +20340,12 @@ def _api_status_probe():
             status['amazon'] = 'issue'
         status['details']['amazon'] = f'Amazon SP-API check failed: {e}'
 
-    # Token-file modification time is not credential issuance time. eBay access
-    # token refreshes rewrite tokens.json, and Amazon credentials live elsewhere,
-    # so file age produced misleading expiry reminders.
-    status['reminders'] = []
+    # Never infer token age from a file timestamp. Provider-reported dates and
+    # explicitly configured authorization dates are the only alert sources.
+    status['token_statuses'] = _telegram_token_statuses()
+    status['reminders'] = expiring_token_reminders(
+        status['token_statuses'], within_days=14
+    )
     return status
 
 def _telegram_alert_state_update(
@@ -20474,7 +20497,16 @@ def _collect_api_issue_alert(require_confirmation=False):
             'message': detail or f'{label} API status is {state}.'
         })
     for reminder in probe.get('reminders') or []:
+        if require_confirmation:
+            ready = _telegram_alert_state_update(
+                reminder.get('alert_key'),
+                reminder.get('signature'),
+                metadata=reminder,
+            )
+            if not ready:
+                continue
         issues.append({
+            'alert_key': reminder.get('alert_key'),
             'platform': reminder.get('label') or 'Token',
             'status': reminder.get('status') or 'reminder',
             'message': reminder.get('message') or ''
@@ -20684,9 +20716,6 @@ def _telegram_backup_status():
     elif not writable:
         health = 'failed'
         status = 'USB backup drive is read-only'
-    elif not daily_scheduled:
-        health = 'failed'
-        status = 'Daily backup schedule is missing'
     elif daily_log.get('result') == 'failed':
         health = 'failed'
         status = 'Latest daily backup attempt failed'
@@ -20696,9 +20725,6 @@ def _telegram_backup_status():
     elif daily['age_hours'] > 36:
         health = 'overdue'
         status = 'Daily backup is overdue'
-    elif not weekly_scheduled:
-        health = 'warning'
-        status = 'Weekly backup schedule is missing'
     elif weekly_log.get('result') == 'failed':
         health = 'failed'
         status = 'Latest weekly backup attempt failed'
@@ -20772,6 +20798,8 @@ def _telegram_api_status_text(probe=None):
         detail = str((probe.get('details') or {}).get(key) or '').strip()
         if detail and state != 'ok':
             lines.append(f'  {detail[:500]}')
+    token_statuses = probe.get('token_statuses') or _telegram_token_statuses()
+    lines.extend(['', format_token_statuses(token_statuses)])
     return '\n'.join(lines)
 
 
@@ -21124,6 +21152,8 @@ def api_telegram_send_test():
         data = request.get_json() or {}
         chat_ids = data.get('chat_ids', [])
         message = str(data.get('message') or 'Telegram test message from Sweet Shelves').strip()
+        token_text = format_token_statuses(_telegram_token_statuses(force=True))
+        message = f'{message}\n\n{token_text}'
         if not chat_ids:
             return jsonify({'success': False, 'error': 'No chat_ids provided'}), 400
         results = []
@@ -41026,10 +41056,22 @@ def additemtrue():
         
         labels_to_print = []
         reserved_note_suffixes = {}
-        # Settle any earlier removals before new receipts are added so a
-        # remove-then-add sequence with the same net quantity still ages correctly.
-        with sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0) as age_conn:
-            _reconcile_inventory_age_batches(age_conn)
+        # Preserve FIFO receiving dates when a removal is immediately followed
+        # by an add, but never wait through the normal 30-second SQLite timeout.
+        # If another worker owns the database, the post-save pass (or the next
+        # inventory maintenance run) can catch the ledger up.
+        try:
+            with db_connection('searchRack.db') as age_conn:
+                age_conn.execute('PRAGMA busy_timeout = 2000')
+                _reconcile_inventory_age_batches(age_conn)
+        except Exception as age_err:
+            print(f"Warning: deferred pre-add inventory age reconciliation: {age_err}")
+        finally:
+            try:
+                age_conn.execute('PRAGMA busy_timeout = 30000')
+            except Exception:
+                pass
+
         rack_conn_for_suffix = sqlite3.connect(str(BASE_DIR / 'searchRack.db'))
         rack_cur_for_suffix = rack_conn_for_suffix.cursor()
         for barcode_item in barcodes:
@@ -41058,11 +41100,33 @@ def additemtrue():
                 or title_overrides.get(base_barcode)
                 or None
             )
-            addToSearchRack(item_position_to_store, barcode_to_add, None, final_pictureposition, title_override, warehouse_note)
+            added = addToSearchRack(
+                item_position_to_store,
+                barcode_to_add,
+                None,
+                final_pictureposition,
+                title_override,
+                warehouse_note,
+            )
+            if added is False:
+                raise RuntimeError(f'Inventory database was busy while adding {barcode_to_add}')
             print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_to_add}, pictureposition={final_pictureposition}")
         rack_conn_for_suffix.close()
-        with sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0) as age_conn:
-            _reconcile_inventory_age_batches(age_conn)
+
+        # Inventory is already durable at this point. Age-ledger maintenance is
+        # secondary and must not turn a successful batch into a 500 response;
+        # that made the browser retry the entire list and could duplicate stock.
+        try:
+            with db_connection('searchRack.db') as age_conn:
+                age_conn.execute('PRAGMA busy_timeout = 2000')
+                _reconcile_inventory_age_batches(age_conn)
+        except Exception as age_err:
+            print(f"Warning: deferred inventory age reconciliation after add: {age_err}")
+        finally:
+            try:
+                age_conn.execute('PRAGMA busy_timeout = 30000')
+            except Exception:
+                pass
 
         # SearchRack writes should be visible immediately in /searchrack.
         _invalidate_searchrack_cache()
@@ -50402,6 +50466,8 @@ def _ensure_fba_prep_tables(cur):
     ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_batch ON fba_prep_items(batch_id, item_index, id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_barcode ON fba_prep_items(barcode, created_at DESC)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_seller_sku ON fba_prep_items(seller_sku, created_at DESC)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_fnsku ON fba_prep_items(fnsku, created_at DESC)')
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS fba_listing_reviews (
@@ -50450,6 +50516,25 @@ def _ensure_fba_prep_tables(cur):
     add_column_if_missing(pack_scan_columns, 'client_id', 'ALTER TABLE fba_pack_scans ADD COLUMN client_id TEXT')
     add_column_if_missing(pack_scan_columns, 'operator_name', 'ALTER TABLE fba_pack_scans ADD COLUMN operator_name TEXT')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_pack_scans_session ON fba_pack_scans(session_id, id)')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS fba_box_move_scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            move_token TEXT NOT NULL UNIQUE,
+            pack_scan_id INTEGER NOT NULL,
+            barcode TEXT NOT NULL,
+            msku TEXT NOT NULL,
+            from_box_id TEXT NOT NULL,
+            to_box_id TEXT NOT NULL,
+            client_id TEXT,
+            operator_name TEXT,
+            moved_at TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES fba_prep_sessions(id),
+            FOREIGN KEY(pack_scan_id) REFERENCES fba_pack_scans(id)
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_box_move_scans_session ON fba_box_move_scans(session_id, id)')
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS fba_count_scans (
@@ -50706,6 +50791,18 @@ def _fba_session_item_payload(raw_item):
         'fba_enablement_checked_at': _fba_trim(raw.get('fba_enablement_checked_at'), 40),
         'amazon_fnsku': _fba_trim(raw.get('amazon_fnsku') or raw.get('fnsku'), 80),
         'amazon_product_type': _fba_trim(raw.get('amazon_product_type'), 120),
+        'amazon_prep': _fba_normalize_prep_detail(
+            raw.get('amazon_prep'), msku=raw.get('seller_sku')
+        ) if isinstance(raw.get('amazon_prep'), dict) else {},
+        'amazon_package_measurements': {
+            'length_in': _listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('length_in'), 0.0),
+            'width_in': _listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('width_in'), 0.0),
+            'height_in': _listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('height_in'), 0.0),
+            'weight_lb': _listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('weight_lb'), 0.0),
+            'updated_at': _fba_trim((raw.get('amazon_package_measurements') or {}).get('updated_at'), 40),
+            'source': _fba_trim((raw.get('amazon_package_measurements') or {}).get('source'), 40),
+            'amazon_status': _fba_trim((raw.get('amazon_package_measurements') or {}).get('amazon_status'), 40),
+        } if isinstance(raw.get('amazon_package_measurements'), dict) else {},
         'batteries_required': _coerce_bool(raw.get('batteries_required')),
         'dg_not_applicable_confirmed': bool(raw.get('dg_not_applicable_confirmed')),
         'fbm_seller_sku': _fba_trim(raw.get('fbm_seller_sku'), 255),
@@ -51060,6 +51157,279 @@ def _fba_missing_prep_mskus(mskus, prep_by_msku):
     return missing
 
 
+def _fba_normalize_prep_detail(raw, *, msku=''):
+    detail = raw if isinstance(raw, dict) else {}
+    raw_prep_types = detail.get('prepTypes')
+    if not isinstance(raw_prep_types, list):
+        raw_prep_types = detail.get('prep_types')
+    prep_types = []
+    for value in raw_prep_types if isinstance(raw_prep_types, list) else []:
+        prep_type = _fba_trim(value, 80).upper()
+        if prep_type and prep_type not in prep_types:
+            prep_types.append(prep_type)
+    return {
+        'msku': _fba_trim(detail.get('msku') or msku, 255),
+        'prep_category': _fba_trim(
+            detail.get('prepCategory') or detail.get('prep_category'), 80
+        ).upper(),
+        'prep_types': prep_types[:30],
+        'prep_owner_constraint': _fba_trim(
+            detail.get('prepOwnerConstraint') or detail.get('prep_owner_constraint'), 40
+        ).upper(),
+        'label_owner_constraint': _fba_trim(
+            detail.get('labelOwnerConstraint') or detail.get('label_owner_constraint'), 40
+        ).upper(),
+        'all_owners_constraint': _fba_trim(
+            detail.get('allOwnersConstraint') or detail.get('all_owners_constraint'), 40
+        ).upper(),
+        'checked': bool(detail.get('checked', bool(detail))),
+        'checked_at': _fba_trim(
+            detail.get('checkedAt') or detail.get('checked_at'), 40
+        ),
+        'source': _fba_trim(detail.get('source') or 'amazon_sp_api', 40),
+        'error': _fba_trim(detail.get('error'), 500),
+    }
+
+
+def _fba_item_prep_details(msku, *, api=None, marketplace_id=''):
+    """Read one MSKU at a time because Amazon currently truncates multi-MSKU results."""
+    seller_sku = _fba_trim(msku, 255)
+    if not seller_sku:
+        return _fba_normalize_prep_detail({}, msku=seller_sku)
+    try:
+        if api is None or not marketplace_id:
+            api, marketplace_id = _fba_amazon_client()
+        payload = _fba_amazon_payload(api.list_prep_details(
+            marketplaceId=marketplace_id, mskus=[seller_sku]
+        ))
+        details = payload.get('mskuPrepDetails') if isinstance(payload.get('mskuPrepDetails'), list) else []
+        match = next((
+            row for row in details if isinstance(row, dict)
+            and _fba_trim(row.get('msku'), 255).casefold() == seller_sku.casefold()
+        ), None)
+        normalized = _fba_normalize_prep_detail(match or {}, msku=seller_sku)
+        normalized['checked'] = bool(match)
+        normalized['checked_at'] = _listagent_now_iso()
+        if not match:
+            normalized['error'] = 'Amazon has not assigned prep instructions yet'
+        return normalized
+    except Exception as exc:
+        logger.warning('Amazon prep lookup failed for %s: %s', seller_sku, exc)
+        normalized = _fba_normalize_prep_detail({}, msku=seller_sku)
+        normalized.update({
+            'checked': False,
+            'checked_at': _listagent_now_iso(),
+            'error': _fba_trim(_amazon_format_spapi_error(exc), 500),
+        })
+        return normalized
+
+
+def _fba_existing_prep_conflict(exc):
+    """Extract an immutable prep assignment from Amazon's setPrepDetails rejection."""
+    match = re.search(
+        r'prep category and types cannot be updated for msku\s+(.+?)\s+'
+        r'with existing prep category of\s+([A-Z0-9_]+)',
+        str(exc or ''),
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return {
+        'msku': _fba_trim(match.group(1), 255),
+        'prepCategory': _fba_trim(match.group(2), 80).upper(),
+    }
+
+
+def _fba_package_measurement_issues(state):
+    """Extract per-MSKU package dimension/weight failures from an inbound operation."""
+    workflow = state if isinstance(state, dict) else {}
+    operation = workflow.get('operation') if isinstance(workflow.get('operation'), dict) else {}
+    problems = operation.get('problems') if isinstance(operation.get('problems'), list) else []
+    by_msku = {}
+    for problem in problems:
+        if not isinstance(problem, dict):
+            continue
+        code = _fba_trim(problem.get('code'), 80).upper()
+        details = _fba_trim(problem.get('details'), 1000)
+        message = _fba_trim(problem.get('message'), 1000)
+        text = f'{details} {message}'.lower()
+        resource = re.search(r"resource\s+['\"]([^'\"]+)['\"]", details, re.IGNORECASE)
+        if not resource:
+            resource = re.search(r'\bmsku\s+([A-Z0-9._:-]+)', text, re.IGNORECASE)
+        msku = _fba_trim(resource.group(1) if resource else '', 255)
+        missing_dimensions = code == 'FBA_INB_0004' or (
+            'dimension' in text and 'manufacturer' in text
+        )
+        missing_weight = code == 'FBA_INB_0005' or (
+            'weight' in text and 'manufacturer' in text
+        )
+        if not msku or not (missing_dimensions or missing_weight):
+            continue
+        key = msku.casefold()
+        row = by_msku.setdefault(key, {
+            'msku': msku, 'missing_dimensions': False, 'missing_weight': False,
+        })
+        row['missing_dimensions'] = row['missing_dimensions'] or missing_dimensions
+        row['missing_weight'] = row['missing_weight'] or missing_weight
+    return list(by_msku.values())
+
+
+def _fba_positive_measurement(value, label, *, maximum=1000000):
+    try:
+        parsed = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError, OverflowError):
+        parsed = Decimal(0)
+    if not parsed.is_finite() or parsed <= 0 or parsed > Decimal(str(maximum)):
+        raise FbaInboundValidationError(f'Enter a valid {label} greater than zero')
+    return float(parsed)
+
+
+def _fba_patch_listing_package_measurements(msku, item, measurements, *, client=None):
+    """Save one sellable unit's original-package measurements to its Amazon listing."""
+    listings, seller_id, marketplace_id = client or _fba_listings_client()
+    seller_sku = _fba_trim(msku, 255)
+    product_type = _fba_trim((item or {}).get('amazon_product_type'), 120)
+    if not product_type:
+        response = listings.get_listings_item(
+            seller_id, seller_sku, marketplaceIds=[marketplace_id],
+            includedData=['summaries'],
+        )
+        payload = _fba_amazon_payload(response)
+        summaries = payload.get('summaries') if isinstance(payload.get('summaries'), list) else []
+        product_type = _fba_trim(next((
+            row.get('productType') or row.get('product_type')
+            for row in summaries if isinstance(row, dict)
+            and _fba_trim(row.get('productType') or row.get('product_type'), 120)
+        ), ''), 120)
+    if not product_type:
+        raise FbaInboundValidationError(f'Amazon did not return the product type for {seller_sku}')
+
+    length_in = _fba_positive_measurement(measurements.get('length_in'), 'package length')
+    width_in = _fba_positive_measurement(measurements.get('width_in'), 'package width')
+    height_in = _fba_positive_measurement(measurements.get('height_in'), 'package height')
+    weight_lb = _fba_positive_measurement(measurements.get('weight_lb'), 'package weight')
+    dimensions = [{
+        'length': {'value': length_in, 'unit': 'inches'},
+        'width': {'value': width_in, 'unit': 'inches'},
+        'height': {'value': height_in, 'unit': 'inches'},
+        'marketplace_id': marketplace_id,
+    }]
+    weight = [{
+        'value': weight_lb, 'unit': 'pounds', 'marketplace_id': marketplace_id,
+    }]
+    body = {
+        'productType': product_type,
+        'patches': [{
+            'op': 'add', 'path': '/attributes/item_package_dimensions',
+            'value': dimensions,
+        }, {
+            'op': 'add', 'path': '/attributes/item_package_weight',
+            'value': weight,
+        }],
+    }
+    response = listings.patch_listings_item(
+        seller_id, seller_sku, marketplaceIds=[marketplace_id],
+        issueLocale='en_US', body=body,
+    )
+    payload = _fba_amazon_payload(response)
+    status = _fba_trim(payload.get('status'), 40).upper()
+    issues = payload.get('issues') if isinstance(payload.get('issues'), list) else []
+    blocking = [
+        issue for issue in issues if isinstance(issue, dict)
+        and _fba_trim(issue.get('severity'), 20).upper() == 'ERROR'
+    ]
+    if blocking or status in ('INVALID', 'ERROR', 'REJECTED', 'FAILURE'):
+        detail = '; '.join(filter(None, (
+            _fba_listing_issue_message(issue) for issue in blocking[:4]
+        ))) or f'Amazon returned {status or "an invalid response"}'
+        raise FbaInboundValidationError(f'{seller_sku}: {detail}')
+    return {
+        'length_in': length_in, 'width_in': width_in, 'height_in': height_in,
+        'weight_lb': weight_lb, 'updated_at': _listagent_now_iso(),
+        'source': 'operator', 'amazon_status': status or 'ACCEPTED',
+    }
+
+
+def _fba_catalog_measurement_reference_from_payload(payload, marketplace_id=''):
+    """Normalize Amazon catalog item/package measurements for operator guidance."""
+    data = payload if isinstance(payload, dict) else {}
+    attributes = data.get('attributes') if isinstance(data.get('attributes'), dict) else {}
+    result = {'item': {}, 'package': {}}
+
+    def normalize_measurement(value):
+        value = value if isinstance(value, dict) else {}
+        try:
+            number = float(value.get('value'))
+        except (TypeError, ValueError, OverflowError):
+            return {}
+        if not math.isfinite(number) or number <= 0:
+            return {}
+        return {'value': number, 'unit': _fba_trim(value.get('unit'), 30).lower()}
+
+    def merge_dimensions(target, raw):
+        raw = raw if isinstance(raw, dict) else {}
+        for name in ('length', 'width', 'height', 'weight'):
+            normalized = normalize_measurement(raw.get(name))
+            if normalized and name not in target:
+                target[name] = normalized
+
+    dimensions = data.get('dimensions') if isinstance(data.get('dimensions'), list) else []
+    selected = next((
+        row for row in dimensions if isinstance(row, dict)
+        and (not marketplace_id or _fba_trim(row.get('marketplaceId'), 40) == marketplace_id)
+    ), next((row for row in dimensions if isinstance(row, dict)), {}))
+    merge_dimensions(result['item'], selected.get('item'))
+    merge_dimensions(result['package'], selected.get('package'))
+
+    for key in ('item_dimensions', 'item_width_height'):
+        rows = attributes.get(key) if isinstance(attributes.get(key), list) else []
+        if rows:
+            merge_dimensions(result['item'], rows[0])
+    item_weight = attributes.get('item_weight') if isinstance(attributes.get('item_weight'), list) else []
+    if item_weight and 'weight' not in result['item']:
+        normalized = normalize_measurement(item_weight[0])
+        if normalized:
+            result['item']['weight'] = normalized
+
+    package_dimensions = (
+        attributes.get('item_package_dimensions')
+        if isinstance(attributes.get('item_package_dimensions'), list) else []
+    )
+    if package_dimensions:
+        merge_dimensions(result['package'], package_dimensions[0])
+    package_weight = (
+        attributes.get('item_package_weight')
+        if isinstance(attributes.get('item_package_weight'), list) else []
+    )
+    if package_weight and 'weight' not in result['package']:
+        normalized = normalize_measurement(package_weight[0])
+        if normalized:
+            result['package']['weight'] = normalized
+    result['package_ready'] = all(
+        name in result['package'] for name in ('length', 'width', 'height', 'weight')
+    )
+    return result
+
+
+def _fba_catalog_measurement_reference(asin, *, client=None):
+    credentials, _seller_id, marketplace_id, marketplace = _amazon_spapi_context()
+    if marketplace is None:
+        raise FbaInboundValidationError('Amazon SP-API marketplace is not available')
+    if client is None:
+        from sp_api.api import CatalogItems
+        client = CatalogItems(
+            credentials=credentials, marketplace=marketplace, version='2022-04-01'
+        )
+    response = client.get_catalog_item(
+        _fba_trim(asin, 30), marketplaceIds=[marketplace_id],
+        includedData=['dimensions', 'attributes', 'summaries'],
+    )
+    payload = _fba_amazon_payload(response)
+    reference = _fba_catalog_measurement_reference_from_payload(payload, marketplace_id)
+    reference.update({'asin': _fba_trim(asin, 30), 'checked_at': _listagent_now_iso()})
+    return reference
+
+
 def _fba_listings_client():
     credentials, seller_id, marketplace_id, marketplace = _amazon_spapi_context()
     if marketplace is None:
@@ -51212,6 +51582,7 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         'listing_statuses': list(dict.fromkeys(listing_statuses)),
         'error': error,
     }
+    result['prep_details'] = _fba_item_prep_details(seller_sku)
     with _FBA_LISTING_READINESS_CACHE_LOCK:
         _FBA_LISTING_READINESS_CACHE[cache_key] = {'ts': now, 'data': dict(result)}
     return result
@@ -51228,6 +51599,15 @@ def _fba_apply_listing_readiness(item, readiness, *, checked_at=None):
     item['fba_enablement_error'] = error
     item['fba_enablement_checked_at'] = checked_at or _listagent_now_iso()
     item['amazon_product_type'] = _fba_trim((readiness or {}).get('product_type'), 120)
+    if isinstance((readiness or {}).get('prep_details'), dict):
+        item['amazon_prep'] = _fba_normalize_prep_detail(
+            readiness['prep_details'], msku=item.get('seller_sku')
+        )
+        item['amazon_prep']['checked'] = bool(readiness['prep_details'].get('checked'))
+        item['amazon_prep']['checked_at'] = _fba_trim(
+            readiness['prep_details'].get('checked_at'), 40
+        ) or item['amazon_prep']['checked_at']
+        item['amazon_prep']['error'] = _fba_trim(readiness['prep_details'].get('error'), 500)
     fnsku = _fba_trim((readiness or {}).get('fnsku'), 80)
     if fnsku:
         item['amazon_fnsku'] = fnsku
@@ -52932,7 +53312,7 @@ def api_movelocation_execute():
                             json.dumps(inventory_state['locations'], ensure_ascii=False),
                             _fba_trim((raw_item or {}).get('asin') or amazon_defaults.get('asin'), 30) or None,
                             _fba_trim((raw_item or {}).get('seller_sku') or amazon_defaults.get('seller_sku'), 120) or None,
-                            _fba_trim((raw_item or {}).get('fnsku'), 80) or None,
+                            _fba_trim((raw_item or {}).get('fnsku') or (raw_item or {}).get('amazon_fnsku'), 80) or None,
                             _fba_trim((raw_item or {}).get('condition') or amazon_defaults.get('condition'), 80) or None,
                             prep_type,
                             item_label_owner,
@@ -53168,12 +53548,23 @@ def _fba_amazon_client(*, legacy=False):
 def _fba_amazon_payload(response):
     errors = getattr(response, 'errors', None)
     if errors:
-        first = errors[0] if isinstance(errors, list) and errors else errors
-        if isinstance(first, dict):
-            message = first.get('message') or first.get('code') or str(first)
-        else:
-            message = str(first)
-        raise FbaInboundValidationError('Amazon rejected the request: ' + _fba_trim(message, 700))
+        problems = errors if isinstance(errors, list) else [errors]
+        fatal = next((
+            problem for problem in problems
+            if not (
+                isinstance(problem, dict)
+                and (
+                    _fba_trim(problem.get('severity'), 20).upper() == 'WARNING'
+                    or _fba_trim(problem.get('message'), 700).upper().startswith('WARNING:')
+                )
+            )
+        ), None)
+        if fatal is not None:
+            if isinstance(fatal, dict):
+                message = fatal.get('message') or fatal.get('code') or str(fatal)
+            else:
+                message = str(fatal)
+            raise FbaInboundValidationError('Amazon rejected the request: ' + _fba_trim(message, 700))
     payload = getattr(response, 'payload', None)
     if payload is None:
         return {}
@@ -53181,6 +53572,30 @@ def _fba_amazon_payload(response):
         return json.loads(json.dumps(payload, ensure_ascii=False, default=str))
     except Exception:
         return dict(payload) if isinstance(payload, dict) else {}
+
+
+def _fba_amazon_exception_detail(exc):
+    try:
+        from sp_api.base.exceptions import SellingApiException
+    except Exception:
+        return ''
+    if not isinstance(exc, SellingApiException):
+        return ''
+    problems = getattr(exc, 'error', None)
+    problems = problems if isinstance(problems, list) else []
+    fatal = next((
+        problem for problem in problems
+        if isinstance(problem, dict)
+        and not (
+            _fba_trim(problem.get('severity'), 20).upper() == 'WARNING'
+            or _fba_trim(problem.get('message'), 700).upper().startswith('WARNING:')
+        )
+    ), None)
+    if fatal:
+        message = _fba_trim(fatal.get('message') or fatal.get('details') or fatal.get('code'), 700)
+    else:
+        message = _fba_trim(getattr(exc, 'message', '') or str(exc), 700)
+    return ('Amazon rejected the request: ' + message) if message else 'Amazon rejected the request'
 
 
 def _fba_amazon_collect(callable_fn, result_key, *, page_size=100, limit=5000):
@@ -53283,6 +53698,23 @@ def _fba_amazon_option_summary(option, kind):
     return result
 
 
+def _fba_transport_option_can_purchase(option):
+    option = option if isinstance(option, dict) else {}
+    if _fba_trim(option.get('shippingSolution'), 80).upper() != 'AMAZON_PARTNERED_CARRIER':
+        return False
+    if _fba_trim(option.get('shippingMode'), 80).upper() != 'GROUND_SMALL_PARCEL':
+        return False
+    if option.get('preconditions'):
+        return False
+    quote = option.get('quote') if isinstance(option.get('quote'), dict) else {}
+    cost = quote.get('cost') if isinstance(quote.get('cost'), dict) else {}
+    try:
+        amount = Decimal(str(cost.get('amount')))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return amount.is_finite() and amount >= 0
+
+
 def _fba_amazon_transport_summary(option):
     option = option if isinstance(option, dict) else {}
     quote = option.get('quote') if isinstance(option.get('quote'), dict) else {}
@@ -53298,6 +53730,7 @@ def _fba_amazon_transport_summary(option):
         },
         'quote': quote,
         'preconditions': option.get('preconditions') if isinstance(option.get('preconditions'), list) else [],
+        'can_purchase': _fba_transport_option_can_purchase(option),
     }
 
 
@@ -53414,12 +53847,40 @@ def _fba_amazon_sync_snapshot(api, state):
         })
     state['shipments'] = shipments
 
+    shipment_by_id = {row.get('shipmentId'): row for row in shipments if row.get('shipmentId')}
+    recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
+    preferred_destinations = {
+        _fba_trim(value, 40).upper()
+        for value in recovery.get('preferred_destinations') or [] if _fba_trim(value, 40)
+    }
+    for option in state.get('placement_options') or []:
+        option_destinations = []
+        for shipment_id in option.get('shipmentIds') or []:
+            warehouse_id = _fba_trim(
+                ((shipment_by_id.get(shipment_id) or {}).get('destination') or {}).get('warehouseId'), 40
+            ).upper()
+            if warehouse_id and warehouse_id not in option_destinations:
+                option_destinations.append(warehouse_id)
+        option['destination_ids'] = option_destinations
+        if preferred_destinations:
+            destination_set = set(option_destinations)
+            option['recovery_destination_match'] = destination_set == preferred_destinations
+            option['recovery_destination_overlap'] = len(destination_set & preferred_destinations)
+    if preferred_destinations:
+        state['placement_options'].sort(key=lambda option: (
+            not bool(option.get('recovery_destination_match')),
+            -int(option.get('recovery_destination_overlap') or 0),
+        ))
+
     if selected_placement:
-        transportation = _fba_amazon_collect(
-            lambda **kwargs: api.list_transportation_options(
-                plan_id, placementOptionId=selected_placement.get('placementOptionId'), **kwargs
-            ), 'transportationOptions', page_size=50, limit=500,
-        )
+        transportation = []
+        selected_shipment_ids = selected_placement.get('shipmentIds') or []
+        for shipment_id in selected_shipment_ids:
+            transportation.extend(_fba_amazon_collect(
+                lambda shipment_id=shipment_id, **kwargs: api.list_transportation_options(
+                    plan_id, shipmentId=shipment_id, **kwargs
+                ), 'transportationOptions', page_size=20, limit=500,
+            ))
         state['transportation_options'] = [_fba_amazon_transport_summary(row) for row in transportation]
 
     operation_failed = str((state.get('operation') or {}).get('status') or '').upper() == 'FAILED'
@@ -53441,6 +53902,420 @@ def _fba_amazon_sync_snapshot(api, state):
         state['stage'] = 'plan_created'
     state['last_synced_at'] = _listagent_now_iso()
     return state
+
+
+def _fba_prepare_and_create_plan(api, marketplace_id, session_data, state):
+    """Create a plan from saved rows without changing any physical pack records."""
+    enablement = _fba_enablement_progress(session_data.get('items') or [])
+    if not enablement.get('all_ready'):
+        needs = enablement.get('needs_enablement', 0)
+        safety = enablement.get('needs_safety_info', 0)
+        enabling = enablement.get('enabling', 0) + enablement.get('checking', 0)
+        failed = enablement.get('failed', 0)
+        parts = []
+        if needs:
+            parts.append(f'{needs} need FBA enablement')
+        if safety:
+            parts.append(f'{safety} need battery and dangerous-goods answers')
+        if enabling:
+            parts.append(f'{enabling} are still activating with Amazon')
+        if failed:
+            parts.append(f'{failed} need listing attention')
+        raise FbaInboundValidationError(
+            'Amazon plan creation is waiting: ' + (
+                ', '.join(parts) or 'check every Seller SKU for FBA readiness'
+            )
+        )
+
+    source = _fba_amazon_source_from_settings()
+    request_body = build_create_plan_request(session_data, source, marketplace_id)
+    mskus = [row.get('msku') for row in request_body.get('items') or [] if row.get('msku')]
+    try:
+        prep_payload = _fba_amazon_payload(api.list_prep_details(
+            marketplaceId=marketplace_id, mskus=mskus
+        ))
+    except Exception as prep_error:
+        unavailable_mskus = _fba_inbound_unavailable_skus(prep_error)
+        if not unavailable_mskus:
+            raise
+        raise FbaInboundValidationError(_fba_inbound_activation_message(
+            unavailable_mskus, session_data.get('items') or []
+        ))
+    prep_by_msku = {
+        _fba_trim(row.get('msku'), 255).casefold(): row
+        for row in prep_payload.get('mskuPrepDetails') or [] if isinstance(row, dict)
+    }
+    # Amazon's live listPrepDetails endpoint currently returns only the first
+    # row for some multi-MSKU calls. Prefer the exact one-SKU details captured
+    # while each item was counted so an existing category is never overwritten.
+    for item in session_data.get('items') or []:
+        if not isinstance(item, dict) or not isinstance(item.get('amazon_prep'), dict):
+            continue
+        seller_sku = _fba_trim(item.get('seller_sku') or item.get('msku'), 255)
+        saved_prep = _fba_normalize_prep_detail(item.get('amazon_prep'), msku=seller_sku)
+        category = _fba_trim(saved_prep.get('prep_category'), 80).upper()
+        if not seller_sku or not category or category == 'UNKNOWN':
+            continue
+        prep_by_msku[seller_sku.casefold()] = {
+            'msku': seller_sku,
+            'prepCategory': category,
+            'prepTypes': saved_prep.get('prep_types') or [],
+            'prepOwnerConstraint': saved_prep.get('prep_owner_constraint') or '',
+            'labelOwnerConstraint': saved_prep.get('label_owner_constraint') or '',
+            'allOwnersConstraint': saved_prep.get('all_owners_constraint') or '',
+        }
+    no_prep_mskus = {
+        _fba_trim(row.get('seller_sku') or row.get('msku'), 255).casefold()
+        for row in session_data.get('items') or [] if isinstance(row, dict)
+        and _fba_trim(row.get('prep_type') or 'none', 40).lower() == 'none'
+    }
+    missing_prep = _fba_missing_prep_mskus(mskus, prep_by_msku)
+    unsupported_missing = [msku for msku in missing_prep if msku.casefold() not in no_prep_mskus]
+    if unsupported_missing:
+        raise FbaInboundValidationError(
+            'Choose an Amazon prep category for: ' + ', '.join(unsupported_missing[:8])
+        )
+    prep_corrections = []
+    pending_prep = list(missing_prep)
+    while pending_prep:
+        prep_problem = None
+        try:
+            prep_response = _fba_amazon_payload(api.set_prep_details(
+                marketplaceId=marketplace_id,
+                mskuPrepDetails=[{
+                    'msku': msku, 'prepCategory': 'NONE', 'prepTypes': ['ITEM_NO_PREP']
+                } for msku in pending_prep],
+            ))
+            prep_operation_id = _fba_trim(prep_response.get('operationId'), 38)
+            for _attempt in range(20):
+                if not prep_operation_id:
+                    break
+                prep_operation = _fba_amazon_payload(api.get_inbound_operation_status(prep_operation_id))
+                prep_status = _fba_trim(prep_operation.get('operationStatus'), 30).upper()
+                if prep_status == 'SUCCESS':
+                    break
+                if prep_status == 'FAILED':
+                    problems = prep_operation.get('operationProblems') or []
+                    message = next((
+                        problem.get('message') for problem in problems
+                        if isinstance(problem, dict) and problem.get('message')
+                    ), '')
+                    prep_problem = FbaInboundValidationError(
+                        message or 'Amazon could not save the item prep category'
+                    )
+                    break
+                time.sleep(0.5)
+            else:
+                raise FbaInboundValidationError(
+                    'Amazon is still saving the item prep category; try Create Amazon plan again'
+                )
+        except FbaInboundValidationError as exc:
+            prep_problem = exc
+
+        if prep_problem is not None:
+            existing = _fba_existing_prep_conflict(prep_problem)
+            existing_key = _fba_trim((existing or {}).get('msku'), 255).casefold()
+            matched_msku = next((
+                msku for msku in pending_prep if msku.casefold() == existing_key
+            ), '')
+            if not matched_msku:
+                raise prep_problem
+            prep_corrections.append({
+                'msku': matched_msku,
+                'prepCategory': existing['prepCategory'],
+                'preserved': True,
+            })
+            pending_prep = [
+                msku for msku in pending_prep if msku.casefold() != existing_key
+            ]
+            logger.info(
+                'Preserving Amazon prep category %s for %s before retrying setPrepDetails',
+                existing['prepCategory'], matched_msku,
+            )
+            continue
+
+        prep_corrections.extend(
+            {'msku': msku, 'prepCategory': 'NONE'} for msku in pending_prep
+        )
+        break
+
+    owner_corrections = []
+    for attempt in range(3):
+        try:
+            response_payload = _fba_amazon_payload(api.create_inbound_plan(**request_body))
+            break
+        except Exception as create_error:
+            unavailable_mskus = _fba_inbound_unavailable_skus(create_error)
+            if unavailable_mskus:
+                raise FbaInboundValidationError(_fba_inbound_activation_message(
+                    unavailable_mskus, session_data.get('items') or []
+                ))
+            corrections = apply_owner_corrections_from_amazon_error(request_body, create_error)
+            if not corrections or attempt >= 2:
+                raise
+            owner_corrections.extend(corrections)
+            logger.warning(
+                'Retrying FBA plan after Amazon owner correction: %s',
+                ', '.join(
+                    f"{row['msku']} {row['field']}={row['to']}" for row in corrections
+                ),
+            )
+    plan_id = _fba_trim(response_payload.get('inboundPlanId'), 38)
+    if not plan_id:
+        raise FbaInboundValidationError('Amazon did not return an inbound plan ID')
+    state.update({
+        'inbound_plan_id': plan_id,
+        'stage': 'plan_creating',
+        'create_request_summary': {
+            'name': request_body.get('name'),
+            'sku_count': len(request_body.get('items') or []),
+            'unit_count': sum(int(row.get('quantity') or 0) for row in request_body.get('items') or []),
+            'owner_corrections': owner_corrections,
+            'prep_corrections': prep_corrections,
+        },
+    })
+    return state, response_payload
+
+
+def _fba_set_amazon_operation(state, response_payload, kind, next_stage, success_flag=''):
+    operation_id = _fba_trim((response_payload or {}).get('operationId'), 38)
+    if operation_id:
+        state['operation'] = {
+            'id': operation_id,
+            'kind': kind,
+            'status': 'IN_PROGRESS',
+            'next_stage': next_stage,
+            'success_flag': success_flag,
+            'started_at': _listagent_now_iso(),
+        }
+    else:
+        state.pop('operation', None)
+        state['stage'] = next_stage
+        if success_flag:
+            state[success_flag] = True
+    return operation_id
+
+
+def _fba_packed_quantities(conn, session_id):
+    return {
+        _fba_trim(row['msku'], 255).casefold(): int(row['quantity'] or 0)
+        for row in conn.execute('''
+            SELECT msku, COUNT(*) AS quantity
+            FROM fba_pack_scans WHERE session_id = ? GROUP BY msku COLLATE NOCASE
+        ''', (session_id,)).fetchall()
+    }
+
+
+def _fba_recovery_fnsku_mismatches(recovery, plan_items):
+    previous = recovery.get('fnsku_by_msku') if isinstance(recovery.get('fnsku_by_msku'), dict) else {}
+    current = {
+        _fba_trim(item.get('msku') or item.get('seller_sku'), 255).casefold():
+            _fba_trim(item.get('fnsku'), 80).upper()
+        for item in plan_items if isinstance(item, dict)
+    }
+    mismatches = []
+    for key, old_fnsku in previous.items():
+        new_fnsku = current.get(str(key).casefold(), '')
+        if old_fnsku and new_fnsku and str(old_fnsku).upper() != new_fnsku:
+            mismatches.append({
+                'msku': key, 'previous_fnsku': str(old_fnsku).upper(), 'new_fnsku': new_fnsku,
+            })
+    return mismatches
+
+
+def _fba_recovery_option_groups(api, plan_id, option):
+    groups = []
+    for index, group_id in enumerate(option.get('packingGroups') or [], 1):
+        items = _fba_amazon_collect(
+            lambda group_id=group_id, **kwargs: api.list_packing_group_items(
+                plan_id, group_id, **kwargs
+            ),
+            'items', page_size=100, limit=2500,
+        )
+        groups.append({
+            'packing_group_id': group_id, 'label': f'Group {index}', 'items': items,
+        })
+    return groups
+
+
+def _fba_choose_compatible_recovery_packing(api, state):
+    recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
+    saved_boxes = recovery.get('saved_boxes') if isinstance(recovery.get('saved_boxes'), list) else []
+    plan_id = _fba_trim(state.get('inbound_plan_id'), 38)
+    compatible = []
+    for option in state.get('packing_options') or []:
+        if option_state(option) not in ('', 'AVAILABLE', 'OFFERED'):
+            continue
+        groups = _fba_recovery_option_groups(api, plan_id, option)
+        _boxes, conflicts = remap_recovery_boxes(saved_boxes, groups)
+        option['recovery_conflict_boxes'] = [row.get('box_id') for row in conflicts]
+        option['recovery_compatible'] = not conflicts
+        if not conflicts:
+            compatible.append((len(groups), _fba_trim(option.get('packingOptionId'), 38), groups))
+    if not compatible:
+        return '', []
+    compatible.sort(key=lambda row: (row[0], row[1]))
+    return compatible[0][1], compatible[0][2]
+
+
+def _fba_recovery_save_updated_items(conn, session_id, updated_items):
+    clean_items = [_fba_session_item_payload(item) for item in updated_items if isinstance(item, dict)]
+    now = _listagent_now_iso()
+    result = conn.execute('''
+        UPDATE fba_prep_sessions
+        SET items_json = ?, item_count = ?, total_units = ?, count_revision = count_revision + 1,
+            updated_at = ?
+        WHERE id = ? AND status = 'open'
+    ''', (
+        json.dumps(clean_items, ensure_ascii=False), len(clean_items),
+        sum(int(item.get('quantity') or 0) for item in clean_items), now, session_id,
+    ))
+    if result.rowcount != 1:
+        raise FbaInboundValidationError('Open FBA session not found while rebuilding the plan')
+    return clean_items
+
+
+def _fba_amazon_sync_recovery(api, marketplace_id, conn, session_id, session_data, state):
+    """Advance one safe recovery step per sync without repeating physical prep work."""
+    recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
+    if not recovery.get('active'):
+        return _fba_amazon_sync_snapshot(api, state), session_data
+
+    state = _fba_amazon_refresh_operation(api, state)
+    operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
+    operation_kind = _fba_trim(operation.get('kind'), 80)
+    operation_status = _fba_trim(operation.get('status'), 30).upper()
+    if operation_status == 'FAILED':
+        recovery['phase'] = 'failed'
+        recovery['error'] = state.get('last_error') or 'Amazon could not rebuild the plan'
+        state['stage'] = 'recovery_failed'
+        state['recovery'] = recovery
+        return state, session_data
+
+    if recovery.get('phase') == 'canceling' and operation_kind == 'recovery_cancel_plan':
+        if operation_status not in ('', 'SUCCESS'):
+            return state, session_data
+        updated_items = _fba_recovery_save_updated_items(
+            conn, session_id, recovery.get('updated_items') or []
+        )
+        session_data['items'] = updated_items
+        recovery['old_plan_cancelled'] = True
+        recovery['phase'] = 'creating_plan'
+        recovery['cancelled_at'] = _listagent_now_iso()
+        preserved = {
+            key: state.get(key) for key in (
+                'inventory_removed_by_msku', 'removed_locations_by_msku',
+                'printed_item_label_counts', 'last_item_label_print', 'last_pack_scan',
+            ) if key in state
+        }
+        state = {
+            'stage': 'draft', 'inbound_plan_id': '', 'boxes': [],
+            'packing_options': [], 'packing_groups': [], 'placement_options': [],
+            'shipments': [], 'transportation_options': [], 'recovery': recovery,
+            **preserved,
+        }
+        try:
+            state, response = _fba_prepare_and_create_plan(
+                api, marketplace_id, session_data, state
+            )
+            _fba_set_amazon_operation(
+                state, response, 'recovery_create_plan', 'plan_created'
+            )
+        except Exception as exc:
+            recovery['phase'] = 'failed'
+            recovery['error'] = _safe_error(exc, 'FBA replacement plan')
+            state['stage'] = 'recovery_failed'
+            state['recovery'] = recovery
+        return state, session_data
+
+    if not _fba_trim(state.get('inbound_plan_id'), 38):
+        recovery['phase'] = 'failed'
+        recovery['error'] = recovery.get('error') or 'The old plan was canceled, but no replacement plan exists'
+        state['stage'] = 'recovery_failed'
+        state['recovery'] = recovery
+        return state, session_data
+
+    state = _fba_amazon_sync_snapshot(api, state)
+    operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
+    operation_status = _fba_trim(operation.get('status'), 30).upper()
+    if operation_status not in ('', 'SUCCESS', 'FAILED'):
+        return state, session_data
+
+    phase = recovery.get('phase')
+    if phase == 'creating_plan':
+        mismatches = _fba_recovery_fnsku_mismatches(recovery, state.get('plan_items') or [])
+        if mismatches:
+            recovery['phase'] = 'label_mismatch'
+            recovery['fnsku_mismatches'] = mismatches
+            state['stage'] = 'recovery_label_mismatch'
+        elif state.get('packing_options'):
+            recovery['phase'] = 'choosing_packing'
+        else:
+            response = _fba_amazon_payload(
+                api.generate_packing_options(state['inbound_plan_id'])
+            )
+            recovery['phase'] = 'generating_packing'
+            state['stage'] = 'packing_generating'
+            _fba_set_amazon_operation(
+                state, response, 'recovery_generate_packing', 'packing_options'
+            )
+        state['recovery'] = recovery
+        return state, session_data
+
+    if phase in ('generating_packing', 'choosing_packing') and state.get('packing_options'):
+        option_id, groups = _fba_choose_compatible_recovery_packing(api, state)
+        if option_id:
+            response = _fba_amazon_payload(
+                api.confirm_packing_option(state['inbound_plan_id'], option_id)
+            )
+            recovery['phase'] = 'confirming_packing'
+            recovery['auto_selected_packing_option_id'] = option_id
+            recovery['replacement_groups'] = groups
+            state['selected_packing_option_id'] = option_id
+            state['stage'] = 'packing_confirming'
+            _fba_set_amazon_operation(
+                state, response, 'recovery_confirm_packing', 'packing', 'packing_confirmed'
+            )
+        else:
+            recovery['phase'] = 'choose_packing'
+            recovery['warning'] = (
+                'Amazon changed the packing groups. Choose an option and re-sort the cartons shown.'
+            )
+        state['recovery'] = recovery
+        return state, session_data
+
+    if phase == 'confirming_packing' and state.get('packing_confirmed') and state.get('packing_groups'):
+        restored_boxes, conflicts = remap_recovery_boxes(
+            recovery.get('saved_boxes') or [], state.get('packing_groups') or []
+        )
+        unresolved = [row for row in conflicts if row.get('unknown_mskus')]
+        resort_required = []
+        for conflict in conflicts:
+            moves = conflict.get('moves') if isinstance(conflict.get('moves'), list) else []
+            if moves:
+                resort_required.append({
+                    'from_box_id': conflict.get('box_id'),
+                    'box_ids': conflict.get('split_box_ids') or [],
+                    'moves': moves,
+                })
+            for move in moves:
+                conn.execute('''
+                    UPDATE fba_pack_scans
+                    SET box_id = ?, packing_group_id = ?
+                    WHERE session_id = ? AND box_id = ? COLLATE NOCASE AND msku = ? COLLATE NOCASE
+                ''', (
+                    move.get('to_box_id'), move.get('packing_group_id'), session_id,
+                    move.get('from_box_id'), move.get('msku'),
+                ))
+        state['boxes'] = restored_boxes
+        recovery['box_conflicts'] = conflicts
+        recovery['resort_required'] = resort_required
+        recovery['phase'] = 'box_conflict' if unresolved else 'complete'
+        recovery['active'] = bool(unresolved)
+        recovery['completed_at'] = _listagent_now_iso() if not unresolved else ''
+        state['stage'] = 'packing'
+        state['recovery'] = recovery
+    return state, session_data
 
 
 @app.route('/api/fba-prep/amazon/readiness', methods=['GET', 'POST'])
@@ -53509,13 +54384,21 @@ def api_fba_prep_amazon_sync(session_id):
     try:
         conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
         conn.row_factory = sqlite3.Row
-        _row, _session, state = _fba_amazon_session(conn, session_id)
+        _row, session_data, state = _fba_amazon_session(conn, session_id)
         if state.get('inbound_plan_id'):
-            api, _marketplace_id = _fba_amazon_client()
-            state = _fba_amazon_sync_snapshot(api, state)
+            api, marketplace_id = _fba_amazon_client()
+            if (state.get('recovery') or {}).get('active'):
+                state, session_data = _fba_amazon_sync_recovery(
+                    api, marketplace_id, conn, session_id, session_data, state
+                )
+            else:
+                state = _fba_amazon_sync_snapshot(api, state)
             _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
             conn.commit()
-        return jsonify({'success': True, 'amazon_workflow': state})
+        return jsonify({
+            'success': True, 'amazon_workflow': state,
+            'items': session_data.get('items') or [],
+        })
     except FbaInboundValidationError as exc:
         if conn is not None:
             conn.rollback()
@@ -53523,6 +54406,10 @@ def api_fba_prep_amazon_sync(session_id):
     except Exception as exc:
         if conn is not None:
             conn.rollback()
+        amazon_detail = _fba_amazon_exception_detail(exc)
+        if amazon_detail:
+            logger.error('fba amazon sync: %s', exc, exc_info=True)
+            return jsonify({'success': False, 'error': amazon_detail}), 502
         return jsonify({'success': False, 'error': _safe_error(exc, 'fba amazon sync')}), 502
     finally:
         if conn is not None:
@@ -53536,18 +54423,298 @@ def api_fba_prep_amazon_action(session_id, action):
         'create-box', 'remove-box',
         'submit-boxes', 'generate-placement', 'confirm-placement',
         'generate-transportation', 'confirm-transportation', 'reset-failed-plan',
+        'recover-remove-item', 'retry-recovery', 'package-measurements',
+        'package-measurement-status',
     }
     if action not in allowed:
         return jsonify({'success': False, 'error': 'Unknown Amazon workflow action'}), 404
     conn = None
     try:
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
         conn.row_factory = sqlite3.Row
-        if action in ('save-boxes', 'create-box', 'remove-box'):
+        if action in ('save-boxes', 'create-box', 'remove-box', 'recover-remove-item', 'retry-recovery'):
             conn.execute('BEGIN IMMEDIATE')
         _row, session_data, state = _fba_amazon_session(conn, session_id)
         plan_id = _fba_trim(state.get('inbound_plan_id'), 38)
+
+        if action == 'package-measurement-status':
+            measurement_issues = _fba_package_measurement_issues(state)
+            if not measurement_issues:
+                raise FbaInboundValidationError(
+                    'Amazon is not currently requesting package measurements for this plan'
+                )
+            session_items = session_data.get('items') if isinstance(session_data.get('items'), list) else []
+            item_by_msku = {
+                _fba_trim(item.get('seller_sku') or item.get('msku'), 255).casefold(): item
+                for item in session_items if isinstance(item, dict)
+                and _fba_trim(item.get('seller_sku') or item.get('msku'), 255)
+            }
+            credentials, _seller_id, _marketplace_id, marketplace = _amazon_spapi_context()
+            if marketplace is None:
+                raise FbaInboundValidationError('Amazon SP-API marketplace is not available')
+            from sp_api.api import CatalogItems
+            catalog = CatalogItems(
+                credentials=credentials, marketplace=marketplace, version='2022-04-01'
+            )
+            references = []
+            for index, issue in enumerate(measurement_issues[:50]):
+                item = item_by_msku.get(issue['msku'].casefold()) or {}
+                asin = _fba_trim(item.get('asin') or (item.get('fba') or {}).get('amazon_listing', {}).get('asin'), 30)
+                reference = {
+                    **issue,
+                    'title': _fba_trim(item.get('title'), 500),
+                    'barcode': _fba_trim(item.get('barcode_display') or item.get('barcode'), 160),
+                    'asin': asin,
+                    'item': {}, 'package': {}, 'package_ready': False,
+                }
+                if asin:
+                    try:
+                        reference.update(_fba_catalog_measurement_reference(asin, client=catalog))
+                    except Exception as catalog_error:
+                        reference['error'] = _fba_trim(
+                            _fba_amazon_exception_detail(catalog_error)
+                            or _amazon_format_spapi_error(catalog_error), 500
+                        )
+                else:
+                    reference['error'] = 'Amazon ASIN is missing'
+                references.append(reference)
+                if index + 1 < len(measurement_issues[:50]):
+                    time.sleep(0.3)
+            return jsonify({
+                'success': True,
+                'all_ready': bool(references) and all(row.get('package_ready') for row in references),
+                'references': references,
+                'checked_at': _listagent_now_iso(),
+            })
+
+        if action == 'package-measurements':
+            measurement_issues = _fba_package_measurement_issues(state)
+            if not measurement_issues:
+                raise FbaInboundValidationError(
+                    'Amazon is not currently requesting package measurements for this plan'
+                )
+            session_items = session_data.get('items') if isinstance(session_data.get('items'), list) else []
+            item_by_msku = {
+                _fba_trim(item.get('seller_sku') or item.get('msku'), 255).casefold(): item
+                for item in session_items if isinstance(item, dict)
+                and _fba_trim(item.get('seller_sku') or item.get('msku'), 255)
+            }
+            requested_rows = data.get('items') if isinstance(data.get('items'), list) else []
+            requested_by_msku = {
+                _fba_trim(row.get('msku') or row.get('seller_sku'), 255).casefold(): row
+                for row in requested_rows[:100] if isinstance(row, dict)
+                and _fba_trim(row.get('msku') or row.get('seller_sku'), 255)
+            }
+            validated = []
+            for issue in measurement_issues:
+                key = issue['msku'].casefold()
+                item = item_by_msku.get(key)
+                incoming = requested_by_msku.get(key)
+                if not item or not incoming:
+                    raise FbaInboundValidationError(
+                        f'Enter package dimensions and weight for {issue["msku"]}'
+                    )
+                validated.append((issue, item, {
+                    'length_in': _fba_positive_measurement(incoming.get('length_in'), 'package length'),
+                    'width_in': _fba_positive_measurement(incoming.get('width_in'), 'package width'),
+                    'height_in': _fba_positive_measurement(incoming.get('height_in'), 'package height'),
+                    'weight_lb': _fba_positive_measurement(incoming.get('weight_lb'), 'package weight'),
+                }))
+
+            listing_client = _fba_listings_client()
+            saved_measurements = {}
+            errors = []
+            for issue, item, measurements in validated:
+                try:
+                    saved_measurements[issue['msku'].casefold()] = (
+                        _fba_patch_listing_package_measurements(
+                            issue['msku'], item, measurements, client=listing_client,
+                        )
+                    )
+                except Exception as measurement_error:
+                    detail = _fba_trim(
+                        _fba_amazon_exception_detail(measurement_error)
+                        or _amazon_format_spapi_error(measurement_error), 700
+                    )
+                    errors.append({
+                        'msku': issue['msku'],
+                        'error': detail or 'Amazon did not accept these measurements',
+                    })
+
+            if saved_measurements:
+                conn.execute('BEGIN IMMEDIATE')
+                latest_row = conn.execute(
+                    "SELECT items_json FROM fba_prep_sessions WHERE id = ? AND status = 'open'",
+                    (session_id,),
+                ).fetchone()
+                latest_items = [
+                    _fba_session_item_payload(item)
+                    for item in _fba_json_list(latest_row['items_json'] if latest_row else '[]')
+                    if isinstance(item, dict)
+                ]
+                for item in latest_items:
+                    key = _fba_trim(item.get('seller_sku') or item.get('msku'), 255).casefold()
+                    if key in saved_measurements:
+                        item['amazon_package_measurements'] = saved_measurements[key]
+                conn.execute('''
+                    UPDATE fba_prep_sessions
+                    SET items_json = ?, count_revision = COALESCE(count_revision, 0) + 1,
+                        updated_at = ?
+                    WHERE id = ? AND status = 'open'
+                ''', (json.dumps(latest_items, ensure_ascii=False), _listagent_now_iso(), session_id))
+                conn.commit()
+                session_items = latest_items
+
+            if errors:
+                return jsonify({
+                    'success': False,
+                    'error': '; '.join(f"{row['msku']}: {row['error']}" for row in errors),
+                    'errors': errors,
+                    'saved_count': len(saved_measurements),
+                    'items': session_items,
+                    'amazon_workflow': state,
+                }), 400
+            return jsonify({
+                'success': True,
+                'message': (
+                    f'Amazon accepted package measurements for {len(saved_measurements)} '
+                    f'item{"" if len(saved_measurements) == 1 else "s"}.'
+                ),
+                'saved_count': len(saved_measurements),
+                'items': session_items,
+                'amazon_workflow': state,
+            })
+
+        if action == 'recover-remove-item':
+            if data.get('confirm') is not True:
+                raise FbaInboundValidationError('Confirm the missing-item plan rebuild')
+            if not plan_id or not state.get('packing_confirmed'):
+                raise FbaInboundValidationError('Missing items can be removed during physical carton packing')
+            if state.get('boxes_submitted'):
+                raise FbaInboundValidationError(
+                    'Box contents are already submitted to Amazon; use Seller Central shipment-content editing'
+                )
+            if (state.get('recovery') or {}).get('active'):
+                raise FbaInboundValidationError('A missing-item recovery is already running')
+            pending = state.get('operation') if isinstance(state.get('operation'), dict) else {}
+            if _fba_trim(pending.get('status'), 30).upper() not in ('', 'SUCCESS', 'FAILED'):
+                raise FbaInboundValidationError('Wait for the current Amazon operation to finish')
+
+            msku = _fba_trim(data.get('msku') or data.get('seller_sku'), 255)
+            packed_quantities = _fba_packed_quantities(conn, session_id)
+            updated_items, reduction = reduce_missing_plan_quantity(
+                session_data.get('items') or [], msku, data.get('quantity') or 1,
+                packed_quantity=packed_quantities.get(msku.casefold(), 0),
+                barcode_key=data.get('barcode_key') or '',
+            )
+            if not updated_items:
+                raise FbaInboundValidationError('An Amazon plan must contain at least one item')
+            fnsku_by_msku = {
+                _fba_trim(item.get('msku') or item.get('seller_sku'), 255).casefold():
+                    _fba_trim(item.get('fnsku'), 80).upper()
+                for item in (state.get('plan_items') or []) if isinstance(item, dict)
+                and _fba_trim(item.get('fnsku'), 80)
+            }
+            for item in session_data.get('items') or []:
+                if not isinstance(item, dict):
+                    continue
+                item_msku = _fba_trim(item.get('seller_sku') or item.get('msku'), 255).casefold()
+                item_fnsku = _fba_trim(item.get('amazon_fnsku') or item.get('fnsku'), 80).upper()
+                if item_msku and item_fnsku and item_msku not in fnsku_by_msku:
+                    fnsku_by_msku[item_msku] = item_fnsku
+            preferred_destinations = []
+            for shipment in state.get('shipments') or []:
+                destination = shipment.get('destination') if isinstance(shipment, dict) else {}
+                warehouse_id = _fba_trim((destination or {}).get('warehouseId'), 40)
+                if warehouse_id and warehouse_id not in preferred_destinations:
+                    preferred_destinations.append(warehouse_id)
+            recovery = {
+                'active': True,
+                'phase': 'canceling',
+                'started_at': _listagent_now_iso(),
+                'old_plan_id': plan_id,
+                'old_stage': state.get('stage') or 'packing',
+                'removed_item': reduction,
+                'updated_items': updated_items,
+                'saved_boxes': json.loads(json.dumps(state.get('boxes') or [])),
+                'preferred_destinations': preferred_destinations,
+                'fnsku_by_msku': fnsku_by_msku,
+                'packed_scan_count': int(conn.execute(
+                    'SELECT COUNT(*) FROM fba_pack_scans WHERE session_id = ?', (session_id,)
+                ).fetchone()[0] or 0),
+            }
+            api, marketplace_id = _fba_amazon_client()
+            response_payload = _fba_amazon_payload(api.cancel_inbound_plan(plan_id))
+            state['recovery'] = recovery
+            state['stage'] = 'recovery_canceling'
+            operation_id = _fba_set_amazon_operation(
+                state, response_payload, 'recovery_cancel_plan', 'recovery_rebuilding'
+            )
+            if not operation_id:
+                state['operation'] = {
+                    'kind': 'recovery_cancel_plan', 'status': 'SUCCESS',
+                    'next_stage': 'recovery_rebuilding', 'started_at': _listagent_now_iso(),
+                }
+                state, session_data = _fba_amazon_sync_recovery(
+                    api, marketplace_id, conn, session_id, session_data, state
+                )
+            _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
+            conn.commit()
+            return jsonify({
+                'success': True, 'amazon_workflow': state,
+                'operation_id': _fba_trim((state.get('operation') or {}).get('id'), 38),
+                'recovery': state.get('recovery'), 'items': session_data.get('items') or [],
+            })
+
+        if action == 'retry-recovery':
+            recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
+            if recovery.get('phase') != 'failed':
+                raise FbaInboundValidationError('There is no failed plan recovery to retry')
+            api, marketplace_id = _fba_amazon_client()
+            recovery['active'] = True
+            recovery.pop('error', None)
+            if recovery.get('old_plan_cancelled'):
+                recovery['phase'] = 'creating_plan'
+                preserved = {
+                    key: state.get(key) for key in (
+                        'inventory_removed_by_msku', 'removed_locations_by_msku',
+                        'printed_item_label_counts', 'last_item_label_print', 'last_pack_scan',
+                    ) if key in state
+                }
+                state = {
+                    'stage': 'draft', 'inbound_plan_id': '', 'boxes': [],
+                    'packing_options': [], 'packing_groups': [], 'placement_options': [],
+                    'shipments': [], 'transportation_options': [], 'recovery': recovery,
+                    **preserved,
+                }
+                state, response_payload = _fba_prepare_and_create_plan(
+                    api, marketplace_id, session_data, state
+                )
+                operation_id = _fba_set_amazon_operation(
+                    state, response_payload, 'recovery_create_plan', 'plan_created'
+                )
+            else:
+                recovery['phase'] = 'canceling'
+                state['recovery'] = recovery
+                state['stage'] = 'recovery_canceling'
+                response_payload = _fba_amazon_payload(
+                    api.cancel_inbound_plan(recovery.get('old_plan_id') or plan_id)
+                )
+                operation_id = _fba_set_amazon_operation(
+                    state, response_payload, 'recovery_cancel_plan', 'recovery_rebuilding'
+                )
+                if not operation_id:
+                    state['operation'] = {
+                        'kind': 'recovery_cancel_plan', 'status': 'SUCCESS',
+                        'next_stage': 'recovery_rebuilding', 'started_at': _listagent_now_iso(),
+                    }
+            _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
+            conn.commit()
+            return jsonify({
+                'success': True, 'amazon_workflow': state, 'operation_id': operation_id,
+                'items': session_data.get('items') or [],
+            })
 
         if action == 'reset-failed-plan':
             operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
@@ -53663,113 +54830,9 @@ def api_fba_prep_amazon_action(session_id, action):
                 raise FbaInboundValidationError('This session already has an Amazon inbound plan')
             if data.get('confirm') is not True:
                 raise FbaInboundValidationError('Review the item quantities and confirm plan creation')
-            enablement = _fba_enablement_progress(session_data.get('items') or [])
-            if not enablement.get('all_ready'):
-                needs = enablement.get('needs_enablement', 0)
-                safety = enablement.get('needs_safety_info', 0)
-                enabling = enablement.get('enabling', 0) + enablement.get('checking', 0)
-                failed = enablement.get('failed', 0)
-                parts = []
-                if needs:
-                    parts.append(f'{needs} need FBA enablement')
-                if safety:
-                    parts.append(f'{safety} need battery and dangerous-goods answers')
-                if enabling:
-                    parts.append(f'{enabling} are still activating with Amazon')
-                if failed:
-                    parts.append(f'{failed} need listing attention')
-                raise FbaInboundValidationError(
-                    'Amazon plan creation is waiting: ' + (', '.join(parts) or 'check every Seller SKU for FBA readiness')
-                )
-            source = _fba_amazon_source_from_settings()
-            request_body = build_create_plan_request(session_data, source, marketplace_id)
-            mskus = [row.get('msku') for row in request_body.get('items') or [] if row.get('msku')]
-            try:
-                prep_payload = _fba_amazon_payload(api.list_prep_details(
-                    marketplaceId=marketplace_id, mskus=mskus
-                ))
-            except Exception as prep_error:
-                unavailable_mskus = _fba_inbound_unavailable_skus(prep_error)
-                if not unavailable_mskus:
-                    raise
-                raise FbaInboundValidationError(_fba_inbound_activation_message(
-                    unavailable_mskus, session_data.get('items') or []
-                ))
-            prep_by_msku = {
-                _fba_trim(row.get('msku'), 255).casefold(): row
-                for row in prep_payload.get('mskuPrepDetails') or [] if isinstance(row, dict)
-            }
-            no_prep_mskus = {
-                _fba_trim(row.get('seller_sku') or row.get('msku'), 255).casefold()
-                for row in session_data.get('items') or [] if isinstance(row, dict)
-                and _fba_trim(row.get('prep_type') or 'none', 40).lower() == 'none'
-            }
-            missing_prep = _fba_missing_prep_mskus(mskus, prep_by_msku)
-            unsupported_missing = [msku for msku in missing_prep if msku.casefold() not in no_prep_mskus]
-            if unsupported_missing:
-                raise FbaInboundValidationError(
-                    'Choose an Amazon prep category for: ' + ', '.join(unsupported_missing[:8])
-                )
-            prep_corrections = []
-            if missing_prep:
-                prep_response = _fba_amazon_payload(api.set_prep_details(
-                    marketplaceId=marketplace_id,
-                    mskuPrepDetails=[{
-                        'msku': msku, 'prepCategory': 'NONE', 'prepTypes': ['ITEM_NO_PREP']
-                    } for msku in missing_prep],
-                ))
-                prep_operation_id = _fba_trim(prep_response.get('operationId'), 38)
-                for _attempt in range(20):
-                    if not prep_operation_id:
-                        break
-                    prep_operation = _fba_amazon_payload(api.get_inbound_operation_status(prep_operation_id))
-                    prep_status = _fba_trim(prep_operation.get('operationStatus'), 30).upper()
-                    if prep_status == 'SUCCESS':
-                        break
-                    if prep_status == 'FAILED':
-                        problems = prep_operation.get('operationProblems') or []
-                        message = next((p.get('message') for p in problems if isinstance(p, dict) and p.get('message')), '')
-                        raise FbaInboundValidationError(message or 'Amazon could not save the item prep category')
-                    time.sleep(0.5)
-                else:
-                    raise FbaInboundValidationError('Amazon is still saving the item prep category; try Create Amazon plan again')
-                prep_corrections = [{'msku': msku, 'prepCategory': 'NONE'} for msku in missing_prep]
-            owner_corrections = []
-            for attempt in range(3):
-                try:
-                    response_payload = _fba_amazon_payload(api.create_inbound_plan(**request_body))
-                    break
-                except Exception as create_error:
-                    unavailable_mskus = _fba_inbound_unavailable_skus(create_error)
-                    if unavailable_mskus:
-                        raise FbaInboundValidationError(_fba_inbound_activation_message(
-                            unavailable_mskus, session_data.get('items') or []
-                        ))
-                    corrections = apply_owner_corrections_from_amazon_error(request_body, create_error)
-                    if not corrections or attempt >= 2:
-                        raise
-                    owner_corrections.extend(corrections)
-                    logger.warning(
-                        'Retrying FBA plan after Amazon owner correction: %s',
-                        ', '.join(
-                            f"{row['msku']} {row['field']}={row['to']}"
-                            for row in corrections
-                        ),
-                    )
-            plan_id = _fba_trim(response_payload.get('inboundPlanId'), 38)
-            if not plan_id:
-                raise FbaInboundValidationError('Amazon did not return an inbound plan ID')
-            state.update({
-                'inbound_plan_id': plan_id,
-                'stage': 'plan_creating',
-                'create_request_summary': {
-                    'name': request_body.get('name'),
-                    'sku_count': len(request_body.get('items') or []),
-                    'unit_count': sum(int(row.get('quantity') or 0) for row in request_body.get('items') or []),
-                    'owner_corrections': owner_corrections,
-                    'prep_corrections': prep_corrections,
-                },
-            })
+            state, response_payload = _fba_prepare_and_create_plan(
+                api, marketplace_id, session_data, state
+            )
             next_stage = 'plan_created'
         else:
             if not plan_id:
@@ -53800,6 +54863,11 @@ def api_fba_prep_amazon_action(session_id, action):
                 response_payload = _fba_amazon_payload(api.confirm_packing_option(plan_id, option_id))
                 state['selected_packing_option_id'] = option_id
                 state['stage'] = 'packing_confirming'
+                recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
+                if recovery.get('active') and recovery.get('phase') == 'choose_packing':
+                    recovery['phase'] = 'confirming_packing'
+                    recovery['manually_selected_packing_option_id'] = option_id
+                    state['recovery'] = recovery
                 next_stage = 'packing'
                 success_flag = 'packing_confirmed'
             elif action == 'submit-boxes':
@@ -53847,10 +54915,28 @@ def api_fba_prep_amazon_action(session_id, action):
                 if _fba_trim(data.get('confirmation'), 40).upper() != 'BUY SHIPPING':
                     raise FbaInboundValidationError('Type BUY SHIPPING to accept the carrier charges')
                 selections = data.get('selections') if isinstance(data.get('selections'), list) else []
+                selected_placement_id = _fba_trim(state.get('selected_placement_option_id'), 38)
+                selected_placement = next((
+                    row for row in state.get('placement_options') or []
+                    if row.get('placementOptionId') == selected_placement_id
+                    or option_state(row) == 'ACCEPTED'
+                ), None)
+                expected_shipments = {
+                    shipment_id for shipment_id in (selected_placement or {}).get('shipmentIds') or []
+                    if shipment_id
+                }
                 available = {
                     (row.get('shipmentId'), row.get('transportationOptionId'))
                     for row in state.get('transportation_options') or []
+                    if row.get('can_purchase') or _fba_transport_option_can_purchase(row)
                 }
+                quoted_shipments = {shipment_id for shipment_id, _option_id in available if shipment_id}
+                missing_quotes = expected_shipments - quoted_shipments
+                if missing_quotes:
+                    raise FbaInboundValidationError(
+                        'Amazon did not return a purchasable partnered-carrier quote for every destination. '
+                        'Regenerate shipping options or complete the unquoted shipment in Send to Amazon.'
+                    )
                 chosen = []
                 seen_shipments = set()
                 source = _fba_amazon_source_from_settings()
@@ -53863,7 +54949,7 @@ def api_fba_prep_amazon_action(session_id, action):
                     shipment_id = _fba_trim((selection or {}).get('shipment_id') or (selection or {}).get('shipmentId'), 38)
                     option_id = _fba_trim((selection or {}).get('transportation_option_id') or (selection or {}).get('transportationOptionId'), 38)
                     if not shipment_id or (shipment_id, option_id) not in available:
-                        raise FbaInboundValidationError('One selected carrier option is no longer available')
+                        raise FbaInboundValidationError('Select a quoted Amazon-partnered carrier for every destination')
                     if shipment_id in seen_shipments:
                         raise FbaInboundValidationError('Select exactly one carrier option per shipment')
                     seen_shipments.add(shipment_id)
@@ -53872,9 +54958,6 @@ def api_fba_prep_amazon_action(session_id, action):
                         'transportationOptionId': option_id,
                         'contactInformation': contact,
                     })
-                expected_shipments = {
-                    row.get('shipmentId') for row in state.get('transportation_options') or [] if row.get('shipmentId')
-                }
                 if not chosen or seen_shipments != expected_shipments:
                     raise FbaInboundValidationError('Select one carrier option for every Amazon shipment')
                 response_payload = _fba_amazon_payload(
@@ -53914,10 +54997,43 @@ def api_fba_prep_amazon_action(session_id, action):
     except Exception as exc:
         if conn is not None:
             conn.rollback()
+        amazon_detail = _fba_amazon_exception_detail(exc)
+        if amazon_detail:
+            logger.error('fba amazon action: %s', exc, exc_info=True)
+            return jsonify({'success': False, 'error': amazon_detail}), 400
         return jsonify({'success': False, 'error': _safe_error(exc, 'fba amazon action')}), 502
     finally:
         if conn is not None:
             conn.close()
+
+
+def _fba_amazon_box_label_document(api, legacy_api, plan_id, shipment_id, confirmation_id):
+    shipment_boxes = _fba_amazon_collect(
+        lambda **kwargs: api.list_shipment_boxes(plan_id, shipment_id, **kwargs),
+        'boxes', page_size=1000, limit=5000,
+    )
+    box_ids = []
+    for box in shipment_boxes:
+        box_id = _fba_trim((box or {}).get('boxId'), 80)
+        if box_id and box_id not in box_ids:
+            box_ids.append(box_id)
+    if not box_ids:
+        raise FbaInboundValidationError(
+            'Amazon has not returned the carton IDs needed to print this shipment yet. Refresh Amazon and try again.'
+        )
+    response = _fba_amazon_payload(legacy_api.get_labels(
+        confirmation_id,
+        PageType='PackageLabel_Thermal',
+        LabelType='UNIQUE',
+        # Swagger 2 arrays default to CSV query encoding. requests encodes a
+        # Python list as repeated keys, which Amazon accepts but silently uses
+        # only one carton ID from. A comma-delimited value returns every label.
+        PackageLabelsToPrint=','.join(box_ids),
+    ))
+    download_url = _fba_trim(response.get('DownloadURL') or response.get('downloadURL'), 2000)
+    if not download_url:
+        raise FbaInboundValidationError('Amazon did not return a box-label document')
+    return download_url, box_ids
 
 
 @app.route('/api/fba-prep/sessions/<int:session_id>/amazon/box-labels/<shipment_id>', methods=['GET'])
@@ -53934,17 +55050,20 @@ def api_fba_prep_amazon_box_labels(session_id, shipment_id):
         confirmation_id = _fba_trim(shipment.get('shipmentConfirmationId'), 40)
         if not confirmation_id:
             return jsonify({'success': False, 'error': 'Amazon has not assigned the printable shipment ID yet'}), 409
-        api, _marketplace_id = _fba_amazon_client(legacy=True)
-        response = _fba_amazon_payload(api.get_labels(
-            confirmation_id,
-            PageType='PackageLabel_Thermal',
-            LabelType='UNIQUE',
-        ))
-        download_url = _fba_trim(response.get('DownloadURL') or response.get('downloadURL'), 2000)
-        if not download_url:
-            return jsonify({'success': False, 'error': 'Amazon did not return a box-label document'}), 502
+        plan_id = _fba_trim(state.get('inbound_plan_id'), 38)
+        api, _marketplace_id = _fba_amazon_client()
+        legacy_api, _legacy_marketplace_id = _fba_amazon_client(legacy=True)
+        download_url, _box_ids = _fba_amazon_box_label_document(
+            api, legacy_api, plan_id, shipment_id, confirmation_id
+        )
         return redirect(download_url)
+    except FbaInboundValidationError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 409
     except Exception as exc:
+        amazon_detail = _fba_amazon_exception_detail(exc)
+        if amazon_detail:
+            logger.error('fba amazon labels: %s', exc, exc_info=True)
+            return jsonify({'success': False, 'error': amazon_detail}), 502
         return jsonify({'success': False, 'error': _safe_error(exc, 'fba amazon labels')}), 502
 
 
@@ -53992,15 +55111,47 @@ def _fba_planned_label_match(barcode, session_rows):
             )
             plan_item = plan_by_msku.get(msku.casefold()) if msku else None
             fnsku = _fba_trim((plan_item or {}).get('fnsku'), 30).upper()
+            box_assignments = []
+            for raw_box in state.get('boxes') or []:
+                if not isinstance(raw_box, dict):
+                    continue
+                box_id = _fba_trim(
+                    raw_box.get('local_id') or raw_box.get('box_id') or raw_box.get('box_number'),
+                    40,
+                ).upper()
+                if not box_id:
+                    continue
+                packed_quantity = sum(
+                    max(0, _listingagent_parse_int(content.get('quantity'), 0) or 0)
+                    for content in (raw_box.get('contents') or [])
+                    if isinstance(content, dict)
+                    and _fba_trim(
+                        content.get('msku') or content.get('seller_sku'), 255
+                    ).casefold() == msku.casefold()
+                )
+                if packed_quantity > 0:
+                    box_assignments.append({
+                        'box_id': box_id,
+                        'quantity': packed_quantity,
+                    })
+            box_assignments.sort(key=lambda assignment: assignment['box_id'])
             match = {
                 'session_id': int(session.get('id') or 0),
                 'session_name': _fba_trim(session.get('session_name') or session.get('batch_name'), 120),
+                # The operator-facing shipment is the FBA prep session. Keep a
+                # separate named field so the scanner does not confuse it with
+                # Amazon's shipment IDs after placement splits are selected.
+                'shipment_name': _fba_trim(session.get('session_name') or session.get('batch_name'), 120),
                 'inbound_plan_id': _fba_trim(state.get('inbound_plan_id'), 38),
                 'barcode': _fba_trim(item.get('barcode'), 160),
                 'title': _fba_trim(item.get('title') or item.get('barcode'), 500),
                 'image': _fba_trim(item.get('image'), 1500),
                 'msku': msku,
                 'fnsku': fnsku,
+                'box_assignments': box_assignments,
+                'box_ids': [assignment['box_id'] for assignment in box_assignments],
+                'packed_quantity': sum(assignment['quantity'] for assignment in box_assignments),
+                'packing_status': 'packed' if box_assignments else 'not_packed',
                 'printable': bool(msku and len(fnsku) == 10 and fnsku.isalnum()),
             }
             if match['printable']:
@@ -54524,6 +55675,177 @@ def api_fba_prep_amazon_pack_scan(session_id):
                 pass
 
 
+@app.route('/api/fba-prep/sessions/<int:session_id>/amazon/move-box-scan', methods=['POST'])
+def api_fba_prep_amazon_move_box_scan(session_id):
+    """Move one previously packed physical unit between compatible cartons."""
+    conn = None
+    try:
+        data = request.get_json() or {}
+        move_token = _fba_trim(data.get('move_token'), 100)
+        barcode = _fba_trim(data.get('barcode'), 160)
+        msku = _fba_trim(data.get('msku') or data.get('seller_sku'), 255)
+        from_box_id = _fba_trim(data.get('from_box_id'), 40).upper()
+        to_box_id = _fba_trim(data.get('to_box_id'), 40).upper()
+        client_id, operator_name = _fba_client_identity(data)
+        active_box_id = _fba_trim(data.get('active_box_id'), 40).upper()
+        if not move_token or not re.fullmatch(r'[A-Za-z0-9._:-]{8,100}', move_token):
+            raise FbaInboundValidationError('A valid box-move scan token is required')
+        if not barcode:
+            raise FbaInboundValidationError('Scan an item barcode to move')
+        if not msku:
+            raise FbaInboundValidationError('The scanned item is not matched to an Amazon Seller SKU')
+        if not from_box_id or not to_box_id:
+            raise FbaInboundValidationError('Choose both the source and destination cartons')
+        if from_box_id == to_box_id:
+            raise FbaInboundValidationError('Choose two different cartons')
+
+        conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_fba_prep_tables(cur)
+        conn.commit()
+        conn.execute('BEGIN IMMEDIATE')
+        cur = conn.cursor()
+
+        existing = cur.execute(
+            'SELECT * FROM fba_box_move_scans WHERE move_token = ? LIMIT 1', (move_token,)
+        ).fetchone()
+        if existing:
+            if int(existing['session_id']) != int(session_id):
+                raise FbaInboundValidationError('That box-move token belongs to another session')
+            session_row = cur.execute(
+                'SELECT * FROM fba_prep_sessions WHERE id = ?', (session_id,)
+            ).fetchone()
+            return jsonify({
+                'success': True, 'idempotent': True, 'move': dict(existing),
+                'amazon_workflow': _fba_amazon_state(session_row),
+            })
+
+        _row, _session_data, state = _fba_amazon_session(conn, session_id)
+        _fba_touch_session_worker(cur, session_id, client_id, operator_name, active_box_id)
+        if not state.get('packing_confirmed'):
+            raise FbaInboundValidationError('Packing has not started for this Amazon plan')
+        if state.get('boxes_submitted'):
+            raise FbaInboundValidationError('Box contents have already been submitted to Amazon and cannot be moved')
+
+        boxes = state.get('boxes') if isinstance(state.get('boxes'), list) else []
+        source_box = next((
+            box for box in boxes if isinstance(box, dict)
+            and _fba_trim(box.get('local_id'), 40).upper() == from_box_id
+        ), None)
+        destination_box = next((
+            box for box in boxes if isinstance(box, dict)
+            and _fba_trim(box.get('local_id'), 40).upper() == to_box_id
+        ), None)
+        if source_box is None or destination_box is None:
+            raise FbaInboundValidationError('One of the selected cartons no longer exists; refresh and choose again')
+        source_group_id = _fba_trim(source_box.get('packing_group_id'), 38)
+        destination_group_id = _fba_trim(destination_box.get('packing_group_id'), 38)
+        if not source_group_id or source_group_id != destination_group_id:
+            raise FbaInboundValidationError('Items can only move between cartons in the same Amazon packing group')
+
+        packing_group = next((
+            group for group in state.get('packing_groups') or [] if isinstance(group, dict)
+            and _fba_trim(group.get('packing_group_id'), 38) == source_group_id
+            and any(
+                isinstance(item, dict)
+                and _fba_trim(item.get('msku') or item.get('seller_sku'), 255).casefold() == msku.casefold()
+                for item in group.get('items') or []
+            )
+        ), None)
+        if packing_group is None:
+            raise FbaInboundValidationError(f'{msku} cannot be placed in the selected destination carton')
+
+        source_contents = source_box.get('contents') if isinstance(source_box.get('contents'), list) else []
+        source_item = next((
+            item for item in source_contents if isinstance(item, dict)
+            and _fba_trim(item.get('msku'), 255).casefold() == msku.casefold()
+        ), None)
+        source_quantity = max(0, _listingagent_parse_int((source_item or {}).get('quantity'), 0) or 0)
+        if source_item is None or source_quantity <= 0:
+            raise FbaInboundValidationError(f'{msku} is not packed in {from_box_id}')
+
+        packed_scan = cur.execute('''
+            SELECT * FROM fba_pack_scans
+            WHERE session_id = ? AND box_id = ? COLLATE NOCASE AND msku = ? COLLATE NOCASE
+            ORDER BY id DESC LIMIT 1
+        ''', (session_id, from_box_id, msku)).fetchone()
+        if not packed_scan:
+            raise FbaInboundValidationError(
+                f'The saved physical scan for {msku} in {from_box_id} could not be found'
+            )
+        packed_scan = dict(packed_scan)
+
+        if source_quantity == 1:
+            source_box['contents'] = [item for item in source_contents if item is not source_item]
+        else:
+            source_item['quantity'] = source_quantity - 1
+            source_box['contents'] = source_contents
+        destination_contents = (
+            destination_box.get('contents') if isinstance(destination_box.get('contents'), list) else []
+        )
+        destination_item = next((
+            item for item in destination_contents if isinstance(item, dict)
+            and _fba_trim(item.get('msku'), 255).casefold() == msku.casefold()
+        ), None)
+        if destination_item is None:
+            destination_item = {'msku': msku, 'quantity': 0}
+            destination_contents.append(destination_item)
+        destination_item['quantity'] = max(
+            0, _listingagent_parse_int(destination_item.get('quantity'), 0) or 0
+        ) + 1
+        destination_box['contents'] = destination_contents
+        # The physical contents changed, so both cartons must be weighed again.
+        source_box['weight_lb'] = ''
+        destination_box['weight_lb'] = ''
+        state['boxes'] = boxes
+        moved_at = _listagent_now_iso()
+        state['last_box_move'] = {
+            'move_token': move_token, 'barcode': barcode, 'msku': msku,
+            'from_box_id': from_box_id, 'to_box_id': to_box_id,
+            'pack_scan_id': int(packed_scan.get('id') or 0),
+            'client_id': client_id, 'operator_name': operator_name, 'moved_at': moved_at,
+        }
+
+        cur.execute('''
+            UPDATE fba_pack_scans
+            SET box_id = ?, packing_group_id = ?
+            WHERE id = ? AND session_id = ? AND box_id = ? COLLATE NOCASE
+        ''', (
+            to_box_id, destination_group_id, int(packed_scan.get('id') or 0),
+            session_id, from_box_id,
+        ))
+        if cur.rowcount != 1:
+            raise FbaInboundValidationError('Another scanner moved this unit first; refresh the cartons')
+        cur.execute('''
+            INSERT INTO fba_box_move_scans (
+                session_id, move_token, pack_scan_id, barcode, msku,
+                from_box_id, to_box_id, client_id, operator_name, moved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            session_id, move_token, int(packed_scan.get('id') or 0), barcode, msku,
+            from_box_id, to_box_id, client_id or None, operator_name or None, moved_at,
+        ))
+        state['last_box_move']['id'] = int(cur.lastrowid or 0)
+        _fba_save_amazon_state(conn, session_id, state)
+        conn.commit()
+        return jsonify({
+            'success': True, 'amazon_workflow': state, 'move': state['last_box_move'],
+            'reweigh_box_ids': [from_box_id, to_box_id],
+        })
+    except FbaInboundValidationError as exc:
+        if conn is not None:
+            conn.rollback()
+        return jsonify({'success': False, 'error': str(exc)}), 409
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+        return jsonify({'success': False, 'error': _safe_error(exc, 'fba box move scan')}), 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+
 @app.route('/api/fba-prep/sessions/<int:session_id>/amazon/reset-pack-scan', methods=['POST'])
 def api_fba_prep_amazon_reset_pack_scan(session_id):
     """Undo the newest packed unit for one MSKU so the physical unit can be rescanned."""
@@ -54774,6 +56096,9 @@ def api_fba_prep_count_scan(session_id):
                     match['title'] = _fba_trim(amazon_listing.get('title'), 500)
                     match['condition'] = _fba_trim(amazon_listing.get('condition') or 'New', 80)
                     match.setdefault('fba', {})['amazon_listing'] = amazon_listing
+                # The UI renders this persisted list in reverse order, so move a
+                # rescanned item to the end to keep the latest scan at the top.
+                items.append(items.pop(items.index(match)))
             else:
                 new_item = _fba_session_item_payload({
                     'barcode': barcode, 'barcode_display': barcode, 'barcode_key': barcode_key,
@@ -54899,9 +56224,39 @@ def api_fba_prep_validate_inbound(session_id):
         if not row:
             return jsonify({'success': False, 'error': 'Open FBA session not found'}), 404
         raw_items = _fba_json_list(row['items_json'])
+        expected_revision = int(row['count_revision'] or 0)
         items = [_fba_session_item_payload(item) for item in raw_items if isinstance(item, dict)]
         if not _fba_trim(row['amazon_inbound_plan_id'], 80):
             _fba_apply_inventory_offer_strategy(cur, items)
+            # Backfill a few exact Amazon prep records per request. The page
+            # continues in short passes, keeping large saved sessions responsive.
+            prep_pending = [
+                item for item in items
+                if _fba_trim(item.get('seller_sku'), 255)
+                and not _fba_trim((item.get('amazon_prep') or {}).get('checked_at'), 40)
+            ]
+            if prep_pending:
+                try:
+                    prep_api, prep_marketplace_id = _fba_amazon_client()
+                    prep_batch = prep_pending[:4]
+                    for prep_index, item in enumerate(prep_batch):
+                        item['amazon_prep'] = _fba_item_prep_details(
+                            item.get('seller_sku'), api=prep_api,
+                            marketplace_id=prep_marketplace_id,
+                        )
+                        if prep_index + 1 < len(prep_batch):
+                            time.sleep(0.52)
+                except Exception as prep_error:
+                    logger.warning('Amazon prep backfill could not start: %s', prep_error)
+                    for item in prep_pending[:4]:
+                        item['amazon_prep'] = _fba_normalize_prep_detail(
+                            {}, msku=item.get('seller_sku')
+                        )
+                        item['amazon_prep'].update({
+                            'checked': False,
+                            'checked_at': _listagent_now_iso(),
+                            'error': _fba_trim(_amazon_format_spapi_error(prep_error), 500),
+                        })
         now = _listagent_now_iso()
         changed = items != raw_items
         if changed:
@@ -54909,17 +56264,27 @@ def api_fba_prep_validate_inbound(session_id):
             current = cur.execute("SELECT amazon_inbound_plan_id FROM fba_prep_sessions WHERE id = ? AND status = 'open'", (session_id,)).fetchone()
             if current and not _fba_trim(current['amazon_inbound_plan_id'], 80):
                 cur.execute('''UPDATE fba_prep_sessions SET items_json = ?, count_revision = COALESCE(count_revision, 0) + 1,
-                               updated_at = ? WHERE id = ?''', (json.dumps(items, ensure_ascii=False), now, session_id))
+                               updated_at = ? WHERE id = ? AND COALESCE(count_revision, 0) = ?''',
+                            (json.dumps(items, ensure_ascii=False), now, session_id, expected_revision))
             conn.commit()
         row = cur.execute('SELECT * FROM fba_prep_sessions WHERE id = ?', (session_id,)).fetchone()
+        items = [
+            _fba_session_item_payload(item)
+            for item in _fba_json_list(row['items_json']) if isinstance(item, dict)
+        ]
         failed_items = [{
             'seller_sku': _fba_trim(item.get('seller_sku'), 255),
             'barcode': _fba_trim(item.get('barcode'), 160),
             'title': _fba_trim(item.get('title'), 160),
             'error': _fba_trim(item.get('fba_enablement_error'), 700),
         } for item in items if item.get('fba_enablement_status') == 'failed']
+        prep_lookup_remaining = sum(
+            1 for item in items if _fba_trim(item.get('seller_sku'), 255)
+            and not _fba_trim((item.get('amazon_prep') or {}).get('checked_at'), 40)
+        )
         return jsonify({'success': True, 'invalid_items': failed_items,
                         'failed_items': failed_items, 'enablement': _fba_enablement_progress(items),
+                        'prep_lookup_remaining': prep_lookup_remaining,
                         'session': _fba_session_row_payload(row, include_items=True)})
     except Exception as exc:
         if conn is not None:
@@ -55610,6 +56975,62 @@ def api_fba_prep_batches():
         return jsonify({'success': True, 'batches': [batch for batch in batches if batch is not None]})
     except Exception as exc:
         return jsonify({'success': False, 'error': _safe_error(exc, 'fba prep batches')}), 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@app.route('/api/fba-prep/items', methods=['GET'])
+def api_fba_prep_items():
+    """Search the permanent UPC, Seller SKU, and FNSKU ledger for completed FBA items."""
+    conn = None
+    try:
+        query = _fba_trim(request.args.get('q'), 160)
+        limit = max(1, min(_listingagent_parse_int(request.args.get('limit'), 250) or 250, 500))
+        conn = sqlite3.connect(str(BASE_DIR / 'searchRack.db'), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        _ensure_fba_prep_tables(cur)
+        conn.commit()
+        where_sql = "WHERE b.status = 'completed'"
+        params = []
+        if query:
+            where_sql += ''' AND (
+                i.barcode LIKE ? OR i.title LIKE ? OR i.asin LIKE ?
+                OR i.seller_sku LIKE ? OR i.fnsku LIKE ?
+                OR b.batch_name LIKE ? OR b.shipment_id LIKE ?
+                OR b.amazon_inbound_plan_id LIKE ?
+            )'''
+            like_query = f'%{query}%'
+            params.extend([like_query] * 8)
+        total = cur.execute(f'''
+            SELECT COUNT(*)
+            FROM fba_prep_items i
+            JOIN fba_prep_batches b ON b.id = i.batch_id
+            {where_sql}
+        ''', params).fetchone()[0]
+        rows = cur.execute(f'''
+            SELECT i.id, i.batch_id, i.barcode, i.title,
+                   i.requested_quantity, i.quantity_removed,
+                   i.asin, i.seller_sku, i.fnsku, i.item_condition,
+                   i.created_at, b.batch_name, b.shipment_id,
+                   b.amazon_inbound_plan_id, b.destination_fc,
+                   b.completed_at
+            FROM fba_prep_items i
+            JOIN fba_prep_batches b ON b.id = i.batch_id
+            {where_sql}
+            ORDER BY COALESCE(b.completed_at, i.created_at) DESC, i.id DESC
+            LIMIT ?
+        ''', [*params, limit]).fetchall()
+        return jsonify({
+            'success': True,
+            'items': [dict(row) for row in rows],
+            'count': int(total or 0),
+            'limit': limit,
+            'query': query,
+        })
+    except Exception as exc:
+        return jsonify({'success': False, 'error': _safe_error(exc, 'fba prep item ledger')}), 500
     finally:
         if conn is not None:
             conn.close()

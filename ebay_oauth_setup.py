@@ -132,7 +132,12 @@ def exchange_code_for_tokens(auth_code):
 def save_tokens(token_data, scopes_used):
     """Save tokens to tokens.json"""
     # Add expiration timestamp
-    token_data["expires_at"] = time.time() + token_data.get("expires_in", 7200)
+    issued_at = time.time()
+    token_data["expires_at"] = issued_at + token_data.get("expires_in", 7200)
+    refresh_lifetime = token_data.get("refresh_token_expires_in")
+    if refresh_lifetime is not None:
+        token_data["refresh_token_issued_at"] = issued_at
+        token_data["refresh_token_expires_at"] = issued_at + float(refresh_lifetime)
     if not token_data.get("scope"):
         token_data["scope"] = " ".join(scopes_used or [])
 
