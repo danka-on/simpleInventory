@@ -959,6 +959,10 @@
     <div class="scan-container">
         <div class="input-container">
             <input type="text" id="barcodeInput" placeholder="Scan barcode..." autofocus autocomplete="off" data-scanner-keyboard="off">
+    <div style="margin:8px 0;text-align:center">
+        <button type="button" id="scanVoiceOnBtn" style="padding:10px 16px;border:1px solid #2563eb;border-radius:8px;background:#eff6ff;color:#1e40af;font-weight:700;cursor:pointer">Voice ON / test sound</button>
+        <div id="scanFeedbackStatus" role="status" aria-live="polite" style="color:#92400e;background:#fffbeb;font-size:14px;line-height:1.4;margin-top:6px"></div>
+    </div>
             <button type="button" id="noBarcodeBtn" class="no-barcode-open-btn">
                 <i class="fas fa-barcode"></i>
                 <span>No Barcode</span>
@@ -1034,7 +1038,10 @@
             <div class="missing-title-icon"><i class="fas fa-wave-square"></i></div>
             <h3 class="missing-title-heading">Missing Title/Image</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
-            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Enter a warehouse title" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done" data-scanner-keyboard="on">
+            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Brand + item + size/color (only what you can verify)" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done" data-scanner-keyboard="on">
+            <p style="font-size:13px">Read the label: brand, item type, size or color. Keep uncertain details out. Saved names are remembered even after stock is removed; Macy BOL and store data take priority when available.</p>
+            <button type="button" id="warehouseDictateBtn" class="missing-title-note-btn" hidden>Dictate name</button>
+            <div id="warehouseIdentityStatus" role="status" aria-live="polite" style="font-size:13px;color:#b45309"></div>
             <button type="button" id="missingTitleNoteBtn" class="missing-title-note-btn">+ note</button>
             <textarea id="missingTitleNoteInput" class="missing-title-note-input" maxlength="2000" placeholder="Warehouse note for this exact item"></textarea>
             <div id="missingTitlePhotoSection" class="missing-title-photo">
@@ -1065,11 +1072,24 @@
 
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+    <script src="/static/scan-feedback.js?v=1"></script>
+    <script src="/static/warehouse-identity.js?v=1"></script>
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
     <script src="/static/no-barcode-label.js?v=20260716b"></script>
-    <script src="/static/ios-scanner-keyboard.js?v=20260716a"></script>
+    <script src="/static/ios-scanner-keyboard.js?v=20260907a"></script>
     
     <script>
+        // Feedback is optional: a missing asset or audio failure must not drop scans.
+        async function runScanFeedback(method, ...args) {
+            try {
+                if (window.ScanFeedback && typeof window.ScanFeedback[method] === 'function') {
+                    await window.ScanFeedback[method](...args);
+                }
+            } catch (error) {
+                console.warn('Scan feedback unavailable:', error);
+            }
+        }
+
         const barcodeEntryState = window.BarcodeEntryState;
         const MANUAL_TITLE_STORAGE_KEY = 'additem_manual_titles';
         const SCANNED_SUFFIXES_KEY = 'barcode_scanned_suffixes';
@@ -1583,36 +1603,7 @@
         }
 
         function playMissingTitleAlert() {
-            try {
-                const Ctx = window.AudioContext || window.webkitAudioContext;
-                if (!Ctx) return;
-                const ctx = window.audioCtx || new Ctx();
-                window.audioCtx = ctx;
-                const start = ctx.currentTime + 0.02;
-                const notes = [
-                    { freq: 932, at: 0, dur: 0.09 },
-                    { freq: 698, at: 0.12, dur: 0.1 },
-                    { freq: 1046, at: 0.26, dur: 0.15 }
-                ];
-                notes.forEach(note => {
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    osc.type = 'triangle';
-                    osc.frequency.setValueAtTime(note.freq, start + note.at);
-                    gain.gain.setValueAtTime(0.0001, start + note.at);
-                    gain.gain.exponentialRampToValueAtTime(0.17, start + note.at + 0.02);
-                    gain.gain.exponentialRampToValueAtTime(0.0001, start + note.at + note.dur);
-                    osc.connect(gain);
-                    gain.connect(ctx.destination);
-                    osc.start(start + note.at);
-                    osc.stop(start + note.at + note.dur + 0.03);
-                    osc.onended = () => {
-                        osc.disconnect();
-                        gain.disconnect();
-                    };
-                });
-            } catch (_) {}
-            if (navigator.vibrate) navigator.vibrate([90, 60, 90, 60, 130]);
+            runScanFeedback('needsInfo', true);
         }
 
         function shouldPreferScannerInput() {
@@ -1804,6 +1795,7 @@
 
         function closeMissingTitleModal(result) {
             if (!missingTitleModal) return;
+            if (window.warehouseIdentity) window.warehouseIdentity.reset();
             missingTitleModal.style.display = 'none';
             missingTitleModalOpen = false;
             missingTitleCurrentIssue = null;
@@ -1844,6 +1836,7 @@
             const existingNote = cleanMissingTitleWarehouseNote(missingTitleCurrentIssue.existingNote || missingTitleCurrentIssue.note || '');
             missingTitleBarcodeText.textContent = formatUpcDisplay(code);
             missingTitleInput.value = existingTitle;
+            if (window.warehouseIdentity) window.warehouseIdentity.reset();
             missingTitleInput.style.borderColor = '#f2c66d';
             missingTitleInput.style.boxShadow = '';
             resetMissingTitlePhotoState();
@@ -1865,7 +1858,6 @@
         async function fetchAddItemScreeningSingle(code) {
             const key = normalizeManualTitleKey(code);
             if (!key) return null;
-            if (screeningCache.has(key)) return screeningCache.get(key);
 
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), 8000);
@@ -1896,14 +1888,17 @@
             if (!key) return true;
 
             const overrides = loadManualTitleOverrides();
-            if (overrides[key]) return true;
             const skipped = loadSkippedManualTitles();
             if (skipped[key]) return true;
 
             let item = null;
             try {
                 item = await fetchAddItemScreeningSingle(key);
-                if (!item || !item.needs_manual_title) return true;
+                if (!item) return true;
+                if (!item.needs_manual_title) {
+                    if (item.missing_image) await runScanFeedback('needsInfo', false, key);
+                    return true;
+                }
             } catch (err) {
                 console.error('Barcode screening failed; continuing without a manual-title prompt:', err);
                 return true;
@@ -1911,7 +1906,7 @@
 
             const modalResult = await openMissingTitleModal(code, {
                 barcode: key,
-                existingTitle: String(item.title || '').trim(),
+                existingTitle: String(item.title || overrides[key] || '').trim(),
                 existingNote: pendingMissingTitleNotes[key] || '',
                 missingImage: Boolean(item.missing_image)
             });
@@ -1969,6 +1964,7 @@
         
         // Add barcode to list
         async function addBarcode(code) {
+            await runScanFeedback('check', code);
             code = normalizeScannedBarcode(code);
             // Validate barcode format
             if (!isValidBarcode(code)) {
@@ -2130,7 +2126,7 @@
         }
 
         if (missingTitleSaveBtn) {
-            missingTitleSaveBtn.addEventListener('click', () => {
+            missingTitleSaveBtn.addEventListener('click', async () => {
                 const value = String(missingTitleInput && missingTitleInput.value || '').replace(/\s+/g, ' ').trim();
                 if (!value) {
                     if (missingTitleInput) {
@@ -2140,6 +2136,19 @@
                     }
                     return;
                 }
+                if (missingTitleSaveBtn.disabled) return;
+                const savingIssue = missingTitleCurrentIssue;
+                missingTitleSaveBtn.disabled = true;
+                try {
+                    await window.warehouseIdentity.save(savingIssue.barcode, value);
+                    screeningCache.delete(normalizeManualTitleKey(savingIssue.barcode));
+                } catch (err) {
+                    document.getElementById('warehouseIdentityStatus').textContent = err.message;
+                    missingTitleSaveBtn.disabled = false;
+                    return;
+                }
+                missingTitleSaveBtn.disabled = false;
+                if (missingTitleCurrentIssue !== savingIssue) return;
                 const issueKey = normalizeManualTitleKey(
                     missingTitleCurrentIssue && missingTitleCurrentIssue.barcode
                 );

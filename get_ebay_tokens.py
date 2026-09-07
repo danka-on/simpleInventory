@@ -27,7 +27,7 @@ data = {
     "redirect_uri": REDIRECT_URI
 }
 
-response = requests.post(url, headers=headers, data=data)
+response = requests.post(url, headers=headers, data=data, timeout=30)
 print("Status:", response.status_code)
 result = response.json()
 print(json.dumps(result, indent=2))

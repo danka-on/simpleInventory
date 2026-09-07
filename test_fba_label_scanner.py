@@ -4,7 +4,10 @@ import unittest
 
 os.environ.setdefault("DISABLE_BACKGROUND_SERVICES", "1")
 
-import app as app_module
+from sweetshelves.bootstrap import app  # Initialize routes once for Flask client tests.
+from sweetshelves import fba_scanning as ss_fba_scanning
+from sweetshelves import runtime as ss_runtime
+
 
 
 def session_row(*, session_id=7, barcode="025398232475", msku="SKU-1", fnsku="X001234567"):
@@ -32,11 +35,11 @@ def session_row(*, session_id=7, barcode="025398232475", msku="SKU-1", fnsku="X0
 
 class FbaLabelScannerTest(unittest.TestCase):
     def setUp(self):
-        app_module.app.testing = True
-        self.client = app_module.app.test_client()
+        ss_runtime.app.testing = True
+        self.client = ss_runtime.app.test_client()
 
     def test_resolves_scanned_barcode_to_open_plan_fnsku(self):
-        match = app_module._fba_planned_label_match(
+        match = ss_fba_scanning._fba_planned_label_match(
             "025398232475", [session_row()]
         )
         self.assertTrue(match["printable"])
@@ -45,14 +48,14 @@ class FbaLabelScannerTest(unittest.TestCase):
         self.assertEqual(match["fnsku"], "X001234567")
 
     def test_returns_waiting_match_when_amazon_has_not_assigned_fnsku(self):
-        match = app_module._fba_planned_label_match(
+        match = ss_fba_scanning._fba_planned_label_match(
             "025398232475", [session_row(fnsku="")]
         )
         self.assertFalse(match["printable"])
         self.assertEqual(match["session_id"], 7)
 
     def test_uses_newest_printable_plan_when_newest_match_is_not_ready(self):
-        match = app_module._fba_planned_label_match(
+        match = ss_fba_scanning._fba_planned_label_match(
             "025398232475",
             [session_row(session_id=9, fnsku=""), session_row(session_id=7)],
         )

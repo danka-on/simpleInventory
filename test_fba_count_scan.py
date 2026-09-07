@@ -9,7 +9,14 @@ from unittest.mock import Mock
 
 os.environ.setdefault("DISABLE_BACKGROUND_SERVICES", "1")
 
-import app as app_module
+from sweetshelves.bootstrap import app  # Initialize routes once for Flask client tests.
+from sweetshelves import amazon_catalog as ss_amazon_catalog
+from sweetshelves import config as ss_config
+from sweetshelves import fba_inventory as ss_fba_inventory
+from sweetshelves import fba_readiness as ss_fba_readiness
+from sweetshelves import fba_schema as ss_fba_schema
+from sweetshelves import runtime as ss_runtime
+import time
 
 
 class FbaCountScanTest(unittest.TestCase):
@@ -17,14 +24,14 @@ class FbaCountScanTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.base_dir = Path(self.temp.name)
         db = sqlite3.connect(self.base_dir / "searchRack.db")
-        app_module._ensure_fba_prep_tables(db.cursor())
+        ss_fba_schema._ensure_fba_prep_tables(db.cursor())
         db.execute("""INSERT INTO fba_prep_sessions
                     (id, session_name, items_json, item_count, total_units, status, created_at, updated_at)
                     VALUES (1, 'Count', '[]', 0, 0, 'open', 'now', 'now')""")
         db.commit()
         db.close()
-        app_module.app.testing = True
-        self.client = app_module.app.test_client()
+        ss_runtime.app.testing = True
+        self.client = ss_runtime.app.test_client()
 
     def tearDown(self):
         self.temp.cleanup()
@@ -36,9 +43,9 @@ class FbaCountScanTest(unittest.TestCase):
         })
 
     def test_unmatched_item_is_rejected_and_not_counted(self):
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_local_amazon_listing", return_value={}),
-              patch.object(app_module, "_amazon_spapi_context", side_effect=RuntimeError("offline"))):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value={}),
+              patch.object(ss_amazon_catalog, "_amazon_spapi_context", side_effect=RuntimeError("offline"))):
             response = self.scan()
         self.assertEqual(response.status_code, 422)
         payload = response.get_json()
@@ -51,12 +58,12 @@ class FbaCountScanTest(unittest.TestCase):
 
     def test_asin_fallback_is_counted_with_seller_sku(self):
         listing = {"asin": "B000U67JMQ", "seller_sku": "PL-8ALB-G8IZ", "title": "Tablecloth"}
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_local_amazon_listing", return_value={}),
-              patch.object(app_module, "_amazon_spapi_context", return_value=(object(), "seller", "market", object())),
-              patch.object(app_module, "_amazon_resolve_asin_from_upc", return_value="B000U67JMQ"),
-              patch.object(app_module, "_fba_local_amazon_listing_by_asin", return_value=listing),
-              patch.object(app_module, "_fba_listing_readiness", return_value={
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value={}),
+              patch.object(ss_amazon_catalog, "_amazon_spapi_context", return_value=(object(), "seller", "market", object())),
+              patch.object(ss_amazon_catalog, "_amazon_resolve_asin_from_upc", return_value="B000U67JMQ"),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing_by_asin", return_value=listing),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value={
                   "status": "ready", "fnsku": "X001234567", "product_type": "HOME"
               })):
             response = self.scan("047596190524")
@@ -70,9 +77,9 @@ class FbaCountScanTest(unittest.TestCase):
 
     def test_listing_without_fnsku_is_counted_for_enablement(self):
         listing = {"asin": "B07XV1JMRF", "seller_sku": "W2-NGC9-BAZS", "title": "Tablecloth"}
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_local_amazon_listing", return_value=listing),
-              patch.object(app_module, "_fba_listing_readiness", return_value={
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value=listing),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value={
                   "status": "needs_enablement", "fnsku": "", "product_type": "HOME",
                   "fulfillment_channels": ["DEFAULT"], "error": "",
               })):
@@ -90,9 +97,9 @@ class FbaCountScanTest(unittest.TestCase):
 
     def test_blocking_amazon_listing_error_is_rejected_and_not_counted(self):
         listing = {"asin": "B07XV1JMRF", "seller_sku": "SKU-BLOCKED", "title": "Blocked item"}
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_local_amazon_listing", return_value=listing),
-              patch.object(app_module, "_fba_listing_readiness", return_value={
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value=listing),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value={
                   "status": "failed", "error": "Missing required product attribute",
               })):
             response = self.scan("026865983135")
@@ -110,9 +117,9 @@ class FbaCountScanTest(unittest.TestCase):
         message = ("'Dangerous Goods Regulations' is required but missing. "
                    "(supplier_declared_dg_hz_regulation); 'Are batteries required?' is required "
                    "but missing. (batteries_required)")
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_local_amazon_listing", return_value=listing),
-              patch.object(app_module, "_fba_listing_readiness", return_value={
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value=listing),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value={
                   "status": "needs_safety_info", "error": message, "product_type": "HOME",
               })):
             response = self.scan("026865983135")
@@ -129,9 +136,9 @@ class FbaCountScanTest(unittest.TestCase):
         message = ("'Dangerous Goods Regulations' is required but missing. "
                    "(supplier_declared_dg_hz_regulation); 'Are batteries required?' is required "
                    "but missing. (batteries_required)")
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_local_amazon_listing", return_value=listing),
-              patch.object(app_module, "_fba_listing_readiness", return_value={
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value=listing),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value={
                   "status": "failed", "error": message, "product_type": "HOME",
               })):
             response = self.scan("047596044292")
@@ -156,7 +163,7 @@ class FbaCountScanTest(unittest.TestCase):
         ))
         db.commit()
         db.close()
-        with patch.object(app_module, "BASE_DIR", self.base_dir):
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
             response = self.client.post("/api/fba-prep/sessions/1/validate-inbound")
         self.assertEqual(response.status_code, 200)
         item = response.get_json()["session"]["items"][0]
@@ -171,7 +178,7 @@ class FbaCountScanTest(unittest.TestCase):
         ))
         db.commit()
         db.close()
-        with patch.object(app_module, "BASE_DIR", self.base_dir):
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
             response = self.client.post("/api/fba-prep/sessions/1/validate-inbound")
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -183,7 +190,7 @@ class FbaCountScanTest(unittest.TestCase):
         ))
 
     def test_enable_fba_requires_explicit_confirmation(self):
-        with patch.object(app_module, "BASE_DIR", self.base_dir):
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={})
         self.assertEqual(response.status_code, 400)
         self.assertIn("inventory-aware", response.get_json()["error"])
@@ -203,8 +210,8 @@ class FbaCountScanTest(unittest.TestCase):
             "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT", "quantity": 1}],
         })
         listings.patch_listings_item.return_value = Mock(errors=None, payload={"status": "ACCEPTED", "issues": []})
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={"confirm": True})
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -232,7 +239,7 @@ class FbaCountScanTest(unittest.TestCase):
         listings.patch_listings_item.return_value = Mock(errors=None, payload={
             "status": "ACCEPTED", "issues": [stale_issue],
         })
-        result = app_module._fba_patch_listing_to_fba(
+        result = ss_fba_readiness._fba_patch_listing_to_fba(
             "SKU-LOOP",
             {"status": "needs_enablement", "product_type": "TABLE_RUNNER",
              "fulfillment_channels": ["DEFAULT"]},
@@ -267,11 +274,11 @@ class FbaCountScanTest(unittest.TestCase):
             "source_sku": "FBM-SKU", "target_sku": "FBM-SKU-FBA",
             "strategy": "separate_fba_sku",
         }
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=listings_client),
-              patch.object(app_module, "_fba_listing_readiness", return_value=readiness),
-              patch.object(app_module, "_fba_create_separate_fba_offer", return_value=created) as create_offer,
-              patch.object(app_module, "_fba_patch_listing_to_fba") as convert_offer):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=listings_client),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value=readiness),
+              patch.object(ss_fba_readiness, "_fba_create_separate_fba_offer", return_value=created) as create_offer,
+              patch.object(ss_fba_readiness, "_fba_patch_listing_to_fba") as convert_offer):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={"confirm": True})
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -299,7 +306,7 @@ class FbaCountScanTest(unittest.TestCase):
                    ("026865983135", "OR1S1B1", 1))
         items = [{"barcode": "026865983135", "seller_sku": "ONLY-SKU", "quantity": 1}]
         try:
-            app_module._fba_apply_inventory_offer_strategy(db.cursor(), items)
+            ss_fba_inventory._fba_apply_inventory_offer_strategy(db.cursor(), items)
         finally:
             db.close()
         self.assertEqual(items[0]["local_inventory_remaining_after_fba"], 0)
@@ -337,7 +344,7 @@ class FbaCountScanTest(unittest.TestCase):
             errors=None, payload={"status": "ACCEPTED", "issues": []},
         )
         client = (listings, "SELLER", "ATVPDKIKX0DER")
-        result = app_module._fba_create_separate_fba_offer(
+        result = ss_fba_readiness._fba_create_separate_fba_offer(
             "FBM-SKU", "FBM-SKU-FBA",
             {"status": "needs_enablement", "product_type": "TABLECLOTH"},
             client=client,
@@ -374,10 +381,10 @@ class FbaCountScanTest(unittest.TestCase):
             return {"status": "needs_enablement", "seller_sku": sku,
                     "product_type": "HOME", "fulfillment_channels": ["DEFAULT"], "error": ""}
 
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=listings_client),
-              patch.object(app_module, "_fba_listing_readiness", side_effect=readiness),
-              patch.object(app_module, "_fba_patch_listing_to_fba",
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=listings_client),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", side_effect=readiness),
+              patch.object(ss_fba_readiness, "_fba_patch_listing_to_fba",
                            return_value={"status": "enabling", "issues": []}) as enable_patch):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={
                 "confirm": True, "seller_skus": ["SKU-2"],
@@ -408,12 +415,12 @@ class FbaCountScanTest(unittest.TestCase):
             return {"status": "needs_enablement", "seller_sku": sku,
                     "product_type": "HOME", "fulfillment_channels": ["DEFAULT"], "error": ""}
 
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=listings_client),
-              patch.object(app_module, "_fba_listing_readiness", side_effect=readiness),
-              patch.object(app_module, "_fba_patch_listing_to_fba",
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=listings_client),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", side_effect=readiness),
+              patch.object(ss_fba_readiness, "_fba_patch_listing_to_fba",
                            return_value={"status": "enabling", "issues": []}),
-              patch.object(app_module.time, "sleep")):
+              patch.object(time, "sleep")):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={"confirm": True})
         self.assertEqual(response.status_code, 200)
         payload = response.get_json()
@@ -434,7 +441,7 @@ class FbaCountScanTest(unittest.TestCase):
         ))
         db.commit()
         db.close()
-        with patch.object(app_module, "BASE_DIR", self.base_dir):
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
             response = self.client.post("/api/fba-prep/sessions/1/validate-inbound")
         self.assertEqual(response.status_code, 200)
         item = response.get_json()["session"]["items"][0]
@@ -465,8 +472,8 @@ class FbaCountScanTest(unittest.TestCase):
         listings.patch_listings_item.return_value = Mock(errors=None, payload={
             "status": "ACCEPTED", "issues": safety_issues,
         })
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
             response = self.client.post("/api/fba-prep/sessions/1/resolve-fba-safety", json={
                 "confirm_not_dangerous_goods": True, "seller_skus": ["SKU-SAFETY"],
             })
@@ -491,8 +498,8 @@ class FbaCountScanTest(unittest.TestCase):
         ))
         db.commit()
         db.close()
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client") as listings_client):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client") as listings_client):
             response = self.client.post("/api/fba-prep/sessions/1/resolve-fba-safety", json={
                 "confirm_not_dangerous_goods": True, "seller_skus": ["SKU-BATTERY"],
             })
@@ -515,8 +522,8 @@ class FbaCountScanTest(unittest.TestCase):
             "summaries": [{"productType": "HOME", "fnSku": "X0099ABC12"}],
             "issues": [], "fulfillmentAvailability": [{"fulfillmentChannelCode": "AMAZON_NA"}],
         })
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba-status")
         self.assertEqual(response.status_code, 200)
         item = response.get_json()["session"]["items"][0]
@@ -541,10 +548,10 @@ class FbaCountScanTest(unittest.TestCase):
             "status": "needs_enablement", "product_type": "HOME",
             "fulfillment_channels": [], "error": "",
         }
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=listings_client),
-              patch.object(app_module, "_fba_listing_readiness", return_value=readiness),
-              patch.object(app_module, "_fba_patch_listing_to_fba",
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=listings_client),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value=readiness),
+              patch.object(ss_fba_readiness, "_fba_patch_listing_to_fba",
                            return_value={"status": "enabling", "issues": []}) as retry_patch):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba-status")
         self.assertEqual(response.status_code, 200)
@@ -572,10 +579,10 @@ class FbaCountScanTest(unittest.TestCase):
             "status": "needs_enablement", "product_type": "HOME",
             "fulfillment_channels": [], "error": "",
         }
-        with (patch.object(app_module, "BASE_DIR", self.base_dir),
-              patch.object(app_module, "_fba_listings_client", return_value=listings_client),
-              patch.object(app_module, "_fba_listing_readiness", return_value=readiness),
-              patch.object(app_module, "_fba_patch_listing_to_fba") as retry_patch):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=listings_client),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value=readiness),
+              patch.object(ss_fba_readiness, "_fba_patch_listing_to_fba") as retry_patch):
             response = self.client.post("/api/fba-prep/sessions/1/enable-fba-status")
         self.assertEqual(response.status_code, 200)
         item = response.get_json()["session"]["items"][0]

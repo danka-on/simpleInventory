@@ -22,6 +22,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -67,7 +68,7 @@ def resolve_databases(names: list[str]) -> list[Path]:
 
 def sqlite_row_count(db_path: Path) -> int | None:
     try:
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path.resolve().as_uri() + '?mode=ro', uri=True)) as conn:
             cur = conn.cursor()
             cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND lower(name)='searchrack' LIMIT 1")
             if cur.fetchone():
@@ -79,6 +80,8 @@ def sqlite_row_count(db_path: Path) -> int | None:
 
 
 def prune_old_backups(backup_dir: Path, db_stem: str, keep: int) -> list[Path]:
+    if keep < 1:
+        raise ValueError('Keep must be at least 1')
     pattern = f"{db_stem}-*.sqlite3.gz"
     backups = sorted(
         backup_dir.glob(pattern),
@@ -96,23 +99,28 @@ def create_sqlite_backup(db_path: Path, backup_dir: Path) -> BackupResult:
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    ensure_directory(backup_dir)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     db_stem = db_path.stem
     output_path = backup_dir / f"{db_stem}-{timestamp}.sqlite3.gz"
 
     temp_fd, temp_name = tempfile.mkstemp(prefix=f"{db_stem}-", suffix=".sqlite3", dir=str(backup_dir))
     os.close(temp_fd)
     temp_path = Path(temp_name)
+    compressed_path = temp_path.with_suffix('.gz.tmp')
 
     try:
-        with sqlite3.connect(db_path) as src_conn, sqlite3.connect(temp_path) as dst_conn:
+        with closing(sqlite3.connect(db_path.resolve().as_uri() + '?mode=ro', uri=True)) as src_conn, closing(sqlite3.connect(temp_path)) as dst_conn:
             src_conn.backup(dst_conn)
-            dst_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            # A WAL source transfers its journal-mode flag to the snapshot.
+            # Make the backup self-contained before compressing or counting it.
+            dst_conn.execute('PRAGMA journal_mode=DELETE')
 
-        with open(temp_path, "rb") as src_file, gzip.open(output_path, "wb", compresslevel=6) as gz_file:
+        with open(temp_path, "rb") as src_file, gzip.open(compressed_path, "wb", compresslevel=6) as gz_file:
             shutil.copyfileobj(src_file, gz_file)
 
         row_count = sqlite_row_count(temp_path)
+        os.replace(compressed_path, output_path)
         size_bytes = output_path.stat().st_size
         return BackupResult(
             db_name=db_path.name,
@@ -122,6 +130,7 @@ def create_sqlite_backup(db_path: Path, backup_dir: Path) -> BackupResult:
         )
     finally:
         temp_path.unlink(missing_ok=True)
+        compressed_path.unlink(missing_ok=True)
 
 
 def list_backups(backup_dir: Path, db_filters: list[str] | None = None) -> int:
@@ -136,7 +145,7 @@ def list_backups(backup_dir: Path, db_filters: list[str] | None = None) -> int:
     )
     if db_filters:
         allowed = {Path(name).stem for name in db_filters}
-        all_files = [p for p in all_files if p.name.split("-", 1)[0] in allowed]
+        all_files = [p for p in all_files if p.name.rsplit("-", 1)[0] in allowed]
 
     if not all_files:
         print(f"No backups found in {backup_dir}")

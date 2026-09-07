@@ -1,0 +1,63 @@
+.....................................................................................WARNING:app:FBA scan Amazon catalog-to-SKU match failed for 225934704567: offline
+........................C:\Users\boxatron\AppData\Local\Temp\sweetshelves-checks-1j4lk2lk\marketplace_manager.py:184: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  created_at = datetime.datetime.utcnow().isoformat()
+.C:\Users\boxatron\AppData\Local\Temp\sweetshelves-checks-1j4lk2lk\rawbol_manager.py:621: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  sync_date = datetime.datetime.utcnow().isoformat()
+.......................
+----------------------------------------------------------------------
+Ran 133 tests in 35.118s
+
+OK
+🔍 Creating database indexes for faster searches...
+✅ Database indexes created
+✅ Amazon integration loaded successfully
+🔧 Python executable: C:\Users\boxatron\AppData\Local\Programs\Python\Python313\python.exe
+Info: brother_ql not installed. Install with: pip install brother_ql
+⚠️ eBay token refresh failed at startup: [Errno 2] No such file or directory: 'C:\\Users\\boxatron\\AppData\\Local\\Temp\\sweetshelves-checks-1j4lk2lk\\tokens.json'
+   The app will start, but eBay API calls will fail until token is refreshed.
+✅ Lifecycle tables initialized
+✅ Payouts table initialized
+[SHELF_GROUPS] Added group_id column to shelves table
+[SHELF_GROUPS] Created default group
+⚠️ Active inventory guard not installed: SEARCHRACK table not found
+✅ Database initialization completed
+Matched order 1: barcode=123456789012, location=A1
+Matched order 1: barcode=123456789012, location=A1
+Matched order 1: barcode=123456789012, location=A1
+Matched order 1: barcode=999999999999, location=
+added new shelf entry: barcode=123, position=A1 to searchRack: position=A1, barcode=123, title=Old custom
+incremented quantity to 2 for barcode=123, position=A1 to searchRack: position=A1, barcode=123, title=Macy shirt
+Adding aftersale_quantity column to raw_bol_items table...
+Column added and initialized successfully!
+Adding aftersale_quantity column to raw_bol_items table...
+Column added and initialized successfully!
+Adding aftersale_quantity column to raw_bol_items table...
+Column added and initialized successfully!
+Adding aftersale_quantity column to raw_bol_items table...
+Column added and initialized successfully!
+🔄 Starting eBay fees sync...
+  ✅ multi: $3.00 seller fee
+  ✅ free: $0.01 seller fee
+
+✅ Updated 2 eBay orders with seller fees
+Adding aftersale_quantity column to raw_bol_items table...
+Column added and initialized successfully!
+Adding aftersale_quantity column to raw_bol_items table...
+Column added and initialized successfully!
+Adding aftersale_quantity column to raw_bol_items table...
+Column added and initialized successfully!
+Parsed 83 scripts; 0 failed.
+Finder order/listing learning and undo client checks passed
+UPC record rendering, escaping, stale requests, and errors passed
+Phone/tablet keyboard typing, layout, deletion, focus, dismissal and scanner exclusion passed
+PASS: both AI buttons apply suffixed-item responses, display errors, and reject stale responses.
+PASS: typed searches, barcode/title fallback parameters, stale search/item responses, protected detail fill.
+PASS: selected suffixed identity survives base-UPC form data.
+PASS: script syntax, eBay/Amazon preflight (13 invalid cases), save success/failure and in-flight edits.
+Scan feedback checks passed
+multibarcode: missing feedback, scanner input passed
+multibarcode: throws feedback, scanner input passed
+multibarcode: loaded feedback, scanner input passed
+barcode: missing feedback, scanner input passed
+barcode: throws feedback, scanner input passed
+barcode: loaded feedback, scanner input passed

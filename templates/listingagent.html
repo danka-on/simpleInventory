@@ -2401,6 +2401,7 @@
       font-size: 0.78rem;
     }
   </style>
+  <link rel="stylesheet" href="/static/listing-workspace.css?v=20260907c">
 </head>
 <body>
   <div id="loading-overlay"><div class="spinner"></div></div>
@@ -2627,15 +2628,15 @@
 
               <!-- ── From eBay Market (catalog / item specifics) ── -->
               <div class="field" style="margin:0;">
-                <label style="font-weight:700;">From eBay Market</label>
-                <div class="hint">Searches all of eBay by UPC/title and suggests item specifics (brand, model, color, etc.) from real listings.</div>
+                <label style="font-weight:700;">Barcode, product name, or model</label>
+                <div class="hint">Find the same product on eBay, then use its details to build your listing. Check model, size, and color before applying.</div>
                 <div class="btnRow" style="margin-top:8px;justify-content:flex-start;">
-                  <input id="ebayCatalogQ" type="text" placeholder="UPC or title..." autocomplete="off" style="flex:1;" />
+                  <input id="ebayCatalogQ" type="text" placeholder="e.g. KitchenAid KSM150 blue or barcode" aria-label="Find similar eBay listings" autocomplete="off" style="flex:1;" />
                   <button class="btn btnGhost" id="btnEbayCatalogSearch" type="button"><i class="fas fa-search"></i>Search</button>
                 </div>
                 <div class="hint" id="ebayCatalogHint" style="margin-top:6px;">Select a UPC to auto-search.</div>
-                <div id="ebayCatalogBox" class="miniBox" style="margin-top:8px;max-height:220px;overflow-y:auto;">
-                  <div class="muted">Select a UPC to load catalog matches.</div>
+                <div id="ebayCatalogBox" class="miniBox" style="margin-top:8px;max-height:560px;overflow-y:auto;">
+                  <div class="muted">Select an item to find similar listings.</div>
                 </div>
               </div>
 
@@ -2737,7 +2738,7 @@
               <div class="row2">
                 <div class="field">
                   <label for="price">Price (USD)</label>
-                  <input id="price" type="number" min="0" step="0.01" placeholder="0.00" />
+                  <input id="price" type="number" min="0.01" step="0.01" placeholder="0.00" />
                   <div class="hint" id="suggestedPriceHint" style="display:none;"></div>
                 </div>
                 <div class="field">
@@ -2893,8 +2894,8 @@
                 <div class="hint" id="amazonCatalogSelectHint" style="margin-top:8px;">Select a UPC or search to see available catalog listings.</div>
                 <div class="hint" id="amazonCatalogModeHint" style="margin-top:6px;display:none;"></div>
 
-                <div id="amazonTemplatesBox" class="miniBox" style="margin-top:10px;max-height:220px;overflow-y:auto;">
-                  <div class="muted">Select a UPC to load catalog matches.</div>
+                <div id="amazonTemplatesBox" class="miniBox" style="margin-top:10px;max-height:560px;overflow-y:auto;">
+                  <div class="muted">Select an item to find similar listings.</div>
                 </div>
                 <div id="amazonCatalogDetail" style="display:none;"></div>
               </div>
@@ -2952,12 +2953,12 @@
               <div class="row2">
                 <div class="field">
                   <label for="amazonPrice">Price (USD)</label>
-                  <input id="amazonPrice" type="number" min="0" step="0.01" placeholder="0.00" />
+                  <input id="amazonPrice" type="number" min="0.01" step="0.01" placeholder="0.00" />
                   <div class="hint" id="amazonSuggestedPriceHint" style="display:none;"></div>
                 </div>
                 <div class="field">
                   <label for="amazonQuantity">Quantity</label>
-                  <input id="amazonQuantity" type="number" min="0" step="1" value="1" />
+                  <input id="amazonQuantity" type="number" min="1" step="1" value="1" />
                 </div>
               </div>
 
@@ -3722,6 +3723,8 @@
 
     const _LEGACY_WORKING_DRAFT_STORAGE_KEY = 'listingagent_working_drafts';
     const _WORKING_DRAFT_FIELD_IDS = [
+      'mappingReferenceId',
+      'mappingTaskId',
       'title',
       'sku',
       'condition',
@@ -3986,22 +3989,41 @@
       return true;
     }
 
+    let workingDraftSaveInFlight = null;
     async function saveWorkingDraftForActiveItem(){
+      if(workingDraftSaveInFlight){
+        await workingDraftSaveInFlight;
+        if(!state.workingDraftDirty) return state.workingDraftSaveStatus !== 'error';
+      }
       const upc = _workingDraftKey(state.activeUpc || $('upc')?.value || $('amazonUpc')?.value || '');
       if(!upc) return false;
+      syncDescFromEditor();
       const draft = _captureWorkingDraft();
-      try{
-        const res = await apiPost('/api/listingagent/working_draft', {upc, draft});
-        const saved = res?.draft && typeof res.draft === 'object' ? res.draft : draft;
-        state.workingDrafts = {...(state.workingDrafts || {}), [upc]: saved};
-      }catch(e){
-        const drafts = state.workingDrafts || {};
-        drafts[upc] = draft;
-        state.workingDrafts = drafts;
-      }
-      state.workingDraftDirty = false;
-      renderQueue();
-      return true;
+      const fingerprint = (value) => JSON.stringify({...value, ts: null});
+      state.workingDraftSaveStatus = 'saving';
+      document.dispatchEvent(new Event('listing-draft-status'));
+      workingDraftSaveInFlight = (async () => {
+        try{
+          const res = await apiPost('/api/listingagent/working_draft', {upc, draft});
+          const saved = res?.draft && typeof res.draft === 'object' ? res.draft : draft;
+          state.workingDrafts = {...(state.workingDrafts || {}), [upc]: saved};
+          if(_workingDraftKey(state.activeUpc || '') === upc){
+            syncDescFromEditor();
+            state.workingDraftDirty = fingerprint(_captureWorkingDraft()) !== fingerprint(draft);
+            state.workingDraftSaveStatus = 'saved';
+          }
+          return true;
+        }catch(e){
+          state.workingDraftDirty = true;
+          state.workingDraftSaveStatus = 'error';
+          return false;
+        }finally{
+          renderQueue();
+          document.dispatchEvent(new Event('listing-draft-status'));
+        }
+      })();
+      try { return await workingDraftSaveInFlight; }
+      finally { workingDraftSaveInFlight = null; }
     }
 
     async function clearWorkingDraftForActiveItem(){
@@ -4557,6 +4579,8 @@
       // eBay per-item fields (keep policy defaults)
       $('offerBadge').style.display = 'none';
       $('offerId').value = '';
+      if($('mappingReferenceId')) $('mappingReferenceId').value = '';
+      if($('mappingTaskId')) $('mappingTaskId').value = '';
       $('sku').value = '';
       $('title').value = '';
       $('quantity').value = 1;
@@ -4581,6 +4605,8 @@
       state.amazonCatalog = [];
       state.amazonCatalogDetail = null;
       state.ebayCatalog = [];
+      state.ebaySimilarGeneratedDescription = '';
+      if($('ebayMatchStatus')) $('ebayMatchStatus').textContent = '';
       state.ebayCatalogSelectedKey = '';
       state.ebayCatalogSelectedItemId = '';
       state.ebayCatalogSelectedProductEpid = '';
@@ -4614,9 +4640,15 @@
         state.workingDraftSaveTimer = null;
       }
       if(state.activeUpc && state.workingDraftDirty){
-        await saveWorkingDraftForActiveItem();
+        const saved = await saveWorkingDraftForActiveItem();
         if(reqId !== state.selectReqId) return;
+        if(!saved || state.workingDraftDirty){
+          _stopLoading();
+          log('Save your current draft before switching items. The server save did not finish.');
+          return;
+        }
       }
+      state.workingDraftSaveStatus = '';
       resetFormsForNewUPC(clean);
       state.manualRequiredAspects = [];
       state.ebayAspectSnapshot = {};
@@ -5308,6 +5340,8 @@
       state.templateReqId += 1; // invalidate in-flight requests
       state.ebayComps = [];
       state.ebayCatalog = [];
+      state.ebaySimilarGeneratedDescription = '';
+      if($('ebayMatchStatus')) $('ebayMatchStatus').textContent = '';
       state.ebayCatalogSelectedKey = '';
       state.ebayCatalogSelectedItemId = '';
       state.ebayCatalogSelectedProductEpid = '';
@@ -6661,11 +6695,13 @@
     async function _loadEbayCatalogDetail(result, {ifEmpty=false, silent=false} = {}){
       const itemId = (result?.itemId || result?.item_id || '').toString().trim();
       const selectionKey = _ebayCatalogResultKey(result);
+      const activeUpc = state.activeUpc;
+      const selectionVersion = state.ebaySimilarSelectionId;
       if(!itemId || !selectionKey) return false;
       try{
         const mp = ($('marketplaceId')?.value || state.settings?.ebay_marketplace_id || 'EBAY_US').toString().trim() || 'EBAY_US';
         const res = await apiGet(`/api/listingagent/ebay/catalog_item?itemId=${encodeURIComponent(itemId)}&marketplaceId=${encodeURIComponent(mp)}`);
-        if(selectionKey !== (state.ebayCatalogSelectedKey || '').toString().trim()) return false;
+        if(activeUpc !== state.activeUpc || selectionVersion !== state.ebaySimilarSelectionId || selectionKey !== (state.ebayCatalogSelectedKey || '').toString().trim()) return false;
         const detail = (res && res.result && typeof res.result === 'object') ? res.result : null;
         if(!detail) return false;
         const merged = {
@@ -6684,7 +6720,7 @@
           merged.aspects || {},
           {
             itemId: merged.itemId || itemId,
-            ifEmpty,
+            ifEmpty: true,
             categoryId: merged.categoryId || '',
             categoryPath: merged.categoryPath || '',
             priceValue: suggestedPrice,
@@ -6701,7 +6737,11 @@
     }
 
     async function _selectEbayCatalogResult(result, {ifEmpty=false} = {}){
-      if(!result || typeof result !== 'object') return false;
+      if(!result || typeof result !== 'object' || !state.item) return false;
+      const activeUpc = state.activeUpc;
+      const selectionVersion = state.ebaySimilarSelectionId = (state.ebaySimilarSelectionId || 0) + 1;
+      const previousDescription = getDescHtml();
+      const mayGenerateDescription = descIsEmpty() || previousDescription === state.ebaySimilarGeneratedDescription || previousDescription === defaultDescription();
       const itemId = (result.itemId || result.item_id || '').toString().trim();
       const epid = (result.epid || '').toString().trim();
       const title = (result.title || '').toString().trim();
@@ -6719,9 +6759,28 @@
         {itemId, ifEmpty, categoryId, categoryPath, priceValue: suggestedPrice}
       );
       renderEbayCatalog();
+      if($('ebayMatchStatus')) $('ebayMatchStatus').textContent = 'Prefilling from this listing…';
+      let detailLoaded = false;
       if(itemId){
-        await _loadEbayCatalogDetail(result, {ifEmpty, silent: !!ifEmpty});
+        detailLoaded = await _loadEbayCatalogDetail(result, {ifEmpty, silent: !!ifEmpty});
       }
+      if(activeUpc !== state.activeUpc || selectionVersion !== state.ebaySimilarSelectionId) return false;
+      // Build our own description from structured facts, retaining existing authored text.
+      if(mayGenerateDescription && getDescHtml() === previousDescription){
+        const facts = state.ebayCatalogSelectedAspects || {};
+        const rows = Object.entries(facts).filter(([name,value]) => name && String(value || '').trim());
+        const conditionNote = ($('conditionDescription')?.value || '').trim();
+        const description = `<h2>${escapeHtml($('title').value)}</h2>` +
+          (rows.length ? '<ul>' + rows.map(([name,value]) => `<li><strong>${escapeHtml(name)}:</strong> ${escapeHtml(String(value))}</li>`).join('') + '</ul>' : '') +
+          (conditionNote ? `<p>${escapeHtml(conditionNote)}</p>` : '');
+        setDescHtml(description);
+        state.ebaySimilarGeneratedDescription = description;
+      }
+      _scheduleWorkingDraftSave();
+      _updateNextFieldBtn();
+      if($('ebayMatchStatus')) $('ebayMatchStatus').textContent =
+        `Prefilled title, available category, suggested price, and ${Object.keys(state.ebayCatalogSelectedAspects || {}).length} item specifics. Review the match and your item's condition.` +
+        (itemId && !detailLoaded ? ' Full details were unavailable; summary data was used. Select the match again to retry.' : '');
       return true;
     }
 
@@ -6740,15 +6799,15 @@
           _clearEbayCatalogSelection();
         }
         box.innerHTML = state.item
-          ? `<div class="hint">${hasSelectedCatalog ? 'No additional eBay catalog matches right now. Keeping the selected catalog specifics.' : 'No eBay catalog match for this UPC.'}</div>`
+          ? `<div class="hint">${hasSelectedCatalog ? 'No additional eBay catalog matches right now. Keeping the selected catalog specifics.' : 'No similar listings found. Try a shorter product name, brand, or model number.'}</div>`
           : '<div class="muted">Search to load eBay catalog matches.</div>';
         if(hint) hint.textContent = state.item
-          ? (hasSelectedCatalog ? 'Using saved catalog specifics.' : 'No matches for this UPC.')
+          ? (hasSelectedCatalog ? 'Using saved catalog specifics.' : 'No matches. Edit the search and try again.')
           : 'Search to see eBay catalog matches.';
         return;
       }
 
-      if(hint) hint.textContent = `${results.length} eBay catalog match${results.length > 1 ? 'es' : ''} found — select one to fill item specifics.`;
+      if(hint) hint.textContent = `${results.length} matches — choose the same model and variant to prefill your listing.`;
 
       const list = document.createElement('div');
       list.style.cssText = 'display:grid;gap:8px;';
@@ -6790,8 +6849,8 @@
         main.innerHTML = `
           <h3 class="compTitle">${escapeHtml(title)}</h3>
           <div class="compMeta">
-            ${epid ? `<span class="badge badgeBlue">EPID ${escapeHtml(epid)}</span>` : ''}
-            ${source ? `<span class="badge">${escapeHtml(source)}</span>` : ''}
+            ${r.matchReason ? `<span class="badge badgeBlue">${escapeHtml(r.matchReason)}</span>` : ''}
+            ${source ? `<span class="badge">${source === 'catalog' ? 'Product catalog' : 'Live listing'}</span>` : ''}
             ${brand ? `<span class="badge">${escapeHtml(brand)}</span>` : ''}
             ${categoryPath ? `<span class="badge">${escapeHtml(categoryPath)}</span>` : ''}
             ${aspectCount ? `<span class="badge badgeGreen">${aspectCount} specifics</span>` : ''}
@@ -6802,9 +6861,19 @@
         row.appendChild(thumb);
         row.appendChild(main);
 
-        row.onclick = async () => {
-          await _selectEbayCatalogResult(r, {ifEmpty: false});
-        };
+        const actions = document.createElement('div');
+        actions.className = 'similarActions';
+        const use = document.createElement('button');
+        use.type = 'button'; use.className = 'btn btnPrimary';
+        use.textContent = isSelected ? 'Use again' : 'Use this listing';
+        use.onclick = async () => { await _selectEbayCatalogResult(r, {ifEmpty: false}); };
+        actions.appendChild(use);
+        const url = (r.itemWebUrl || '').toString();
+        if(/^https:\/\/([a-z0-9-]+\.)?ebay\.com\//i.test(url)){
+          const link = document.createElement('a'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+          link.textContent = 'View on eBay ↗'; link.className = 'hint'; actions.appendChild(link);
+        }
+        main.appendChild(actions);
 
         list.appendChild(row);
       }
@@ -6820,14 +6889,14 @@
       const titleEl = $('title');
       if(titleEl && title){
         if(!ifEmpty || !(titleEl.value || '').trim()){
-          titleEl.value = title;
+          titleEl.value = title.slice(0, 80);
         }
       }
 
       const priceEl = $('price');
       const suggestedPrice = Number(priceValue);
       if(priceEl && Number.isFinite(suggestedPrice) && suggestedPrice > 0){
-        const canApply = !ifEmpty || !state.priceManuallySet || !(priceEl.value || '').toString().trim();
+        const canApply = !ifEmpty || !state.priceManuallySet;
         if(canApply){
           priceEl.value = suggestedPrice.toFixed(2);
           state.priceManuallySet = false;
@@ -6855,7 +6924,8 @@
         state._pendingCatalogAspects = aspects;
       }
       const count = Object.keys(aspects||{}).length;
-      if(count) log(`eBay ${ifEmpty?'auto-filled':'applied'} ${count} specifics from ${epid||'catalog'}.`);
+      if(count) log(`eBay ${ifEmpty?'auto-filled':'applied'} ${count} specifics from ${epid||'similar listing'}.`);
+      _scheduleWorkingDraftSave();
     }
 
     function _applySelectedEbayCatalogAspects({ifEmpty=true} = {}){
@@ -6891,22 +6961,42 @@
       return changed;
     }
 
-    async function ebayCatalogSearch(){
+    function _ebaySimilarSearchParams({automatic=false, upc=''} = {}){
       const typed = ($('ebayCatalogQ')?.value || '').trim();
-      const typedUpc = formatUpc12(_splitUpcSuffix(typed).base || typed);
-      const upc = formatUpc12((($('upc')?.value || '').trim()));
-      const q = upc || typedUpc;
-      if(!q){ log('Pick a UPC first (eBay catalog).'); return; }
-      if($('ebayCatalogQ')) $('ebayCatalogQ').value = q;
-      _clearEbayCatalogSelection();
-      if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
-      if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint">Searching eBay catalog…</div>';
+      const barcode = upc || ($('upc')?.value || '').trim();
+      const title = (state.item?.title || state.item?.bol?.description || $('title')?.value || '').trim();
+      const params = new URLSearchParams({limit: '10', marketplaceId: $('marketplaceId')?.value || 'EBAY_US'});
+      if(!automatic && typed){
+        // Never replace a manually typed product name with the active item's UPC.
+        if(/^\d{8,14}$/.test(typed)) params.set('upc', typed);
+        else params.set('q', typed);
+      } else {
+        if(barcode) params.set('upc', barcode);
+        if(title) params.set('title', title);
+      }
+      return params;
+    }
+
+    async function ebayCatalogSearch({automatic=false, upc=''} = {}){
+      const params = _ebaySimilarSearchParams({automatic, upc});
+      if(!params.has('upc') && !params.has('q') && !params.has('title')){
+        if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Enter a barcode, product name, or model.';
+        return;
+      }
+      const requestId = state.ebaySimilarSearchId = (state.ebaySimilarSearchId || 0) + 1;
+      const activeUpc = state.activeUpc;
+      if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Finding similar eBay listings…';
+      if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint" role="status">Finding similar listings…</div>';
       try{
-        const res = await apiGet(`/api/listingagent/ebay/catalog_search?upc=${encodeURIComponent(q)}&limit=10`);
+        const res = await apiGet(`/api/listingagent/ebay/catalog_search?${params}`);
+        if(requestId !== state.ebaySimilarSearchId || activeUpc !== state.activeUpc) return;
         state.ebayCatalog = res.results || [];
         renderEbayCatalog();
+        if(res.warnings?.length && $('ebayCatalogHint')) $('ebayCatalogHint').textContent += ' Some eBay sources were unavailable; retry for more matches.';
       }catch(e){
-        if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = `eBay catalog search failed: ${e.message}`;
+        if(requestId !== state.ebaySimilarSearchId || activeUpc !== state.activeUpc) return;
+        if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = `Similar-listing search failed: ${e.message}`;
+        if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint">Search could not finish. Try again or edit the search.</div>';
       }
     }
 
@@ -7182,23 +7272,9 @@
         } finally { _stopLoading(); }
       })();
 
-      // eBay catalog search: UPC-only, without automatic selection/apply.
-      _startLoading();
-      (async () => {
-        if($('ebayCatalogQ') && !$('ebayCatalogQ').value.trim()) $('ebayCatalogQ').value = clean;
-        if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = 'Searching eBay catalog...';
-        if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '<div class="hint">Searching eBay catalog…</div>';
-        try{
-          const res = await apiGet(`/api/listingagent/ebay/catalog_search?upc=${encodeURIComponent(clean)}&limit=10`);
-          if(reqId !== state.templateReqId) return;
-          state.ebayCatalog = res.results || [];
-          renderEbayCatalog();
-        } catch(e){
-          if(reqId !== state.templateReqId) return;
-          if($('ebayCatalogHint')) $('ebayCatalogHint').textContent = `eBay catalog unavailable: ${e.message}`;
-          if($('ebayCatalogBox')) $('ebayCatalogBox').innerHTML = '';
-        } finally { _stopLoading(); }
-      })();
+      // Search in the background; the editor stays usable while eBay responds.
+      if($('ebayCatalogQ')) $('ebayCatalogQ').value = (state.item?.title || clean).toString().trim();
+      ebayCatalogSearch({automatic: true, upc: clean});
     }
 
     function inferImageSource(url){
@@ -8029,13 +8105,13 @@
       const title = $('title').value.trim();
       const selected = _effectiveEbayImages((Array.isArray(state.images) ? state.images : []).filter(u => _isImageEnabled(u)));
       return {
-        upc: $('upc').value.trim(),
+        upc: String(state.activeUpc || $('upc').value).trim(),
         sku: $('sku').value.trim(),
         title,
         description: title,
         condition: $('condition').value,
         conditionDescription: $('conditionDescription').value.trim(),
-        quantity: Number($('quantity').value || 1),
+        quantity: $('quantity').value === '' ? NaN : Number($('quantity').value),
         price: $('price').value === '' ? null : Number($('price').value),
         images: selected,
         aspects: collectEbayAspects(),
@@ -8050,6 +8126,7 @@
         listingDuration: $('listingDuration').value.trim(),
         offerId: $('offerId').value.trim(),
         catalogEpid: (state.ebayCatalogSelectedProductEpid || '').toString().trim(),
+        mappingReferenceId: $('mappingReferenceId')?.value || '',
       };
     }
 
@@ -8070,7 +8147,7 @@
         ),
         conditionType: $('amazonConditionType').value,
         conditionNote: $('amazonConditionNote').value.trim(),
-        quantity: Number($('amazonQuantity').value || 1),
+        quantity: $('amazonQuantity').value === '' ? NaN : Number($('amazonQuantity').value),
         price: $('amazonPrice').value === '' ? null : Number($('amazonPrice').value),
         productType: $('amazonProductType').value.trim(),
         requirements: $('amazonRequirements').value.trim(),
@@ -8165,15 +8242,11 @@
     }
 
     function _expandCardForElement(el){
-      if(!el || !el.closest) return;
-      const card = el.closest('.card');
-      if(!card || !card.classList || !card.classList.contains('collapsed')) return;
-      card.classList.remove('collapsed');
-      try{
-        const collapsed = JSON.parse(localStorage.getItem('listingAgentCollapsed') || '{}');
-        if(card.id) collapsed[card.id] = false;
-        localStorage.setItem('listingAgentCollapsed', JSON.stringify(collapsed));
-      }catch(e){}
+      if(!el) return;
+      for(let parent = el; parent; parent = parent.parentElement){
+        if(parent.classList?.contains('card')) parent.classList.remove('collapsed');
+        if(parent.tagName === 'DETAILS') parent.open = true;
+      }
     }
 
     function scrollToFirstInvalidField(){
@@ -8238,13 +8311,15 @@
       if(_isBlank(payload.upc)) add('upc', 'UPC');
       if(_isBlank(payload.sku)) add('sku', 'SKU');
       if(_isBlank(payload.title)) add('title', 'Title');
+      else if(payload.title.length > 80) add('title', 'Title (maximum 80 characters)');
       if(_isBlank(payload.listingDescription)) add('listingDescEditor', 'Listing Description');
+      if(!payload.images?.length) add('cardItemPreview', 'Photos');
       if(_isBlank(payload.categoryId)) add('categoryId', 'Category');
       if(_isBlank(payload.fulfillmentPolicyId)) add('fulfillmentPolicyId', 'Fulfillment Policy');
       if(_isBlank(payload.paymentPolicyId)) add('paymentPolicyId', 'Payment Policy');
       if(_isBlank(payload.returnPolicyId)) add('returnPolicyId', 'Return Policy');
-      if(payload.price === null || Number.isNaN(payload.price)) add('price', 'Price');
-      if(!Number.isFinite(payload.quantity) || Number(payload.quantity) < 1) add('quantity', 'Quantity');
+      if(!Number.isFinite(payload.price) || payload.price <= 0) add('price', 'Price');
+      if(!Number.isInteger(payload.quantity) || payload.quantity < 1) add('quantity', 'Quantity');
 
       const box = $('ebayAspectsBox');
       if(box){
@@ -8278,7 +8353,9 @@
         add('amazonUpc', 'ASIN or UPC');
       }
       if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
-      if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
+      if(!Number.isFinite(payload.price) || payload.price <= 0) add('amazonPrice', 'Amazon Price');
+      if(!Number.isInteger(payload.quantity) || payload.quantity < 1) add('amazonQuantity', 'Amazon Quantity');
+      if(payload.conditionType !== 'new_new' && _isBlank(payload.conditionNote)) add('amazonConditionNote', 'Amazon Condition Note');
       return missing;
     }
 
@@ -8299,7 +8376,7 @@
       // Remove ring from previously targeted element
       document.querySelectorAll('.fieldNextTarget').forEach(el => el.classList.remove('fieldNextTarget'));
       if(!state.item || canComplete){
-        badge.textContent = '✓';
+        if(badge) badge.textContent = '✓';
         btn.disabled = !state.item;
         btn.classList.toggle('allDone', !!state.item);
         btn.innerHTML = state.item
@@ -8404,14 +8481,16 @@
       if(payload.upc){
         if(_isBlank(payload.sku)) add('sku', 'SKU');
         if(_isBlank(payload.title)) add('title', 'Title');
+        else if(payload.title.length > 80) add('title', 'Title (maximum 80 characters)');
         if(_isBlank(payload.listingDescription)) add('listingDescEditor', 'Listing Description');
+        if(!payload.images?.length) add('cardItemPreview', 'Photos');
         if(_isBlank(payload.categoryId)) add('categoryId', 'Category');
         if(_isBlank(payload.fulfillmentPolicyId)) add('fulfillmentPolicyId', 'Fulfillment Policy');
         if(_isBlank(payload.paymentPolicyId)) add('paymentPolicyId', 'Payment Policy');
         if(_isBlank(payload.returnPolicyId)) add('returnPolicyId', 'Return Policy');
 
-        if(payload.price === null || Number.isNaN(payload.price)) add('price', 'Price');
-        if(!Number.isFinite(payload.quantity) || Number(payload.quantity) < 1) add('quantity', 'Quantity');
+        if(!Number.isFinite(payload.price) || payload.price <= 0) add('price', 'Price');
+        if(!Number.isInteger(payload.quantity) || payload.quantity < 1) add('quantity', 'Quantity');
 
         // Validate required eBay aspects currently shown in UI.
         const box = $('ebayAspectsBox');
@@ -8451,8 +8530,11 @@
         if(_isBlank(payload.listingDescription)) add('listingDescEditor', 'Listing Description');
         if(_isBlank(payload.productType)) add('amazonProductType', 'Amazon Product Type');
       }
+      if(!payload.manualMode && _isBlank(payload.upc) && _isBlank(payload.asin)) add('amazonUpc', 'ASIN or UPC');
       if(_isBlank(payload.sku)) add('amazonSku', 'Amazon SKU');
-      if(payload.price === null || Number.isNaN(payload.price)) add('amazonPrice', 'Amazon Price');
+      if(!Number.isFinite(payload.price) || payload.price <= 0) add('amazonPrice', 'Amazon Price');
+      if(!Number.isInteger(payload.quantity) || payload.quantity < 1) add('amazonQuantity', 'Amazon Quantity');
+      if(payload.conditionType !== 'new_new' && _isBlank(payload.conditionNote)) add('amazonConditionNote', 'Amazon Condition Note');
       return { ok: missing.length === 0, missing };
     }
 
@@ -8602,6 +8684,10 @@
     }
 
     async function createDraft(){
+      if($('mappingReferenceId')?.value){
+        await saveWorkingDraftForActiveItem();
+        return;
+      }
       const payload = collectPayload();
       if(!payload.upc){
         log('Pick a UPC first.');
@@ -9112,6 +9198,8 @@
       if($('results')) $('results').innerHTML = '';
       $('offerBadge').style.display = 'none';
       $('offerId').value = '';
+      if($('mappingReferenceId')) $('mappingReferenceId').value = '';
+      if($('mappingTaskId')) $('mappingTaskId').value = '';
 
       $('upc').value = '';
       $('sku').value = '';
@@ -9309,7 +9397,7 @@
       const btn = $('btnAiDesc');
       const orig = btn.innerHTML;
       const reqId = ++state.aiDescReqId;
-      let upcKey = '';
+      const upcKey = _workingDraftKey(state.activeUpc || '');
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working...';
       try{
@@ -9317,7 +9405,6 @@
         const listingTitle = ($('title')?.value || systemTitle || '').toString().trim();
         const categoryId = (categorySelect()?.value || '').toString().trim();
         const upc = ($('upc')?.value || state.activeUpc || '').toString().trim();
-        upcKey = _workingDraftKey(upc || state.activeUpc || '');
         const aspects = {};
         const aspectsBox = $('ebayAspectsBox');
         if(aspectsBox){
@@ -9352,7 +9439,7 @@
       const btn = $('btnAiTitle');
       const orig = btn.innerHTML;
       const reqId = ++state.aiTitleReqId;
-      let upcKey = '';
+      const upcKey = _workingDraftKey(state.activeUpc || '');
       btn.disabled = true;
       btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working...';
       try{
@@ -9360,7 +9447,6 @@
         const title = (systemTitle || $('title')?.value || '').toString().trim();
         const categoryId = (categorySelect()?.value || '').toString().trim();
         const upc = ($('upc')?.value || state.activeUpc || '').toString().trim();
-        upcKey = _workingDraftKey(upc || state.activeUpc || '');
         const aspects = {};
         const aspectsBox = $('ebayAspectsBox');
         if(aspectsBox){
@@ -9785,6 +9871,9 @@
     </div>
   </div>
 
+  <input type="hidden" id="mappingReferenceId"><input type="hidden" id="mappingTaskId">
+<script src="/static/listing-workspace.js?v=20260907c"></script>
+<script src="/static/listing-mapping.js?v=20260907c"></script>
   <script src="/static/i18n.js"></script>
   <script src="/static/location-preview.js?v=20260317a"></script>
 </body>

@@ -6,7 +6,7 @@ import json
 # appear on their own row followed by items that belong to that shelf. Example:
 # ["a","12345","23456","b","98765", ...]
 
-LOCAL_CACHE = 'inventory_cache.json'
+LOCAL_CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'inventory_cache.json')
 shelfCodes = ('a', 'b', 'c', 'd')
 
 

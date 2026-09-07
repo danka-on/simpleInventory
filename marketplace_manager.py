@@ -3,6 +3,10 @@ Marketplace sales manager - handles marketplace.db operations
 """
 import sqlite3
 import datetime
+from pathlib import Path
+from contextlib import closing
+
+BASE_DIR = Path(__file__).resolve().parent
 
 
 def _serialize_pickup_row(row):
@@ -22,55 +26,56 @@ def _serialize_pickup_row(row):
 
 def ensure_marketplace_db():
     """Create marketplace.db tables used by marketplace sale flows."""
-    conn = sqlite3.connect('marketplace.db')
-    cur = conn.cursor()
+    with closing(sqlite3.connect(str(BASE_DIR / 'marketplace.db'), timeout=30)) as conn:
+        cur = conn.cursor()
     
-    cur.execute('''CREATE TABLE IF NOT EXISTS marketplace_sales (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        barcode TEXT NOT NULL,
-        title TEXT,
-        quantity INTEGER DEFAULT 1,
-        price REAL,
-        sale_date TEXT,
-        created_at TEXT,
-        session_id TEXT
-    )''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS marketplace_sales (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            barcode TEXT NOT NULL,
+            title TEXT,
+            quantity INTEGER DEFAULT 1,
+            price REAL,
+            sale_date TEXT,
+            created_at TEXT,
+            session_id TEXT
+        )''')
 
-    # Migration: add session_id if missing
-    try:
-        cur.execute("SELECT session_id FROM marketplace_sales LIMIT 1")
-    except sqlite3.OperationalError:
-        cur.execute("ALTER TABLE marketplace_sales ADD COLUMN session_id TEXT")
+        # Migration: add session_id if missing
+        try:
+            cur.execute("SELECT session_id FROM marketplace_sales LIMIT 1")
+        except sqlite3.OperationalError:
+            cur.execute("ALTER TABLE marketplace_sales ADD COLUMN session_id TEXT")
 
-    # Migration: add price_auto flag (1 = auto-split from session total, 0 = manually entered)
-    try:
-        cur.execute("SELECT price_auto FROM marketplace_sales LIMIT 1")
-    except sqlite3.OperationalError:
-        cur.execute("ALTER TABLE marketplace_sales ADD COLUMN price_auto INTEGER DEFAULT 0")
+        # Migration: add price_auto flag (1 = auto-split from session total, 0 = manually entered)
+        try:
+            cur.execute("SELECT price_auto FROM marketplace_sales LIMIT 1")
+        except sqlite3.OperationalError:
+            cur.execute("ALTER TABLE marketplace_sales ADD COLUMN price_auto INTEGER DEFAULT 0")
 
-    cur.execute('''CREATE TABLE IF NOT EXISTS marketplace_pickups (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        barcode TEXT,
-        title TEXT NOT NULL,
-        image_url TEXT,
-        pickup_date TEXT NOT NULL,
-        pickup_time TEXT NOT NULL,
-        scheduled_at TEXT NOT NULL,
-        source TEXT DEFAULT 'manual',
-        notes TEXT,
-        status TEXT DEFAULT 'scheduled',
-        created_at TEXT
-    )''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS marketplace_pickups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            barcode TEXT,
+            title TEXT NOT NULL,
+            image_url TEXT,
+            pickup_date TEXT NOT NULL,
+            pickup_time TEXT NOT NULL,
+            scheduled_at TEXT NOT NULL,
+            source TEXT DEFAULT 'manual',
+            notes TEXT,
+            status TEXT DEFAULT 'scheduled',
+            created_at TEXT
+        )''')
 
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_marketplace_pickups_status ON marketplace_pickups(status)')
-    cur.execute('CREATE INDEX IF NOT EXISTS idx_marketplace_pickups_scheduled ON marketplace_pickups(scheduled_at)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_marketplace_pickups_status ON marketplace_pickups(status)')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_marketplace_pickups_scheduled ON marketplace_pickups(scheduled_at)')
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
 
 
 def add_marketplace_pickup(title, pickup_date, pickup_time, barcode=None, image_url=None, source='manual', notes=None):
     """Create a scheduled pickup entry."""
+    conn = None
     try:
         ensure_marketplace_db()
         title_clean = str(title or '').strip()
@@ -86,7 +91,7 @@ def add_marketplace_pickup(title, pickup_date, pickup_time, barcode=None, image_
         created_at = datetime.datetime.now().isoformat(timespec='seconds')
         scheduled_at = scheduled_dt.isoformat(timespec='minutes')
 
-        conn = sqlite3.connect('marketplace.db')
+        conn = sqlite3.connect(str(BASE_DIR / 'marketplace.db'), timeout=30)
         cur = conn.cursor()
         cur.execute('''
             INSERT INTO marketplace_pickups
@@ -128,13 +133,17 @@ def add_marketplace_pickup(title, pickup_date, pickup_time, barcode=None, image_
         return {'success': False, 'error': 'Invalid pickup date or time'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def get_marketplace_pickups(status='scheduled', limit=None):
     """Return scheduled marketplace pickups ordered by soonest first."""
+    conn = None
     try:
         ensure_marketplace_db()
-        conn = sqlite3.connect('marketplace.db')
+        conn = sqlite3.connect(str(BASE_DIR / 'marketplace.db'), timeout=30)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
@@ -159,12 +168,16 @@ def get_marketplace_pickups(status='scheduled', limit=None):
         }
     except Exception as e:
         return {'success': False, 'error': str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
 
 def add_marketplace_sale(barcode, title, quantity, price, session_id=None, price_auto=False):
     """Add a marketplace sale entry."""
+    conn = None
     try:
         ensure_marketplace_db()
-        conn = sqlite3.connect('marketplace.db')
+        conn = sqlite3.connect(str(BASE_DIR / 'marketplace.db'), timeout=30)
         cur = conn.cursor()
 
         sale_date = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -182,12 +195,16 @@ def add_marketplace_sale(barcode, title, quantity, price, session_id=None, price
         return {'success': True, 'id': sale_id}
     except Exception as e:
         return {'success': False, 'error': str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
 
 def get_marketplace_sales(limit=None, offset=None):
     """Get marketplace sales with optional pagination."""
+    conn = None
     try:
         ensure_marketplace_db()
-        conn = sqlite3.connect('marketplace.db')
+        conn = sqlite3.connect(str(BASE_DIR / 'marketplace.db'), timeout=30)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
@@ -226,105 +243,73 @@ def get_marketplace_sales(limit=None, offset=None):
         }
     except Exception as e:
         return {'success': False, 'error': str(e)}
+    finally:
+        if conn is not None:
+            conn.close()
 
 def delete_marketplace_sale(sale_id):
-    """Delete a marketplace sale from both marketplace.db and sold.db."""
+    """Delete one sale and its corresponding order in one transaction.
+
+    Old sales have no order reference. Only remove an unambiguously matching
+    legacy order; a quantity is a unit count, never a number of order rows.
+    """
     try:
         ensure_marketplace_db()
-        
-        # First, get sale details before deleting
-        conn = sqlite3.connect('marketplace.db')
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        
-        cur.execute('SELECT * FROM marketplace_sales WHERE id = ?', (sale_id,))
-        sale = cur.fetchone()
-        
-        if not sale:
-            conn.close()
-            return {'success': False, 'error': 'Sale not found'}
-        
-        sale_barcode = sale['barcode']
-        sale_quantity = sale['quantity']
-        sale_date = sale['sale_date']
-        
-        # Delete from marketplace.db
-        cur.execute('DELETE FROM marketplace_sales WHERE id = ?', (sale_id,))
-        deleted_marketplace = cur.rowcount
-        
-        conn.commit()
-        conn.close()
-        
-        # Delete from sold.db (orders table where store='marketplace')
-        # Match by barcode and approximate date (same day)
-        sold_conn = sqlite3.connect('sold.db')
-        sold_cur = sold_conn.cursor()
-        
-        # Find matching orders from the same day
-        sold_cur.execute('''
-            DELETE FROM orders 
-            WHERE barcode = ? 
-            AND store = 'marketplace'
-            AND DATE(paid_time) = ?
-            AND id IN (
-                SELECT id FROM orders 
-                WHERE barcode = ? 
-                AND store = 'marketplace'
-                AND DATE(paid_time) = ?
-                ORDER BY paid_time DESC
-                LIMIT ?
-            )
-        ''', (sale_barcode, sale_date, sale_barcode, sale_date, sale_quantity))
-        
-        deleted_sold = sold_cur.rowcount
-        
-        # Also check if this was marked as a resold return and revert it
-        sold_cur.execute('''
-            SELECT id FROM returns 
-            WHERE resold = 1 
-            AND resold_order_id = ?
-        ''', (f'marketplace-{sale_id}',))
-        
-        return_row = sold_cur.fetchone()
-        if return_row:
-            return_id = return_row[0]
-            
-            # Revert the resold status
-            sold_cur.execute('''
-                UPDATE returns 
-                SET resold = 0, resold_date = NULL, resold_order_id = NULL,
-                    lifecycle_count = lifecycle_count - 1
-                WHERE id = ?
-            ''', (return_id,))
-            
-            # Delete the lifecycle event
-            sold_cur.execute('''
-                DELETE FROM return_lifecycle_events 
-                WHERE return_id = ? 
-                AND event_type = 'resold' 
-                AND order_id = ?
-            ''', (return_id, f'marketplace-{sale_id}'))
-            
-            print(f'[DELETE] Reverted resold status for return #{return_id}')
-        
-        sold_conn.commit()
-        sold_conn.close()
-        
-        return {
-            'success': True, 
-            'deleted': deleted_marketplace,
-            'deleted_from_sold': deleted_sold
-        }
+        with closing(sqlite3.connect(str(BASE_DIR / 'marketplace.db'), timeout=30)) as conn:
+            conn.row_factory = sqlite3.Row
+            has_sold = (BASE_DIR / 'sold.db').is_file()
+            if has_sold:
+                conn.execute('ATTACH DATABASE ? AS sold', (str(BASE_DIR / 'sold.db'),))
+            with conn:
+                conn.execute('BEGIN IMMEDIATE')
+                sale = conn.execute('SELECT * FROM marketplace_sales WHERE id = ?', (sale_id,)).fetchone()
+                if sale is None:
+                    return {'success': False, 'error': 'Sale not found'}
+                references = (f'marketplace-{sale_id}', f'marketplace-sale-bulk-{sale_id}')
+                tables = {row[0] for row in conn.execute("SELECT name FROM sold.sqlite_master WHERE type='table'")} if has_sold else set()
+                order_ids = []
+                if 'orders' in tables:
+                    orders = conn.execute("""
+                        SELECT id FROM sold.orders WHERE order_id IN (?, ?)
+                        AND store IN ('marketplace', 'marketplace-sale-bulk')
+                    """, references).fetchall()
+                    if not orders:
+                        orders = conn.execute("""
+                            SELECT id FROM sold.orders WHERE barcode = ?
+                            AND store IN ('marketplace', 'marketplace-sale-bulk')
+                            AND COALESCE(order_id, '') = '' AND DATE(paid_time) = ?
+                            AND quantity = ? AND COALESCE(title, '') = ?
+                            AND COALESCE(price, 0) = ?
+                        """, (sale['barcode'], sale['sale_date'], sale['quantity'],
+                              sale['title'] or '', sale['price'] or 0)).fetchall()
+                    if len(orders) > 1:
+                        return {'success': False, 'error': 'Multiple sold orders match this legacy sale. Resolve the order link before deleting.'}
+                    order_ids = [row['id'] for row in orders]
+                    for order_id in order_ids:
+                        for child in ('order_removal_allocations', 'ready_to_ship_notes', 'ready_to_ship_order_labels'):
+                            if child in tables:
+                                conn.execute(f'DELETE FROM sold.{child} WHERE order_row_id = ?', (order_id,))
+                        conn.execute('DELETE FROM sold.orders WHERE id = ?', (order_id,))
+                if 'returns' in tables:
+                    return_rows = conn.execute('SELECT id FROM sold.returns WHERE resold = 1 AND resold_order_id IN (?, ?)', references).fetchall()
+                    for row in return_rows:
+                        conn.execute("""UPDATE sold.returns SET resold = 0, resold_date = NULL,
+                            resold_order_id = NULL, lifecycle_count = MAX(0, COALESCE(lifecycle_count, 0) - 1)
+                            WHERE id = ?""", (row['id'],))
+                        if 'return_lifecycle_events' in tables:
+                            conn.execute("""DELETE FROM sold.return_lifecycle_events WHERE return_id = ?
+                                AND event_type = 'resold' AND order_id IN (?, ?)""", (row['id'], *references))
+                deleted = conn.execute('DELETE FROM marketplace_sales WHERE id = ?', (sale_id,)).rowcount
+            return {'success': True, 'deleted': deleted, 'deleted_from_sold': len(order_ids)}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         return {'success': False, 'error': str(e)}
 
 def update_marketplace_sale(sale_id, barcode=None, title=None, quantity=None, price=None):
     """Update a marketplace sale."""
+    conn = None
     try:
         ensure_marketplace_db()
-        conn = sqlite3.connect('marketplace.db')
+        conn = sqlite3.connect(str(BASE_DIR / 'marketplace.db'), timeout=30)
         cur = conn.cursor()
         
         updates = []
@@ -358,3 +343,6 @@ def update_marketplace_sale(sale_id, barcode=None, title=None, quantity=None, pr
         return {'success': True, 'updated': updated}
     except Exception as e:
         return {'success': False, 'error': str(e)}
+    finally:
+        if conn is not None:
+            conn.close()

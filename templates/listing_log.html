@@ -139,6 +139,8 @@
         const p = new URLSearchParams(window.location.search);
         const ret = p.get('return');
         if(ret && ret.startsWith('/')) document.getElementById('backBtn').href = ret;
+        const upc = p.get('upc');
+        if(upc) document.getElementById('filterUPC').value = upc;
       }catch(e){}
     })();
 

@@ -461,6 +461,13 @@ def get_rawbol_stats():
     except Exception as e:
         return {'success': False, 'error': str(e)}
 
+def _bol_quantity_projection(columns):
+    """Older BOL databases may not yet have the optional prep quantity columns."""
+    available = {str(column).lower() for column in columns}
+    return ', '.join(column if column in available else f'NULL AS {column}'
+                     for column in ('id', 'quantity', 'original_qty', 'good_qty', 'bad_qty', 'unchecked_qty'))
+
+
 def sync_rawbol_to_bol(specific_lot=None):
     """
     Sync rawbol.db to bol.db with lot-aware identity:
@@ -476,7 +483,7 @@ def sync_rawbol_to_bol(specific_lot=None):
         ensure_rawbol_db()
 
         # First ensure bol.db has quantity column
-        bol_conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'))
+        bol_conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'), timeout=30)
         try:
             bol_cur = bol_conn.cursor()
 
@@ -487,8 +494,16 @@ def sync_rawbol_to_bol(specific_lot=None):
                 bol_cur.execute('ALTER TABLE bol_items ADD COLUMN quantity INTEGER DEFAULT 0')
                 bol_conn.commit()
 
+            # Each imported row looks up one UPC+lot. Without a matching
+            # composite index a large sync repeatedly scans the entire BOL.
+            bol_cur.execute('''CREATE INDEX IF NOT EXISTS idx_bol_upc_lot_sync
+                ON bol_items(upc COLLATE NOCASE, lot_number COLLATE NOCASE, import_date DESC, id DESC)''')
+            bol_conn.commit()
+
             # Get all raw items grouped by lot
-            raw_conn = sqlite3.connect(os.path.join(BASE_DIR, 'rawbol.db'))
+            raw_conn = bol_conn
+            raw_conn.execute('ATTACH DATABASE ? AS rawdb', (os.path.join(BASE_DIR, 'rawbol.db'),))
+            raw_conn.execute('BEGIN IMMEDIATE')
             try:
                 raw_conn.row_factory = sqlite3.Row
                 raw_cur = raw_conn.cursor()
@@ -496,17 +511,17 @@ def sync_rawbol_to_bol(specific_lot=None):
                 # Get unique lot numbers from raw_bol_items
                 if specific_lot:
                     # Only sync the specific lot
-                    raw_cur.execute('SELECT DISTINCT lot_number FROM raw_bol_items WHERE lot_number = ?', (specific_lot,))
+                    raw_cur.execute('SELECT DISTINCT lot_number FROM rawdb.raw_bol_items WHERE lot_number = ?', (specific_lot,))
                 else:
                     # Sync all lots
-                    raw_cur.execute('SELECT DISTINCT lot_number FROM raw_bol_items WHERE lot_number IS NOT NULL AND lot_number != ""')
+                    raw_cur.execute('SELECT DISTINCT lot_number FROM rawdb.raw_bol_items WHERE lot_number IS NOT NULL AND lot_number != ""')
                 lots = [r['lot_number'] for r in raw_cur.fetchall()]
 
                 if not lots:
                     return {'success': False, 'error': f'Lot {specific_lot} not found' if specific_lot else 'No lots found'}
 
                 # Check which lots have already been synced
-                raw_cur.execute('SELECT lot_number FROM synced_lots')
+                raw_cur.execute('SELECT lot_number FROM rawdb.synced_lots')
                 synced_lots = set(r['lot_number'] for r in raw_cur.fetchall())
 
                 # Filter out already synced lots
@@ -518,7 +533,7 @@ def sync_rawbol_to_bol(specific_lot=None):
 
                 # Get items only from lots that haven't been synced
                 placeholders = ','.join('?' for _ in lots_to_sync)
-                raw_cur.execute(f'SELECT * FROM raw_bol_items WHERE lot_number IN ({placeholders})', tuple(lots_to_sync))
+                raw_cur.execute(f'SELECT * FROM rawdb.raw_bol_items WHERE lot_number IN ({placeholders})', tuple(lots_to_sync))
                 raw_items = raw_cur.fetchall()
 
                 updated = 0
@@ -533,15 +548,15 @@ def sync_rawbol_to_bol(specific_lot=None):
 
                 for item in raw_items:
                     upc = item['upc']
-                    qty = item['quantity'] or 1
+                    qty = 1 if item['quantity'] is None else max(0, int(item['quantity']))
                     lot_num = item['lot_number']
                     import_date = item['import_date']
                     item_desc = item['item_description']
                     image_url = item['image_url']
 
                     # Check if this exact UPC+LOT exists in bol.db
-                    bol_cur.execute('''
-                        SELECT id, quantity, original_qty, good_qty, bad_qty, unchecked_qty
+                    bol_cur.execute(f'''
+                        SELECT {_bol_quantity_projection(cols)}
                         FROM bol_items
                         WHERE upc = ? COLLATE NOCASE
                           AND lot_number = ? COLLATE NOCASE
@@ -604,14 +619,16 @@ def sync_rawbol_to_bol(specific_lot=None):
 
                 # Record synced lots
                 sync_date = datetime.datetime.utcnow().isoformat()
+                lot_counts = {}
+                for item in raw_items:
+                    lot_counts[item['lot_number']] = lot_counts.get(item['lot_number'], 0) + 1
                 for lot in lots_to_sync:
-                    raw_cur.execute('SELECT COUNT(*) FROM raw_bol_items WHERE lot_number = ?', (lot,))
-                    count = raw_cur.fetchone()[0]
-                    raw_cur.execute('INSERT INTO synced_lots (lot_number, sync_date, items_count) VALUES (?, ?, ?)',
+                    count = lot_counts[lot]
+                    raw_cur.execute('INSERT INTO rawdb.synced_lots (lot_number, sync_date, items_count) VALUES (?, ?, ?)',
                                   (lot, sync_date, count))
 
                 # Record sync history
-                raw_cur.execute('''INSERT INTO sync_history (sync_date, items_updated, items_inserted, changes_json)
+                raw_cur.execute('''INSERT INTO rawdb.sync_history (sync_date, items_updated, items_inserted, changes_json)
                                   VALUES (?, ?, ?, ?)''',
                                (sync_date, updated, inserted, json.dumps(changes)))
 
@@ -646,30 +663,32 @@ def delete_lot(lot_number):
     try:
         ensure_rawbol_db()
 
-        bol_conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'))
+        bol_conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'), timeout=30)
         try:
             bol_cur = bol_conn.cursor()
 
-            raw_conn = sqlite3.connect(os.path.join(BASE_DIR, 'rawbol.db'))
+            raw_conn = bol_conn
+            raw_conn.execute('ATTACH DATABASE ? AS rawdb', (os.path.join(BASE_DIR, 'rawbol.db'),))
+            raw_conn.execute('BEGIN IMMEDIATE')
             try:
                 raw_conn.row_factory = sqlite3.Row
                 raw_cur = raw_conn.cursor()
 
                 # Get all items from this lot before deleting
-                raw_cur.execute('SELECT * FROM raw_bol_items WHERE lot_number = ?', (lot_number,))
+                raw_cur.execute('SELECT * FROM rawdb.raw_bol_items WHERE lot_number = ?', (lot_number,))
                 lot_items = raw_cur.fetchall()
                 deleted_items = len(lot_items)
 
                 # Check metadata presence (can exist even when lot items were already removed).
-                raw_cur.execute('SELECT COUNT(*) FROM upload_logs WHERE lot_number = ?', (lot_number,))
+                raw_cur.execute('SELECT COUNT(*) FROM rawdb.upload_logs WHERE lot_number = ?', (lot_number,))
                 has_upload_log = (raw_cur.fetchone()[0] or 0) > 0
-                raw_cur.execute('SELECT COUNT(*) FROM synced_lots WHERE lot_number = ?', (lot_number,))
+                raw_cur.execute('SELECT COUNT(*) FROM rawdb.synced_lots WHERE lot_number = ?', (lot_number,))
                 has_synced_row = (raw_cur.fetchone()[0] or 0) > 0
 
                 if not lot_items:
                     if has_upload_log or has_synced_row:
-                        raw_cur.execute('DELETE FROM synced_lots WHERE lot_number = ?', (lot_number,))
-                        raw_cur.execute('DELETE FROM upload_logs WHERE lot_number = ?', (lot_number,))
+                        raw_cur.execute('DELETE FROM rawdb.synced_lots WHERE lot_number = ?', (lot_number,))
+                        raw_cur.execute('DELETE FROM rawdb.upload_logs WHERE lot_number = ?', (lot_number,))
                         raw_conn.commit()
                         return {
                             'success': True,
@@ -691,14 +710,14 @@ def delete_lot(lot_number):
                 has_unchecked_qty = 'unchecked_qty' in bol_cols
 
                 # Desync from bol.db
-                for item in lot_items:
+                for item in (lot_items if has_synced_row else []):
                     upc = item['upc']
-                    qty = item['quantity'] or 1
+                    qty = 1 if item['quantity'] is None else max(0, int(item['quantity']))
                     lot = item['lot_number']
 
                     # Check if this exact UPC+LOT exists in bol.db
-                    bol_cur.execute('''
-                        SELECT id, quantity, original_qty, good_qty, bad_qty, unchecked_qty
+                    bol_cur.execute(f'''
+                        SELECT {_bol_quantity_projection(bol_cols)}
                         FROM bol_items
                         WHERE upc = ? COLLATE NOCASE
                           AND lot_number = ? COLLATE NOCASE
@@ -738,9 +757,9 @@ def delete_lot(lot_number):
                             updated += 1
 
                 # Delete from rawbol.db tables
-                raw_cur.execute('DELETE FROM raw_bol_items WHERE lot_number = ?', (lot_number,))
-                raw_cur.execute('DELETE FROM synced_lots WHERE lot_number = ?', (lot_number,))
-                raw_cur.execute('DELETE FROM upload_logs WHERE lot_number = ?', (lot_number,))
+                raw_cur.execute('DELETE FROM rawdb.raw_bol_items WHERE lot_number = ?', (lot_number,))
+                raw_cur.execute('DELETE FROM rawdb.synced_lots WHERE lot_number = ?', (lot_number,))
+                raw_cur.execute('DELETE FROM rawdb.upload_logs WHERE lot_number = ?', (lot_number,))
 
                 bol_conn.commit()
                 raw_conn.commit()
@@ -770,17 +789,19 @@ def desync_all_rawbol():
     try:
         ensure_rawbol_db()
 
-        bol_conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'))
+        bol_conn = sqlite3.connect(os.path.join(BASE_DIR, 'bol.db'), timeout=30)
         try:
             bol_cur = bol_conn.cursor()
 
-            raw_conn = sqlite3.connect(os.path.join(BASE_DIR, 'rawbol.db'))
+            raw_conn = bol_conn
+            raw_conn.execute('ATTACH DATABASE ? AS rawdb', (os.path.join(BASE_DIR, 'rawbol.db'),))
+            raw_conn.execute('BEGIN IMMEDIATE')
             try:
                 raw_conn.row_factory = sqlite3.Row
                 raw_cur = raw_conn.cursor()
 
                 # Get all raw items
-                raw_cur.execute('SELECT * FROM raw_bol_items')
+                raw_cur.execute('SELECT * FROM rawdb.raw_bol_items WHERE lot_number IN (SELECT lot_number FROM rawdb.synced_lots)')
                 raw_items = raw_cur.fetchall()
 
                 updated = 0
@@ -794,12 +815,12 @@ def desync_all_rawbol():
 
                 for item in raw_items:
                     upc = item['upc']
-                    qty = item['quantity'] or 1
+                    qty = 1 if item['quantity'] is None else max(0, int(item['quantity']))
                     lot = item['lot_number']
 
                     # Check if this exact UPC+LOT exists in bol.db
-                    bol_cur.execute('''
-                        SELECT id, quantity, original_qty, good_qty, bad_qty, unchecked_qty
+                    bol_cur.execute(f'''
+                        SELECT {_bol_quantity_projection(bol_cols)}
                         FROM bol_items
                         WHERE upc = ? COLLATE NOCASE
                           AND lot_number = ? COLLATE NOCASE
@@ -839,7 +860,7 @@ def desync_all_rawbol():
                             updated += 1
 
                 # Clear synced lots tracking
-                raw_cur.execute('DELETE FROM synced_lots')
+                raw_cur.execute('DELETE FROM rawdb.synced_lots')
 
                 bol_conn.commit()
                 raw_conn.commit()

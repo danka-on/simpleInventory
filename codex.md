@@ -24,7 +24,7 @@ Always use the Pi key explicitly with `ssh -i` / `scp -i` when connecting to `dk
 The default SSH config on this PC only has a GitHub host entry, so Pi connections can fail with `Permission denied (publickey,password)` unless the key is passed explicitly.
 
 ```powershell
-# Scripted deploy (hardcoded subset of files — update script when adding new files)
+# Scripted deploy (runtime module list plus the sweetshelves package)
 .\deploy-to-pi.ps1
 
 # Manual SCP for specific files
@@ -33,7 +33,7 @@ scp -i C:/Users/boxatron/.ssh/sweet_shelves_pi .\templates\*.html dk@10.0.0.151:
 scp -i C:/Users/boxatron/.ssh/sweet_shelves_pi .\static\i18n.js dk@10.0.0.151:/opt/sweetshelves/static/
 ```
 
-**Never SCP database files (.db) from PC to Pi.** The Pi has its own live databases. Only transfer code, templates, and static assets.
+**Never SCP database files (.db) from PC to Pi.** The Pi has its own live databases. Only transfer code, templates, and static assets. Since the modularization, deploy `sweetshelves/` along with `app.py`; copying the entrypoint alone is insufficient. The deploy script stages only package Python source and transfers it before the entrypoint.
 
 After deploying, restart the service on the Pi: `ssh -i C:/Users/boxatron/.ssh/sweet_shelves_pi dk@10.0.0.151 "sudo systemctl restart sweetshelves.service"`
 
@@ -87,7 +87,11 @@ When user says "push", "p", "push to pi", or "commit changes", treat it as:
 
 ## Architecture
 
-- **`app.py`** (~14k lines) — monolithic Flask app with 227+ routes. All routing, API endpoints, and view logic lives here.
+- **`app.py`** (30 lines) — WSGI/local-development entrypoint. `gunicorn -c gunicorn_config.py app:app` and `python app.py` still work.
+- **`sweetshelves/`** — 86 feature/core modules, plus package initialization, startup, route registration, and legacy exports. The migration preserved all 471 Flask URL rules and 1,132 helper/endpoint function signatures. See `docs/architecture.md` for ownership and extension rules.
+- **`sweetshelves/bootstrap.py`** — initializes schemas, registers routes, and starts optional workers once. Feature imports do not open databases or start background services.
+- **`sweetshelves/runtime.py`**, **`config.py`**, **`database.py`** — shared Flask/cache instances, project-root configuration, request-scoped connections and teardown.
+- **`sweetshelves/routing.py`** — explicit registrations preserving existing endpoint names and URLs.
 - **`DBmanager.py`** — SQLite connection pooling (request-scoped via Flask `g`), CRUD operations, WAL mode on all databases.
 - **`amazon_manager.py`** / **`ebay_manager.py`** — marketplace API integrations with rate limiting and OAuth token management.
 - **`BOLextractor.py`** — parses BOL data from Excel/CSV uploads.
@@ -108,8 +112,9 @@ Server-side Jinja2 templates in `templates/`. Vanilla JavaScript with AJAX calls
 
 ## Key Conventions
 
-- Database connections use `get_db_connection(db_name)` or the `@contextmanager db_connection(db_name)` pattern from DBmanager — never open raw `sqlite3.connect()` calls in app.py.
+- Prefer `sweetshelves.database.get_db_connection(db_name)` / `db_connection(db_name)` for request-scoped work, or `DBmanager.connect_db` for independent connections. Existing feature code still contains legacy raw SQLite connections; keep their transaction behavior intact when changing them.
 - Flask-Caching with 5-minute default timeout. Flask-Compress enabled.
-- Error responses use `_safe_error()` to sanitize messages before sending to client.
-- Pi deployment: 1 Gunicorn worker, 4 threads, preloaded app, RAM disk for temp files.
-- No automated test suite exists — testing is manual through the web UI.
+- Error responses use `sweetshelves.errors._safe_error()` to sanitize messages before sending to client.
+- Pi deployment: 1 Gunicorn worker, 4 threads, `preload_app = False`, RAM disk for temp files.
+- Offline regression suite: `py -3.13 tools/run_checks.py --javascript` on Windows, or `python tools/run_checks.py --javascript` in a configured environment. It copies code into a disposable directory, excludes databases/credentials, and disables background services and the tunnel. Browser suites require Playwright and Edge.
+- New features import their owning modules directly. `app.__getattr__` preserves legacy read/import access only; patch shared state on its real owner in tests. Do not add features or shared state to `app.py`.

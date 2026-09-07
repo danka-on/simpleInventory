@@ -1,0 +1,119 @@
+/* Listing workspace: existing marketplace controls remain the source of truth. */
+body.listing-workspace {
+  --bg0:#f4f6f8; --bg1:#fff; --bg2:#edf1f5; --card:#fff; --card-hover:#f7f9fc;
+  --ink:#27364b; --ink-bright:#142338; --muted:#607086; --muted-dim:#6c7b8e;
+  --border:#dde4ec; --border-hover:#b9c7d8; --blue:#245edb; --blue-light:#245edb;
+  --green:#168063; --red:#c63e49; --red-light:#c63e49; --shadow:none; --shadow2:none;
+  background:var(--bg0); color:var(--ink); font-size:14px;
+}
+html.ss-theme-night body.listing-workspace {
+  --bg0:#111925; --bg1:#192435; --bg2:#243247; --card:#192435; --card-hover:#213047;
+  --ink:#d6e0ed; --ink-bright:#f1f5fa; --muted:#a0aec0; --muted-dim:#94a3b8;
+  --border:#334257; --border-hover:#526780; --blue:#7ca6ff; --blue-light:#7ca6ff;
+  --green:#5cd5af; --red:#ff929a; --red-light:#ff929a;
+}
+.listing-workspace .wrap,.listing-workspace .topbarInner {max-width:1700px;padding-left:28px;padding-right:28px}
+.listing-workspace .topbar,.listing-workspace .topbar.storeAmazon {background:var(--card);border-color:var(--border);box-shadow:none}
+.listing-workspace .topbarInner{min-height:70px}
+.listing-workspace .topbar{top:var(--ss-banner-h,0px)}
+.listing-workspace .pageTitle{color:var(--ink-bright);font-size:20px;letter-spacing:-.6px}
+.listing-workspace .backBtn{background:var(--bg0);color:var(--ink);border-color:var(--border)}
+.listing-workspace .layout{grid-template-columns:270px minmax(0,1fr) 290px;gap:22px;overflow:visible;animation:none}
+.listing-workspace .main{gap:18px}
+.listing-workspace .sidebar{top:calc(var(--ss-banner-h,0px) + 88px);padding:0;scrollbar-gutter:auto}
+.listing-workspace .card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:none;overflow:hidden}
+.listing-workspace .cardHeader{padding:17px 20px;background:transparent;border-color:var(--border)}
+.listing-workspace .cardHeader h2{font-size:15px;color:var(--ink-bright);letter-spacing:-.2px}
+.listing-workspace .cardBody{padding:20px}
+.listing-workspace .stepBadge{display:none}
+.listing-workspace .btn{border-radius:7px;box-shadow:none;font-size:12px;min-height:34px}
+.listing-workspace .btnGhost{background:var(--card);border-color:var(--border);color:var(--ink)}
+.listing-workspace .btnPrimary,.listing-workspace #btnPublish,.listing-workspace #btnAmazonPut{background:#245edb;border-color:#245edb;color:white}
+.listing-workspace input,.listing-workspace select,.listing-workspace textarea,.listing-workspace .richEditor{background:var(--card);color:var(--ink-bright);border-color:var(--border);border-radius:7px;font:inherit}
+.listing-workspace input,.listing-workspace select{min-height:42px}
+.listing-workspace label{color:var(--ink);font-size:12px;font-weight:600}
+.listing-workspace .field{margin-top:13px}
+.listing-workspace .field:first-child{margin-top:0}
+.listing-workspace .hint,.listing-workspace .muted{color:var(--muted);font-size:12px;line-height:1.6}
+.listing-workspace .miniBox{background:var(--bg0);border-color:var(--border);box-shadow:none}
+.listing-workspace .formSection{border:0;margin:0;padding:0}
+.listing-workspace .formSectionLabel{color:var(--muted)}
+.listing-workspace .storeBar{margin:0;padding:0;background:none;border:0}
+.listing-workspace .storeTabs{background:var(--bg2);padding:4px;border-radius:9px}
+.listing-workspace .storeLabel{display:none}
+.listing-workspace .tabBtn{border:0;background:transparent;color:var(--muted);border-radius:6px}
+.listing-workspace .tabBtnActive{background:var(--card);color:var(--ink-bright);box-shadow:0 1px 4px #0001}
+.listing-workspace .queueItem{border:1px solid transparent;background:transparent;border-radius:8px;min-height:62px;padding:12px 9px;color:var(--ink)}
+.listing-workspace .queueItem.active{background:var(--bg2);border-color:var(--blue)}
+.listing-workspace .queueTitle{color:var(--ink);font-size:12px;line-height:1.5;white-space:normal;-webkit-line-clamp:2}
+.listing-workspace .queueNum{background:var(--bg2);color:var(--muted)}
+.listing-workspace .queueListShell{max-height:calc(100vh - 360px)}
+.listing-workspace #cardListing .cardHeader{padding:14px 12px}
+.listing-workspace #cardListing .cardBody{padding:12px}
+.listing-workspace .queueModeSelect{max-width:150px;min-height:32px;background:var(--card);color:var(--ink)}
+.listing-workspace .previewThumb{width:100px;height:100px;background:var(--bg0)}
+.listing-workspace .previewTop{gap:16px}
+.listing-workspace .richEditor{min-height:170px;line-height:1.7}
+.listing-workspace .sidebarHistoryLink{background:transparent;border-color:var(--border);color:var(--muted)}
+.ws-intro{margin:6px 0 24px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.ws-eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);font-weight:700}
+.ws-intro h2{font-size:28px;letter-spacing:-1px;margin:7px 0;color:var(--ink-bright)}
+.ws-intro p{color:var(--muted);margin:0;font-size:13px}
+.ws-stat{font-size:12px;color:var(--muted);white-space:nowrap}
+.ws-stat strong{font-size:24px;color:var(--ink-bright);margin-right:7px}
+.ws-nav{display:flex;gap:7px;flex-wrap:wrap;padding-bottom:2px}
+.ws-nav button{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 12px;border-radius:7px;cursor:pointer;font:inherit;font-size:12px}
+.ws-nav button:hover,.ws-nav button:focus-visible{color:var(--blue);border-color:var(--blue)}
+.ws-review{position:sticky;top:calc(var(--ss-banner-h,0px) + 88px);min-width:0;max-height:calc(100vh - var(--ss-banner-h,0px) - 106px);overflow:auto}
+.ws-review .cardBody{padding:18px}
+.ws-review h2{font-size:16px;margin:0 0 16px;color:var(--ink-bright)}
+.ws-cover{width:100%;height:165px;object-fit:contain;background:var(--bg0);border-radius:8px;margin-bottom:15px}
+.ws-review-title{font-size:15px;line-height:1.5;color:var(--ink-bright);margin:0 0 10px;overflow-wrap:anywhere}
+.ws-price{font-size:28px;font-weight:700;letter-spacing:-1px;color:var(--ink-bright)}
+.ws-meta{font-size:12px;color:var(--muted);margin:5px 0 18px;line-height:1.5}
+.ws-divider{border:0;border-top:1px solid var(--border);margin:18px 0}
+.ws-status{font-size:13px;font-weight:600;color:var(--ink-bright)}
+.ws-checks{display:grid;gap:6px;margin:10px 0 18px}
+.ws-check{display:flex;align-items:center;gap:9px;text-align:left;border:0;background:var(--bg0);color:var(--ink);border-radius:6px;padding:9px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ws-check span:first-child{color:var(--green)}
+.ws-check[data-missing=true] span:first-child{color:var(--red)}
+.ws-actions{display:grid;gap:8px}
+.ws-actions .btn{width:100%;justify-content:center;min-height:42px}
+.ws-save-status{font-size:11px;line-height:1.5;color:var(--muted);margin:10px 0 0;min-height:17px}
+.ws-filter{width:100%;margin-bottom:10px}
+.ws-count{font-size:11px;color:var(--muted);margin-bottom:10px}
+.ws-title-count{float:right;font-size:11px;color:var(--muted)}
+.ws-title-count.over{color:var(--red);font-weight:700}
+.ws-policies{font-size:12px;color:var(--muted);line-height:1.7;margin-top:0}
+.ws-review details{font-size:12px;color:var(--muted);line-height:1.6}
+.ws-review summary{cursor:pointer;color:var(--ink);font-weight:600}
+.listing-workspace [id^=card]{scroll-margin-top:calc(var(--ss-banner-h,0px) + 90px)}
+.listing-workspace :focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.listing-workspace .ws-empty{padding:22px 0;color:var(--muted);line-height:1.6}
+.listing-workspace #cardStoreCatalog{border-color:var(--blue)}
+.listing-workspace #cardStoreCatalog .cardHeader{background:var(--bg2)}
+.listing-workspace #ebayCatalogBox{max-height:560px!important;padding:0;background:transparent;border:0}
+.listing-workspace #ebayCatalogBox .compRow{padding:14px;border:1px solid var(--border);border-radius:8px;background:var(--card);align-items:start;cursor:default!important}
+.listing-workspace #ebayCatalogBox .compRowSelected{border-color:var(--green);background:var(--bg0)}
+.listing-workspace #ebayCatalogBox .compThumb{width:72px;height:80px;background:var(--bg0)}
+.listing-workspace #ebayCatalogBox .compTitle{color:var(--ink-bright);font-size:14px;line-height:1.5}
+.similarActions{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.ws-match-status{font-size:12px;line-height:1.6;color:var(--green);margin:0}
+.ws-match-status:empty{display:none}
+.listing-workspace .card.collapsed > .cardBody{display:none!important}
+.listing-workspace.ws-no-item #storeEbayPage,.listing-workspace.ws-no-item #storeAmazonPage,
+.listing-workspace.ws-no-item .ws-nav,.listing-workspace.ws-no-item #wsEbayActions,
+.listing-workspace.ws-no-item #wsAmazonActions{display:none!important}
+@media(min-width:1500px){.listing-workspace .layout{grid-template-columns:290px minmax(0,1fr) 310px;gap:26px}}
+@media(max-width:1200px){.listing-workspace .layout{grid-template-columns:230px minmax(0,1fr)}.ws-review{position:static;grid-column:2;max-height:none}.ws-cover{display:none}.listing-workspace .wrap,.listing-workspace .topbarInner{padding-left:18px;padding-right:18px}}
+@media(max-width:760px){.listing-workspace .layout{display:flex;flex-direction:column;gap:16px}.listing-workspace .sidebar,.listing-workspace .main,.ws-review{width:100%}.listing-workspace .sidebar{position:static;max-height:none}.listing-workspace .queueListShell{max-height:200px}.listing-workspace .cardBody{padding:16px}.ws-intro{align-items:flex-start;margin-bottom:18px}.ws-intro h2{font-size:24px}.ws-stat{display:none}.listing-workspace .row2{grid-template-columns:1fr}.listing-workspace .wrap{padding:16px 12px 40px}.listing-workspace .topbarInner{padding:10px 12px}.listing-workspace .topbarItemPreview{position:static;transform:none;max-width:45%}.listing-workspace .topbarItemName{display:none}.listing-workspace #previewTop{grid-template-columns:1fr!important}.ws-nav{gap:5px}.ws-nav button{padding:9px}.ws-review{overflow:visible}.listing-workspace .btnNext{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.listing-workspace *{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+/* Native recommendations stay within the existing matching workspace. */
+.ws-native-mapping { padding: 16px; margin-bottom: 20px; border: 1px solid var(--line, #d5dbe0); border-radius: 12px; }
+.ws-native-mapping h3 { margin: 0 0 8px; }
+.ws-native-mapping p { line-height: 1.5; }
+.ws-native-preview { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line, #d5dbe0); }
+.ws-native-preview dl { display: grid; grid-template-columns: minmax(90px, 1fr) 2fr; gap: 6px 12px; }
+.ws-native-preview dt { font-weight: 600; }
+.ws-native-preview dd { margin: 0; overflow-wrap: anywhere; }
+.ws-native-preview details { margin-bottom: 12px; }

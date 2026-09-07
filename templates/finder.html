@@ -40,6 +40,46 @@
     .panel-header .count { background: rgba(255,255,255,0.3); padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; }
     .panel-warehouse .panel-header { background: #6c5ce7; }
     .panel-rawbol .panel-header { background: #0984e3; }
+    .panel-history { grid-column: 1 / -1; }
+    .panel-history .panel-header { background: #64748b; }
+    .upc-records { margin: 16px 0; padding: 16px; background: white; border-radius: 12px; }
+    .record-nav { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0; }
+    .record-nav button { padding:10px 14px; border:1px solid #e2e8f0; border-radius:8px; background:white; color:#475569; cursor:pointer; }
+    .record-nav button[aria-pressed="true"] { background:#334155; border-color:#334155; color:white; }
+    .record-source { margin:20px 0; }
+    .record-source h4 { font-size:1rem; margin-bottom:10px; color:#334155; }
+    .record-row { padding:14px 0; border-bottom:1px solid #e2e8f0; display:flex; align-items:flex-start; gap:16px; }
+    .record-row-main { flex:1; min-width:0; }
+    .record-row strong { display:block; color:#1e293b; overflow-wrap:anywhere; }
+    .record-meta { color:#64748b; font-size:.85rem; margin-top:6px; display:flex; flex-wrap:wrap; gap:6px 16px; }
+    .record-note { margin-top:8px; color:#475569; font-size:.9rem; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .record-identity { padding:16px; border-radius:8px; background:#f8fafc; }
+    .record-identity h3 { font-size:1.1rem; margin-bottom:6px; }
+    .record-empty { padding:24px 0; color:#64748b; }
+    .record-detail-link { flex-shrink:0; color:#2563eb; border:0; background:none; padding:2px; cursor:pointer; font:inherit; font-size:.85rem; }
+    .record-source, .record-nav button { --record-color:#475569; --record-tint:#f1f5f9; }
+    [data-category="Inventory"] { --record-color:#6d28d9; --record-tint:#f5f3ff; }
+    [data-category="Sales & returns"] { --record-color:#047857; --record-tint:#ecfdf5; }
+    [data-category="Prep"] { --record-color:#b45309; --record-tint:#fffbeb; }
+    [data-category="Listings"] { --record-color:#0369a1; --record-tint:#f0f9ff; }
+    [data-category="BOL & other"] { --record-color:#475569; --record-tint:#f1f5f9; }
+    .record-nav button { border-bottom:3px solid var(--record-color); }
+    .record-nav button[aria-pressed="true"] { color:var(--record-color); background:var(--record-tint); border-color:var(--record-color); }
+    .record-source h4 { border-left:3px solid var(--record-color); padding:8px 12px; background:var(--record-tint); color:var(--record-color); border-radius:0 6px 6px 0; }
+    .record-actions { display:flex; flex-direction:column; align-items:flex-end; gap:10px; flex-shrink:0; }
+    .record-original { font-size:.85rem; font-weight:600; color:var(--record-color, #2563eb); text-decoration:none; }
+    .record-original:hover { text-decoration:underline; }
+    .record-badge { display:inline-block; border-radius:5px; padding:3px 7px; font-size:.75rem; font-weight:600; color:#475569; background:#f1f5f9; }
+    .record-badge.good { color:#047857; background:#ecfdf5; }
+    .record-badge.bad { color:#b91c1c; background:#fef2f2; }
+    .record-badge.pending { color:#92400e; background:#fffbeb; }
+    .record-settings { display:flex; flex-wrap:wrap; gap:12px 24px; margin-top:12px; font-size:.8rem; color:#64748b; }
+    .record-settings label { display:flex; gap:6px; align-items:center; cursor:pointer; }
+    @media(max-width:600px) { .record-row { flex-wrap:wrap; gap:10px; } .record-actions { flex-direction:row; width:100%; } }
+    .record-fields { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 8px; font-size: .85rem; padding: 10px; }
+    .record-fields dt { color: #64748b; overflow-wrap: anywhere; }
+    .record-fields dd { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
+    .all-data-btn { padding: 6px 10px; margin-top: 8px; border: 1px solid #64748b; border-radius: 6px; background: #fff; color: #334155; cursor: pointer; }
     .panel-body { padding: 12px; max-height: 60vh; overflow-y: auto; }
 
     .result-card {
@@ -305,15 +345,36 @@
         <input type="text" class="search-input" id="searchInput" data-i18n="search_by_title" placeholder="Search by title, barcode, UPC..." autofocus>
         <button class="search-btn" id="searchBtn" data-i18n="search">Search</button>
       </div>
+      <label class="custom-items-filter">Name matching:
+        <select id="matchMode"><option value="all">All words</option><option value="any">Any words (broader)</option></select>
+      </label>
+      <div style="color:#64748b;font-size:.85rem;margin-top:8px">Select a few distinctive words or sizes. Short numbers search names; complete barcodes search exact codes. Use Any words when names differ. Confirmed matches teach Finder alternate names; Undo reverses that learning.</div>
       <label class="custom-items-filter">
         <input type="checkbox" id="customItemsOnly">
         <span>Custom Items</span>
+      </label>
+      <label class="custom-items-filter">
+        <input type="checkbox" id="includeHistory">
+        <span>Include Rack History</span>
       </label>
     </div>
 
     <div class="token-bar" id="tokenBar">
       <span class="label" data-i18n="words">Words:</span>
     </div>
+
+    <section class="upc-records" aria-label="All UPC data">
+      <h3>Item history</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <input id="recordsUpc" aria-label="UPC for all data" placeholder="Enter UPC" style="padding:8px;min-width:0">
+        <button type="button" id="recordsSearch" class="all-data-btn" style="margin:0">View item</button>
+      </div>
+      <div class="record-settings">
+        <label><input type="checkbox" id="recordsFamily"> Include related UPCs</label>
+        <label><input type="checkbox" id="recordsSupporting"> Show supporting records</label>
+      </div>
+      <div id="recordsResults" aria-live="polite" style="margin-top:16px">Enter a UPC or choose “View history” on a search result.</div>
+    </section>
 
     <!-- Confirm removal popup -->
     <div class="confirm-overlay" id="confirmOverlay">
@@ -359,6 +420,10 @@
     </div>
 
     <div class="panels">
+      <div class="panel panel-history" id="historyPanel" hidden>
+        <div class="panel-header">Rack History <span class="count" id="historyCount">0</span></div>
+        <div class="panel-body" id="historyResults"></div>
+      </div>
       <div class="panel panel-warehouse">
         <div class="panel-header"><span data-i18n="warehouse_searchrack">Warehouse (searchRack)</span> <span class="count" id="warehouseCount">0</span></div>
         <div class="panel-body" id="warehouseResults">
@@ -397,6 +462,7 @@ let tokens = [];
 const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
 const customItemsOnly = document.getElementById('customItemsOnly');
+const includeHistory = document.getElementById('includeHistory');
 
 // Show order context if we have info
 if (orderTitle) {
@@ -434,7 +500,7 @@ if (orderTitle) {
   }
 
   // Build token chips from title words (all start inactive for manual use)
-  // Filter out punctuation, filler words, and numbers
+  // Keep numeric sizes; filter punctuation and filler words.
   const fillerWords = new Set(['a', 'an', 'the', 'for', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'of', 'with', 'by', 'from', 'as', 'is', 'it', 'its', 'be', 'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'this', 'that', 'these', 'those', 'am', 'if', 'then', 'so', 'up', 'out', 'no', 'not', 'only', 'own', 'into', 'over', 'after', 'before', 'between', 'under', 'again', 'further', 'once']);
   const words = (orderTitle.match(/\d+(?:\.\d+)?|[^\W\d_]+/gu) || [])
     // Split mixed terms at number/letter boundaries:
@@ -442,13 +508,20 @@ if (orderTitle) {
     .map(w => w.trim())
     .filter(w => w.length > 0)
     .filter(w => !fillerWords.has(w.toLowerCase()));
-  tokens = words.map(w => ({word: w, active: false}));
+  tokens = words.filter((w, i) => words.findIndex(other => other.toLowerCase() === w.toLowerCase()) === i).map(w => ({word: w, active: false}));
   renderTokens();
 }
 
 searchBtn.addEventListener('click', () => doSearch());
 searchInput.addEventListener('keyup', (e) => { if (e.key === 'Enter') doSearch(); });
 customItemsOnly.addEventListener('change', () => doSearch());
+includeHistory.addEventListener('change', () => doSearch());
+document.getElementById('matchMode').addEventListener('change', () => doSearch());
+searchInput.addEventListener('input', () => {
+  const selected = new Set(searchInput.value.toLowerCase().split(/\s+/));
+  tokens.forEach(token => { token.active = selected.has(token.word.toLowerCase()); });
+  renderTokens();
+});
 
 function renderTokens() {
   const bar = document.getElementById('tokenBar');
@@ -528,33 +601,70 @@ function formatUpcDisplay(code) {
 
 const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">No img</text></svg>');
 
+let searchSequence = 0;
+let searchController = null;
+
 async function doSearch(overrideQuery) {
+  const sequence = ++searchSequence;
+  if (searchController) searchController.abort();
+  searchController = new AbortController();
   const q = (overrideQuery || searchInput.value).trim();
+  if (/^\d{7,}(?:-\w+)?$/.test(q)) showAllUpcData(q);
   const customOnly = customItemsOnly.checked;
-  if (!q && !customOnly) return;
+  document.getElementById('historyPanel').hidden = !includeHistory.checked;
+  renderHistory([]);
+  if (!q && !customOnly) {
+    renderWarehouse([]);
+    renderRawbol([]);
+    return;
+  }
 
   document.getElementById('warehouseResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
   document.getElementById('rawbolResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
+  if (includeHistory.checked) document.getElementById('historyResults').textContent = t('searching');
 
   try {
     const resp = await fetch('/api/finder', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({q: q, custom_only: customOnly})
+      signal: searchController.signal,
+      body: JSON.stringify({q: q, custom_only: customOnly, include_history: includeHistory.checked, match_mode: document.getElementById('matchMode').value})
     });
+    if (!resp.ok) throw new Error('Search failed');
     const data = await resp.json();
+    if (sequence !== searchSequence) return;
     renderWarehouse(data.searchrack || []);
     renderRawbol(data.rawbol || []);
+    renderHistory(data.rackhistory || [], data.rackhistory_error);
   } catch (e) {
+    if (e.name === 'AbortError' || sequence !== searchSequence) return;
+    renderHistory([], true);
     document.getElementById('warehouseResults').innerHTML = '<div class="empty-state">' + t('error_searching') + '</div>';
     document.getElementById('rawbolResults').innerHTML = '<div class="empty-state">' + t('error_searching') + '</div>';
   }
+}
+
+function renderHistory(items, error) {
+  document.getElementById('historyCount').textContent = items.length;
+  const el = document.getElementById('historyResults');
+  if (error || !items.length) {
+    el.innerHTML = '<div class="empty-state">' + (error ? t('error_searching') : t('no_results_found')) + '</div>';
+    return;
+  }
+  el.innerHTML = items.map(item => `<div class="result-card"><div class="details">
+    <div class="title">${esc(item.title)}</div>
+    <div class="meta">UPC: ${esc(formatUpcDisplay(item.barcode))} | Quantity: ${esc(String(item.quantity_removed ?? ''))}</div>
+    <div class="meta">${esc(item.removal_type)} | ${esc(item.removed_at)}${item.undone_at ? ' | Undone: ' + esc(item.undone_at) : ''}</div>
+    <div class="loc-badge">${esc(item.item_position || 'No location')}</div>
+    ${allDataButton(item.barcode)}
+  </div></div>`).join('');
 }
 
 function renderWarehouse(items) {
   const el = document.getElementById('warehouseResults');
   document.getElementById('warehouseCount').textContent = items.length;
 
+  window._warehouseItems = items;
   if (!items.length) {
     el.innerHTML = '<div class="empty-state">' + t('no_results_found') + '</div>';
     return;
@@ -582,6 +692,14 @@ function renderWarehouse(items) {
       : `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
 
     const itemTitle = item.title || '';
+    const uniqueAliases = [...new Map((item.aliases || []).map(alias => [alias.title, alias])).values()];
+    const aliasesHtml = uniqueAliases.length ? `<details style="margin-top:8px" ${uniqueAliases.some(alias => alias.matched) ? 'open' : ''}>
+      <summary>Previously matched as… (${uniqueAliases.length})</summary>
+      ${uniqueAliases.map(alias => `<div style="margin-top:6px;font-size:.85rem">
+        <span>${esc(alias.title)}</span> ${alias.matched ? '<strong> · Search match</strong>' : ''}
+        <button type="button" data-alias-id="${attrEsc(alias.id)}" data-alias-source="${attrEsc(alias.source)}" onclick="forgetFinderAlias(this)">Forget</button>
+      </div>`).join('')}
+    </details>` : '';
     const warehouseNote = String(item.warehouse_note || '').trim();
     const prepSummary = item.item_prep_summary || {};
     const hasPrep = String(item.barcode || '').includes('-') && !!prepSummary.has_content;
@@ -601,10 +719,28 @@ function renderWarehouse(items) {
         </div>
         ${locBadgeHtml}
         ${noteActions}
+        ${aliasesHtml}
+        ${allDataButton(item.barcode)}
       </div>
       ${actionBtn}
     </div>`;
   }).join('');
+}
+
+async function forgetFinderAlias(button) {
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/finder/aliases/forget', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({id: button.dataset.aliasId, source: button.dataset.aliasSource})
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Could not forget alternate name');
+    await doSearch();
+  } catch (error) {
+    alert(error.message);
+    button.disabled = false;
+  }
 }
 
 function closePrepPopup() {
@@ -689,6 +825,7 @@ function renderRawbol(items) {
           <span>UPC: ${esc(formatUpcDisplay(upcRaw))}</span>
           <span>LOT: ${esc(item.lot_number)}</span>
         </div>
+        ${allDataButton(upcRaw)}
       </div>
       <button class="search-rack-btn" onclick="searchWarehouse('${upc}')">${t('search_warehouse')}</button>
     </div>`;
@@ -702,6 +839,8 @@ function searchWarehouse(upc) {
 
 // Delegated click handler for thumbnail images and truncated titles
 document.addEventListener('click', (e) => {
+  const dataBtn = e.target.closest('[data-all-upc]');
+  if (dataBtn) { showAllUpcData(dataBtn.dataset.allUpc); document.getElementById('recordsUpc').scrollIntoView({behavior: 'smooth', block: 'center'}); return; }
   const prepBtn = e.target.closest('.prep-open-btn');
   if (prepBtn) { e.preventDefault(); e.stopPropagation(); showFinderItemPrep(prepBtn.dataset.barcode || ''); return; }
   const warehouseNoteBtn = e.target.closest('.warehouse-note-open-btn');
@@ -711,6 +850,283 @@ document.addEventListener('click', (e) => {
   const titleDiv = e.target.closest('.clickable-title');
   if (titleDiv) { showImgPopup(titleDiv.dataset.img || '', titleDiv.dataset.title || ''); }
 });
+
+function allDataButton(upc) {
+  return upc ? `<button type="button" class="all-data-btn" data-all-upc="${attrEsc(upc)}">View history</button>` : '';
+}
+
+let recordsSequence = 0;
+let recordsController = null;
+let recordsContext = null;
+let recordsData = null;
+let recordsCategory = 'Overview';
+document.getElementById('recordsSearch').addEventListener('click', () => showAllUpcData(document.getElementById('recordsUpc').value));
+document.getElementById('recordsUpc').addEventListener('keydown', event => {
+  if (event.key === 'Enter') showAllUpcData(event.target.value);
+});
+document.getElementById('recordsFamily').addEventListener('change', () => showAllUpcData(document.getElementById('recordsUpc').value));
+document.getElementById('recordsSupporting').addEventListener('change', () => { if (recordsData) renderRecordOverview(); });
+
+function recordValue(record, ...keys) {
+  return keys.map(key => Object.entries(record).find(([name]) => name.toLowerCase() === key)?.[1]).find(value => value !== null && value !== undefined && value !== '');
+}
+
+function recordCategory(source) {
+  const id = source.id.toLowerCase();
+  if (/^sold.db:/.test(id)) return 'Sales & returns';
+  if (/prep|fba_|items_prep/.test(id)) return 'Prep';
+  if (/listing|listagent|ebaystore|amazonstore|fbstore|pricemaster/.test(id)) return 'Listings';
+  if (/searchrack|rackhistory|rack.db|deleted/.test(id)) return 'Inventory';
+  return 'BOL & other';
+}
+
+function recordSourceName(source) {
+  const table = source.id.split(':')[1].toLowerCase();
+  const names = {orders:'Sold orders', returns:'Returns', return_lifecycle_events:'Return updates',
+    prep_log:'Prep history', items_prep_status:'Current prep status', items_prep_notes:'Prep notes', items_prep_images:'Prep photos',
+    items_prep_media:'Prep media', items_prep_exceptions:'Prep exceptions', searchrack:'Current warehouse stock',
+    removed_items:'Inventory changes', removed:'Earlier removals', deleted_items:'Archived items',
+    raw_bol_items:'Received BOL items', bol_items:'BOL items', listing_log:'Listing activity', listing_queue:'Listing queue',
+    price_changes:'Price changes', listing_meta:'Listing dates', inventory:'eBay listings', items:'Amazon listings',
+    ready_to_ship_notes:'Shipping notes', ready_to_ship_order_labels:'Shipping labels', order_removal_allocations:'Allocated stock'};
+  if (source.id === 'rack.db:INVENTORY') return 'Rack scans';
+  return names[table] || table.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function isPrimaryRecordSource(source) {
+  return new Set(['sold.db:orders', 'sold.db:returns', 'preplog.db:prep_log',
+    'bol.db:items_prep_status', 'bol.db:items_prep_notes', 'bol.db:items_prep_images', 'bol.db:items_prep_media',
+    'searchrack.db:searchrack', 'rackhistory.db:removed_items', 'rawbol.db:raw_bol_items',
+    'listinglog.db:listing_log', 'listagent.db:listing_queue', 'ebaystore.db:inventory',
+    'amazonstore.db:items', 'fbstore.db:fb_listings', 'pricemaster.db:price_changes',
+    'searchrack.db:fba_prep_items']).has(source.id.toLowerCase());
+}
+
+function recordOriginalLink(source, record) {
+  const id = source.id.toLowerCase();
+  const get = (...keys) => recordValue(record, ...keys);
+  const upc = get('upc', 'barcode', 'source_upc') || recordsContext?.upc || '';
+  const link = (path, params, label) => ({href:path + (params ? '?' + new URLSearchParams(params) : ''), label});
+  if (id.startsWith('rackhistory.db:')) return link('/searchrack', {db:'searchRack', q:upc, open_history:'1', history_search:upc}, 'Open rack history');
+  if (id === 'sold.db:orders') return link('/searchrack', {db:'sold', q:get('order_id') || upc}, 'Open sold order');
+  if (id === 'sold.db:returns' || id === 'sold.db:return_lifecycle_events') return link('/searchrack', {db:'returns', q:get('barcode') || upc}, 'Open returns');
+  if (/fba_/.test(id)) return link('/fba-prep', null, 'Open FBA prep');
+  if (id.startsWith('preplog.db:') || id.startsWith('bol.db:items_prep')) {
+    const params = {upc};
+    if (get('lot_number')) params.lot = get('lot_number');
+    return link('/item-prep/diagnostic/view', params, 'Open item prep');
+  }
+  if (id.startsWith('listinglog.db:')) return link('/listing-log', {upc}, 'Open listing log');
+  if (id.startsWith('listagent.db:') || id.startsWith('listing_alerts.db:')) return link('/listingagent', {upc}, 'Open listing agent');
+  if (/^(ebaystore|amazonstore|fbstore)\.db:/.test(id)) {
+    const url = String(get('url', 'listed_url') || '').trim();
+    if (/^https?:\/\//i.test(url)) return {href:url, label:'Open listing'};
+    if (id.startsWith('fbstore')) return link('/fb-listings', null, 'Open Facebook listings');
+    return link('/searchrack', {db:id.startsWith('ebay') ? 'ebayStore' : 'amazonStore', q:upc}, 'Open store listing');
+  }
+  if (id.startsWith('pricemaster.db:')) return link('/price-master', null, 'Open Price Master');
+  if (id.startsWith('rawbol.db:') || id === 'bol.db:bol_items') return link('/searchrack', {db:'bol', q:upc}, 'Open BOL');
+  if (id.startsWith('deleted.db:')) return link('/trash-manager', null, 'Open archive');
+  if (id === 'searchrack.db:searchrack') return link('/searchrack', {db:'searchRack', q:upc, highlight_id:get('id') || ''}, 'Open inventory');
+  return null;
+}
+
+function recordStatusBadge(status, undone) {
+  if (undone) return '<span class="record-badge">Undone</span>';
+  if (status === undefined || status === null || status === '') return '';
+  const key = String(status).toLowerCase();
+  const tone = /^(good|ready|listed|completed|complete|paid|success)$/.test(key) ? 'good' : /^(bad|failed|error|damaged|return|returned)$/.test(key) ? 'bad' : /^(pending|unchecked|queued|open)$/.test(key) ? 'pending' : '';
+  return `<span class="record-badge ${tone}">${esc(key.replace(/_/g,' '))}</span>`;
+}
+
+function recordDate(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw + 'T00:00:00' : raw.replace(' ', 'T'));
+  if (Number.isNaN(date.getTime())) return raw;
+  return date.toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'});
+}
+
+function recordHtml(record, source = {id: ''}, index = 0) {
+  const get = (...keys) => recordValue(record, ...keys);
+  const table = source.id.split(':')[1]?.toLowerCase();
+  const status = get('removal_type', 'status', 'action', 'event_type', 'checkout_status');
+  const undone = get('undone_at') || [1, true, '1'].includes(get('undone'));
+  let heading = get('title', 'item_description', 'name') || recordSourceName({id: source.id || ':record'});
+  if (table === 'orders') heading = `Order ${get('order_id', 'id') ?? '—'}${get('store') ? ' · ' + get('store') : ''}`;
+  else if (table === 'prep_log') heading = 'Prep check';
+  else if (table === 'searchrack') heading = `${get('quantity') ?? '—'} units · ${get('item_position', 'location') || 'No location assigned'}`;
+  else if (table === 'removed_items') heading = String(status || 'Inventory change').replace(/_/g, ' ') + (undone ? ' · Undone' : '');
+  const metadata = [];
+  const add = (label, value) => { if (value !== undefined && value !== null && value !== '') metadata.push(`<span>${esc(label)}${esc(String(value))}</span>`); };
+  const date = table === 'orders' ? get('paid_time', 'created_at') : table === 'returns' ? get('return_date', 'created_at') : get('removed_at', 'created_at', 'updated_at', 'import_date', 'changed_at', 'scanned_at', 'time_removed');
+  add('', recordDate(date));
+  if (table !== 'searchrack') {
+    add('Qty: ', get('quantity_removed', 'quantity', 'qty'));
+    add('Location: ', get('item_position', 'location', 'from_position', 'source_location'));
+  }
+  add('To: ', get('to_position'));
+  if (recordsContext?.family === '1') add('UPC: ', get('barcode', 'upc'));
+  if (['raw_bol_items', 'bol_items', 'items_prep_status'].includes(table)) add('LOT: ', get('lot_number'));
+  const price = get('price', 'new_price', 'refund_amount');
+  add(table === 'returns' ? 'Refund: ' : 'Price: ', price === undefined ? undefined : (Number.isFinite(Number(price)) ? '$' + Number(price).toFixed(2) : price));
+  const badge = recordStatusBadge(status, undone);
+  if (badge && table !== 'removed_items') metadata.push(badge);
+  const note = get('note', 'notes', 'reason', 'return_reason', 'warehouse_note');
+  const original = recordOriginalLink(source, record);
+  return `<article class="record-row"><div class="record-row-main"><strong>${esc(heading)}</strong>
+    <div class="record-meta">${metadata.join('')}</div>
+    ${note ? `<p class="record-note">${esc(String(note).slice(0, 220))}${String(note).length > 220 ? '…' : ''}</p>` : ''}</div>
+    <div class="record-actions">${original ? `<a class="record-original" href="${attrEsc(original.href)}" target="_blank" rel="noopener noreferrer">${esc(original.label)} ↗</a>` : ''}
+    <button type="button" class="record-detail-link" data-record-source="${attrEsc(source.id)}" data-record-index="${index}">Details</button></div></article>`;
+}
+
+function recordDetailsHtml(record, technical = false) {
+  const useful = new Set(['title','name','item_description','barcode','upc','order_id','quantity','quantity_removed',
+    'old_quantity','new_quantity','item_position','from_position','to_position','location','lot_number','price','old_price','new_price',
+    'refund_amount','status','action','event_type','removal_type','store','platform','note','notes','reason','return_reason','warehouse_note',
+    'paid_time','shipped_time','created_at','removed_at','updated_at','import_date','changed_at','return_date','undone','undone_at',
+    'sku','asin','item_condition','item_condition_description','image_url','image_path','file_path','url']);
+  const fields = Object.entries(record).filter(([key, value]) => (technical || useful.has(key.toLowerCase())) && value !== null && value !== '').map(([key, value]) => {
+    let display = value;
+    if (typeof value === 'string' && /^[\[{]/.test(value.trim())) {
+      try { display = JSON.stringify(JSON.parse(value), null, 2); } catch (_) {}
+    } else if (value && typeof value === 'object') display = JSON.stringify(value, null, 2);
+    return `<dt>${esc(key.replace(/_/g, ' '))}</dt><dd>${esc(display == null ? '—' : String(display))}</dd>`;
+  }).join('');
+  return `<dl class="record-fields">${fields}</dl>`;
+}
+
+document.getElementById('recordsResults').addEventListener('click', event => {
+  const button = event.target.closest('[data-record-source]');
+  if (!button) return;
+  const source = recordsData?.sources.find(item => item.id === button.dataset.recordSource);
+  const record = source?.records[Number(button.dataset.recordIndex)];
+  if (record) {
+    const original = recordOriginalLink(source, record);
+    showPrepPopupHtml(`<h3>${esc(recordSourceName(source))}</h3>${original ? `<p style="margin:12px 0"><a href="${attrEsc(original.href)}" target="_blank" rel="noopener noreferrer">${esc(original.label)} ↗</a></p>` : ''}${recordDetailsHtml(record, document.getElementById('recordsSupporting').checked)}`);
+  }
+});
+
+function renderRecordOverview() {
+  const el = document.getElementById('recordsResults');
+  el.textContent = '';
+  const allSources = recordsData.sources;
+  const sources = document.getElementById('recordsSupporting').checked ? allSources : allSources.filter(isPrimaryRecordSource);
+  const primary = sources.find(source => source.id.toLowerCase() === 'searchrack.db:searchrack') || sources.find(source => source.records.some(row => recordValue(row, 'title', 'item_description')));
+  const title = primary?.records.map(row => recordValue(row, 'title', 'item_description')).find(Boolean) || 'Item history';
+  const identity = document.createElement('div');
+  identity.className = 'record-identity';
+  identity.innerHTML = `<h3>${esc(title)}</h3><span class="record-meta">UPC ${esc(recordsContext.upc)}${recordsContext.family === '1' ? ' · Includes related items' : ' · Exact item'}</span>`;
+  el.appendChild(identity);
+  const nav = document.createElement('nav');
+  nav.className = 'record-nav';
+  nav.setAttribute('aria-label', 'Item history sections');
+  for (const category of ['Overview', 'Inventory', 'Sales & returns', 'Prep', 'Listings', 'BOL & other']) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = category;
+    button.setAttribute('data-category', category);
+    button.setAttribute('aria-pressed', String(recordsCategory === category));
+    button.addEventListener('click', () => { recordsCategory = category; renderRecordOverview(); });
+    nav.appendChild(button);
+  }
+  el.appendChild(nav);
+  if (recordsCategory === 'Overview') {
+    const intro = document.createElement('p');
+    intro.className = 'record-meta';
+    intro.textContent = 'Latest sales, prep, and inventory activity. Open the original page to manage an item.';
+    el.appendChild(intro);
+    const featured = ['searchrack.db:searchrack', 'sold.db:orders', 'preplog.db:prep_log', 'rackhistory.db:removed_items'];
+    const previews = featured.map(id => sources.find(source => source.id.toLowerCase() === id)).filter(Boolean);
+    (previews.length ? previews : sources.slice(0, 3)).forEach(source => appendRecordSource(source, recordsContext, true));
+  } else {
+    const selected = sources.filter(source => recordCategory(source) === recordsCategory);
+    if (!selected.length) {
+      const empty = document.createElement('p');
+      empty.className = 'record-empty';
+      empty.textContent = `No ${recordsCategory.toLowerCase()} records found for this UPC.`;
+      el.appendChild(empty);
+    }
+    selected.forEach(source => appendRecordSource(source, recordsContext));
+  }
+  if (!sources.length) {
+    const empty = document.createElement('p');
+    empty.className = 'record-empty';
+    empty.textContent = allSources.length ? 'Only supporting records were found. Turn on “Show supporting records” to view them.' : 'No matching records found.';
+    el.appendChild(empty);
+  }
+  if (recordsData.errors?.length) {
+    const warning = document.createElement('p');
+    warning.className = 'record-note';
+    warning.textContent = 'Some history could not be loaded. Use View item to retry.';
+    el.appendChild(warning);
+  }
+}
+
+function appendRecordSource(source, context, preview = false) {
+  const section = document.createElement('section');
+  section.className = 'record-source';
+  section.setAttribute('data-category', recordCategory(source));
+  const summary = document.createElement('h4');
+  summary.textContent = `${recordSourceName(source)} (${source.total})`;
+  section.appendChild(summary);
+  const rows = document.createElement('div');
+  rows.innerHTML = (preview ? source.records.slice(0, 3) : source.records).map((row, index) => recordHtml(row, source, index)).join('');
+  section.appendChild(rows);
+  const more = document.createElement('button');
+  more.className = 'all-data-btn';
+  more.textContent = preview ? `View ${recordCategory(source).toLowerCase()} →` : `Load more (${source.records.length} of ${source.total} shown)`;
+  more.hidden = !preview && source.next_offset === null;
+  section.appendChild(more);
+  more.addEventListener('click', async () => {
+    if (preview) { recordsCategory = recordCategory(source); renderRecordOverview(); return; }
+    more.disabled = true;
+    more.textContent = 'Loading…';
+    try {
+      const query = new URLSearchParams({...context, source: source.id, offset: source.next_offset});
+      const response = await fetch('/api/finder/records?' + query, {signal: recordsController.signal});
+      const data = await response.json();
+      if (recordsContext !== context) return;
+      const page = data.sources?.find(item => item.id === source.id);
+      if (!response.ok || !page) throw new Error('Could not load records. Try again.');
+      const startIndex = source.records.length;
+      source.records.push(...page.records);
+      rows.insertAdjacentHTML('beforeend', page.records.map((row, index) => recordHtml(row, source, startIndex + index)).join(''));
+      source.next_offset = page.next_offset;
+      more.hidden = page.next_offset === null;
+      more.textContent = `Load more (${source.records.length} of ${source.total} shown)`;
+    } catch (error) {
+      if (error.name !== 'AbortError') more.textContent = 'Could not load records. Retry';
+    } finally { more.disabled = false; }
+  });
+  document.getElementById('recordsResults').appendChild(section);
+}
+
+async function showAllUpcData(upc) {
+  const sequence = ++recordsSequence;
+  if (recordsController) recordsController.abort();
+  recordsController = new AbortController();
+  upc = String(upc || '').trim();
+  const el = document.getElementById('recordsResults');
+  document.getElementById('recordsUpc').value = upc;
+  const context = {upc, family: document.getElementById('recordsFamily').checked ? '1' : '0'};
+  recordsContext = context;
+  recordsData = null;
+  recordsCategory = 'Overview';
+  if (!upc) { el.textContent = 'Enter a UPC to see all available data.'; return; }
+  el.textContent = 'Loading all UPC data…';
+  try {
+    const response = await fetch('/api/finder/records?' + new URLSearchParams(context), {signal: recordsController.signal});
+    const data = await response.json();
+    if (sequence !== recordsSequence) return;
+    if (!response.ok) throw new Error(data.error || 'Could not load UPC data.');
+    recordsData = data;
+    renderRecordOverview();
+  } catch (error) {
+    if (error.name !== 'AbortError' && sequence === recordsSequence) el.textContent = error.message;
+  }
+}
 
 // Image popup
 function showImgPopup(src, name) {
@@ -874,12 +1290,16 @@ function handleMatchFromButton(btnEl) {
 }
 
 // Match barcode and location to sold order (when accessed from ready-to-ship)
+let matchInFlight = false;
+
 async function handleMatch(searchrackId, barcode, location, btnEl) {
+  if (matchInFlight) return;
   if (!orderId && !isListingMatch) {
     alert('No order or store listing context - cannot match');
     return;
   }
 
+  matchInFlight = true;
   try {
     const endpoint = orderId
       ? `/api/sold/match-barcode/${orderId}`
@@ -894,6 +1314,7 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
           listing_title: orderTitle,
           searchrack_id: searchrackId
         };
+    payload.finder_learn = true;
     const resp = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -908,6 +1329,7 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
       // Store for undo
       _lastMatch = {
         mode: orderId ? 'order' : 'listing',
+        finder_alias_undo: data.finder_alias_undo,
         order_id: orderId,
         old_match: data.old_match || null,
         old_barcode: data.old_barcode,
@@ -936,7 +1358,8 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
       const banner = document.getElementById('successBanner');
       const locText = savedLocation ? ` | Loc: ${savedLocation}` : '';
       const matchLabel = isListingMatch ? 'Store listing fallback saved!' : (t('barcode_matched') || 'Matched!');
-      banner.innerHTML = `${matchLabel} UPC: ${formatUpcDisplay(barcode)}${locText}
+      banner.innerHTML = `${matchLabel} UPC: ${esc(formatUpcDisplay(barcode))}${esc(locText)}
+        <span> Alternate-name learning saved with this match.</span>
         <button class="undo-btn" onclick="undoMatch()">${t('undo') || 'Undo'}</button>`;
       banner.style.display = 'block';
       banner.style.background = '#4caf50';
@@ -948,12 +1371,15 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
     }
   } catch (e) {
     alert(t('error_matching') || 'Error matching barcode');
+  } finally {
+    matchInFlight = false;
   }
 }
 
 // Undo the last match
 async function undoMatch() {
-  if (!_lastMatch) return;
+  if (!_lastMatch || matchInFlight) return;
+  matchInFlight = true;
 
   try {
     const isListingUndo = _lastMatch.mode === 'listing';
@@ -977,6 +1403,7 @@ async function undoMatch() {
           location: _lastMatch.old_location || '',
           searchrack_id: _lastMatch.old_searchrack_id || null
         };
+    payload.finder_alias_undo = _lastMatch.finder_alias_undo;
     const resp = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -1012,6 +1439,8 @@ async function undoMatch() {
     }
   } catch (e) {
     alert(t('error_undoing') || 'Error undoing match');
+  } finally {
+    matchInFlight = false;
   }
 }
 

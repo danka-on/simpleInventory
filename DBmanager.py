@@ -484,7 +484,7 @@ def createEbayStoreDB():
         except sqlite3.Error as e:
             print("something went wrong with table ", e)
 
-def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None, TITLE_OVERRIDE=None, WAREHOUSE_NOTE=None):
+def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None, TITLE_OVERRIDE=None, WAREHOUSE_NOTE=None, RESOLVED_METADATA=None):
     """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db"""
     # Validate barcode and position before doing any DB work
     if not BARCODE or not str(BARCODE).strip():
@@ -592,6 +592,15 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         title = str(TITLE_OVERRIDE).strip()
         custom_title = 1
 
+    # The scanning flow resolves authoritative fields at submission time.
+    if RESOLVED_METADATA is not None:
+        resolved = RESOLVED_METADATA
+        if resolved.get('title'):
+            title = resolved['title']
+            custom_title = int(resolved.get('title_source') == 'custom_registry')
+        if resolved.get('image_url'):
+            image = resolved['image_url']
+
     barcode_norm = str(BARCODE).strip()
     position_norm = str(ITEM_POSITION).strip()
     has_picture = PICTUREPOSITION and str(PICTUREPOSITION).strip()
@@ -664,11 +673,11 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                         TITLE = COALESCE(?, TITLE),
                         ITEMID = COALESCE(?, ITEMID),
                         IMAGE = COALESCE(?, IMAGE),
-                        CUSTOM_TITLE = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(CUSTOM_TITLE, 0) END,
+                        CUSTOM_TITLE = CASE WHEN ? = 1 OR ? = 1 THEN ? ELSE COALESCE(CUSTOM_TITLE, 0) END,
                         WAREHOUSE_NOTE = CASE WHEN ? != '' THEN ? ELSE COALESCE(WAREHOUSE_NOTE, '') END,
                         CREATED_AT = ?
                     WHERE ID = ?
-                """, (new_qty, title, itemid, image, custom_title, warehouse_note, warehouse_note, now_iso, existing_id))
+                """, (new_qty, title, itemid, image, custom_title, int(RESOLVED_METADATA is not None), custom_title, warehouse_note, warehouse_note, now_iso, existing_id))
                 action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
 
                 _log_rack_history(barcode_norm, title, 1, existing_id, existing_qty, new_qty, 'add_to_shelf', position_norm)

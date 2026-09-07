@@ -18,10 +18,17 @@ if (!(Test-Path $venvPython)) {
 Write-Host "🚀 Starting Sweet Shelves with venv Python:" -ForegroundColor Cyan
 Write-Host "    $venvPython" -ForegroundColor Gray
 
-# Optionally pass a flag to control tunnel logic (app.py can read env var)
+# Pass the requested tunnel mode and restore the caller's environment on exit.
+$previousNoTunnel = $env:SWEETSHELVES_NO_TUNNEL
 if ($NoTunnel) {
     $env:SWEETSHELVES_NO_TUNNEL = "1"
 }
 
 # Launch the app
-& $venvPython "$root\app.py"
+Push-Location $root
+try {
+    & $venvPython "$root\app.py"
+} finally {
+    Pop-Location
+    $env:SWEETSHELVES_NO_TUNNEL = $previousNoTunnel
+}

@@ -31,6 +31,7 @@ RUNAME = os.getenv("EBAY_RUNAME")
 # eBay support confirmed the generic api_scope should be omitted once Logistics
 # access is assigned to the application.
 BASE_SCOPES = [
+    "https://api.ebay.com/oauth/api_scope/sell.inventory.mapping",
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
     "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
     "https://api.ebay.com/oauth/api_scope/sell.finances",
@@ -119,7 +120,7 @@ def exchange_code_for_tokens(auth_code):
         "redirect_uri": RUNAME,
     }
 
-    response = requests.post(token_url, headers=headers, data=data)
+    response = requests.post(token_url, headers=headers, data=data, timeout=30)
 
     if response.status_code == 200:
         return response.json()

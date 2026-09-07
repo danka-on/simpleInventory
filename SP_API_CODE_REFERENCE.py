@@ -1,3 +1,5 @@
+"""Documentation examples only; placeholders are not executable.
+
 # Quick Reference: SP-API Shipping Class Internal Mechanisms
 # Source: python-amazon-sp-api v1.9.50
 
@@ -90,7 +92,7 @@ response = shipping._request(
 # For POST:
 response = shipping._request(
     "/shipping/v1/shipments",
-    data={"clientReferenceId": "test", "shipTo": {...}, ...},
+    data={"clientReferenceId": "test", "shipTo": {}},  # Fill in the address and remaining shipment fields.
     params={"method": "POST"}
 )
 
@@ -158,3 +160,5 @@ response = requests.post(
 # - Error Handling: Exceptions raised via get_exception_for_code()
 # - Response: ApiResponse object with payload, headers, errors
 
+
+"""

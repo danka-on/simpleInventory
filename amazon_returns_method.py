@@ -4,6 +4,10 @@ Amazon Returns API Integration - Extension for amazon_manager.py
 Add this method to the AmazonManager class
 """
 
+import time
+from sp_api.api import Finances
+from sp_api.base import SellingApiException
+
 def get_returns(self, days_back=90):
     """
     Fetch returns from Amazon Returns API

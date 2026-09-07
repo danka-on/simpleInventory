@@ -17,6 +17,14 @@
   var numberPanel = null;
   var shiftKey = null;
   var shifted = true;
+  var capsLocked = false;
+  var lastShiftAt = 0;
+  var symbolPanel = null;
+  var repeatTimer = null;
+  var repeatInterval = null;
+  var repeatingButton = null;
+  var originalInputMode = null;
+  var framePending = false;
   var focusTimer = null;
   var lastPointerField = null;
   var lastPointerAt = 0;
@@ -54,6 +62,27 @@
       '@media(max-width:430px){.ss-ios-kb-deck{padding-left:3px;padding-right:3px}.ss-ios-kb-panel{gap:6px}.ss-ios-kb-row{gap:4px}.ss-ios-kb-key{height:42px;font-size:16px}.ss-ios-kb-key.ss-ios-kb-side{font-size:19px}.ss-ios-kb-key.ss-ios-kb-mode,.ss-ios-kb-key.ss-ios-kb-done{font-size:12px}}',
       '@media(max-height:540px) and (orientation:landscape){.ss-ios-kb-accessory{height:28px;margin-bottom:4px}.ss-ios-kb-panel{gap:4px}.ss-ios-kb-row{gap:4px}.ss-ios-kb-key{height:34px}.ss-ios-kb-deck{padding-bottom:calc(4px + env(safe-area-inset-bottom,0px))}}'
     ].join('');
+    style.textContent += `
+      #ss-ios-scanner-keyboard{visibility:hidden;transition:transform .2s cubic-bezier(.2,.8,.2,1),visibility 0s .2s;}
+      #ss-ios-scanner-keyboard.ss-ios-kb-open{visibility:visible;transition:transform .2s cubic-bezier(.2,.8,.2,1);}
+      #ss-ios-scanner-keyboard *{box-sizing:border-box;}
+      .ss-ios-kb-deck{max-width:100%;padding:0 3px calc(8px + env(safe-area-inset-bottom,0px));background:#d1d3d9;box-shadow:0 -1px 0 #b6b8bf;}
+      .ss-ios-kb-accessory{height:36px;margin:0 -3px 9px;background:#e6e7eb;border-bottom:1px solid #c1c3c9;font-weight:400;}
+      .ss-ios-kb-field-label{max-width:80%;}
+      .ss-ios-kb-panel{gap:11px;}
+      .ss-ios-kb-row{gap:6px;}
+      .ss-ios-kb-key{height:44px;border-radius:5px;font-size:23px;box-shadow:0 1px 0 #898b90;transition:background-color 60ms;touch-action:none;}
+      .ss-ios-kb-key.ss-ios-kb-action{background:#aeb3be;font-weight:400;}
+      .ss-ios-kb-key.ss-ios-kb-active{background:white;}
+      .ss-ios-kb-key.ss-ios-kb-pressed{background:#9198a5;transform:translateY(1px);}
+      .ss-ios-kb-key.ss-ios-kb-space{font-size:16px;}
+      .ss-ios-kb-key.ss-ios-kb-mode,.ss-ios-kb-key.ss-ios-kb-done{font-size:16px;}
+      .ss-ios-kb-key.ss-ios-kb-done{background:#007aff;color:white;}
+      html.ss-ios-keyboard-open{scroll-padding-bottom:var(--ss-ios-keyboard-height,280px);}
+      @media(min-width:700px){.ss-ios-kb-deck{padding-left:9px;padding-right:9px}.ss-ios-kb-key{height:58px;border-radius:7px}.ss-ios-kb-row{gap:9px}.ss-ios-kb-panel{gap:10px}.ss-ios-kb-accessory{margin-left:-9px;margin-right:-9px}}
+      @media(max-height:540px) and (orientation:landscape){.ss-ios-kb-key{height:32px;font-size:19px}.ss-ios-kb-panel{gap:5px}.ss-ios-kb-accessory{height:26px;margin-bottom:5px}}
+      @media(prefers-reduced-motion:reduce){#ss-ios-scanner-keyboard{transition:none!important}}
+    `;
     document.head.appendChild(style);
   }
 
@@ -63,6 +92,8 @@
     button.type = 'button';
     button.className = 'ss-ios-kb-key' + (options.className ? ' ' + options.className : '');
     button.textContent = label;
+    if (options.action === 'backspace') button.innerHTML = '<svg width="25" height="22" viewBox="0 0 28 24" fill="none" aria-hidden="true"><path d="M10 4h15v16H10L2 12z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m13 8 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.5"/></svg>';
+    if (options.action === 'hide') button.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     if (options.char != null) button.setAttribute('data-ios-kb-char', options.char);
     if (options.action) button.setAttribute('data-ios-kb-action', options.action);
     if (options.letter) button.setAttribute('data-ios-kb-letter', '1');
@@ -129,15 +160,9 @@
     }));
     letterPanel.appendChild(makeRow(lowerRow));
 
-    var quickLeft = makeKey("'", { char: "'" });
-    quickLeft.setAttribute('data-ios-kb-quick', 'left');
-    var quickRight = makeKey('-', { char: '-' });
-    quickRight.setAttribute('data-ios-kb-quick', 'right');
     letterPanel.appendChild(makeRow([
       makeKey('123', { action: 'numbers', className: 'ss-ios-kb-action ss-ios-kb-mode' }),
-      quickLeft,
       makeKey('space', { char: ' ', className: 'ss-ios-kb-space' }),
-      quickRight,
       makeKey('Done', { action: 'done', className: 'ss-ios-kb-action ss-ios-kb-done' })
     ]));
     deck.appendChild(letterPanel);
@@ -153,31 +178,71 @@
       ['-', '-'], ['/', '/'], [':', ':'], [';', ';'], ['(', '('], [')', ')'], ['$', '$'], ['&', '&'], ['@', '@'], ['"', '"']
     ].map(function (entry) { return makeKey(entry[0], { char: entry[1] }); })));
     numberPanel.appendChild(makeRow([
-      makeKey('ABC', { action: 'letters', className: 'ss-ios-kb-action ss-ios-kb-side' }),
+      makeKey('#+=', { action: 'symbols', className: 'ss-ios-kb-action ss-ios-kb-side' }),
       makeKey('.', { char: '.' }),
       makeKey(',', { char: ',' }),
       makeKey('?', { char: '?' }),
       makeKey('!', { char: '!' }),
       makeKey("'", { char: "'" }),
-      makeKey('#', { char: '#' }),
-      makeKey('%', { char: '%' }),
       makeKey('⌫', { action: 'backspace', className: 'ss-ios-kb-action ss-ios-kb-side', label: 'Delete' })
     ]));
     numberPanel.appendChild(makeRow([
       makeKey('ABC', { action: 'letters', className: 'ss-ios-kb-action ss-ios-kb-mode' }),
-      makeKey('Clear', { action: 'clear', className: 'ss-ios-kb-action ss-ios-kb-mode' }),
       makeKey('space', { char: ' ', className: 'ss-ios-kb-space' }),
       makeKey('Done', { action: 'done', className: 'ss-ios-kb-action ss-ios-kb-done' })
     ]));
     deck.appendChild(numberPanel);
+    symbolPanel = document.createElement('div');
+    symbolPanel.className = 'ss-ios-kb-panel';
+    symbolPanel.hidden = true;
+    ['[]{}#%^*+=', '_\\|~<>€£¥•'].forEach(function (chars) {
+      symbolPanel.appendChild(makeRow(Array.from(chars).map(function (ch) { return makeKey(ch, {char: ch}); })));
+    });
+    symbolPanel.appendChild(makeRow([
+      makeKey('123', {action: 'numbers', className: 'ss-ios-kb-action ss-ios-kb-side'}),
+      ...Array.from('.,?!’').map(function (ch) { return makeKey(ch, {char: ch}); }),
+      makeKey('⌫', {action: 'backspace', className: 'ss-ios-kb-action ss-ios-kb-side', label: 'Delete'})
+    ]));
+    symbolPanel.appendChild(makeRow([
+      makeKey('ABC', {action: 'letters', className: 'ss-ios-kb-action ss-ios-kb-mode'}),
+      makeKey('space', {char: ' ', className: 'ss-ios-kb-space'}),
+      makeKey('Done', {action: 'done', className: 'ss-ios-kb-action ss-ios-kb-done'})
+    ]));
+    deck.appendChild(symbolPanel);
     root.appendChild(deck);
 
     root.addEventListener('pointerdown', function (event) {
-      if (event.target.closest('button')) event.preventDefault();
+      var button = event.target.closest('button');
+      if (!button) return;
+      event.preventDefault();
+      stopRepeat();
+      repeatingButton = null;
+      button.classList.add('ss-ios-kb-pressed');
+      if (button.getAttribute('data-ios-kb-action') === 'backspace') {
+        repeatTimer = window.setTimeout(function () {
+          repeatingButton = button;
+          backspace();
+          repeatInterval = window.setInterval(backspace, 75);
+        }, 400);
+      }
     });
-    root.addEventListener('click', handleKeyboardClick);
+    root.addEventListener('click', function (event) {
+      if (repeatingButton === event.target.closest('button')) { repeatingButton = null; return; }
+      repeatingButton = null;
+      handleKeyboardClick(event);
+    });
+    window.addEventListener('pointerup', stopRepeat);
+    window.addEventListener('pointercancel', stopRepeat);
+    root.addEventListener('pointerleave', stopRepeat);
     document.body.appendChild(root);
     return root;
+  }
+
+  function stopRepeat() {
+    clearTimeout(repeatTimer);
+    clearInterval(repeatInterval);
+    repeatTimer = repeatInterval = null;
+    if (root) root.querySelectorAll('.ss-ios-kb-pressed').forEach(function (key) { key.classList.remove('ss-ios-kb-pressed'); });
   }
 
   function explicitMode(field) {
@@ -223,9 +288,9 @@
 
   function setLayout(layout) {
     buildKeyboard();
-    var numbers = layout === 'numbers';
-    letterPanel.hidden = numbers;
-    numberPanel.hidden = !numbers;
+    letterPanel.hidden = layout !== 'letters';
+    numberPanel.hidden = layout !== 'numbers';
+    symbolPanel.hidden = layout !== 'symbols';
   }
 
   function prefersNumberLayout(field) {
@@ -242,7 +307,12 @@
       var value = String(key.getAttribute('data-ios-kb-char') || '');
       key.textContent = shifted ? value.toUpperCase() : value.toLowerCase();
     });
-    if (shiftKey) shiftKey.classList.toggle('ss-ios-kb-active', shifted);
+    if (shiftKey) {
+      shiftKey.classList.toggle('ss-ios-kb-active', shifted);
+      shiftKey.innerHTML = '<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 9 9h-5v8H8v-8H3z" fill="' + (shifted ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' + (capsLocked ? '<path d="M8 23h8" stroke="currentColor" stroke-width="2"/>' : '') + '</svg>';
+      shiftKey.setAttribute('aria-pressed', String(shifted));
+      shiftKey.setAttribute('aria-label', capsLocked ? 'Caps lock on' : 'Shift');
+    }
   }
 
   function syncShift() {
@@ -265,25 +335,8 @@
     }
     var capitalize = !before || /[\s.!?(\-\/&]$/.test(before);
     var autoCapitalize = String(activeField.autocapitalize || activeField.getAttribute('autocapitalize') || '').toLowerCase();
-    setShift(autoCapitalize === 'off' ? false : capitalize);
-  }
-
-  function updateQuickKeys(field) {
-    if (!root || !field) return;
-    var left = root.querySelector('[data-ios-kb-quick="left"]');
-    var right = root.querySelector('[data-ios-kb-quick="right"]');
-    if (!left || !right) return;
-    var type = String(field.type || '').toLowerCase();
-    if (type === 'email') {
-      left.textContent = '@'; left.setAttribute('data-ios-kb-char', '@');
-      right.textContent = '.'; right.setAttribute('data-ios-kb-char', '.');
-    } else if (type === 'url') {
-      left.textContent = '/'; left.setAttribute('data-ios-kb-char', '/');
-      right.textContent = '.'; right.setAttribute('data-ios-kb-char', '.');
-    } else {
-      left.textContent = "'"; left.setAttribute('data-ios-kb-char', "'");
-      right.textContent = '-'; right.setAttribute('data-ios-kb-char', '-');
-    }
+    if (autoCapitalize !== 'words') capitalize = !before || /[.!?]\s$/.test(before);
+    setShift(capsLocked || autoCapitalize === 'characters' || ((autoCapitalize !== 'off' && autoCapitalize !== 'none') && capitalize));
   }
 
   function currentViewportHeight() {
@@ -296,38 +349,85 @@
     return reference > 0 && current > 0 && current < reference - 110;
   }
 
+  function restoreInputMode() {
+    if (!activeField || !originalInputMode) return;
+    if (originalInputMode.present) activeField.setAttribute('inputmode', originalInputMode.value);
+    else activeField.removeAttribute('inputmode');
+    originalInputMode = null;
+  }
+
+  function updateGeometry() {
+    framePending = false;
+    if (!activeField || !root || !root.classList.contains('ss-ios-kb-open')) return;
+    if (!activeField.isConnected || !activeField.getClientRects().length || activeField.disabled || activeField.readOnly) {
+      hideKeyboard(); return;
+    }
+    var bottom = viewport ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop) : 0;
+    root.style.bottom = bottom + 'px';
+    document.documentElement.style.setProperty('--ss-ios-keyboard-height', root.offsetHeight + 'px');
+    var rect = activeField.getBoundingClientRect();
+    var top = viewport ? viewport.offsetTop : 0;
+    var keyboardTop = window.innerHeight - bottom - root.offsetHeight;
+    if (rect.bottom > keyboardTop - 12 || rect.top < top + 12) {
+      // Scroll only enough to expose the field; never start a delayed smooth scroll.
+      var delta = rect.bottom > keyboardTop - 12 ? rect.bottom - keyboardTop + 12 : rect.top - top - 12;
+      var parent = activeField.parentElement;
+      while (parent && parent !== document.body) {
+        if (parent.scrollHeight > parent.clientHeight && /auto|scroll/.test(getComputedStyle(parent).overflowY)) {
+          parent.scrollTop += delta;
+          return;
+        }
+        parent = parent.parentElement;
+      }
+      window.scrollBy(0, delta);
+    }
+  }
+
+  function scheduleGeometry() {
+    if (framePending) return;
+    framePending = true;
+    window.requestAnimationFrame(updateGeometry);
+  }
+
   function showKeyboard(field, force) {
-    if (!isSupportedField(field) && !force) return false;
-    if (!field || field.disabled || field.readOnly) return false;
+    if (!isSupportedField(field) || !field.isConnected || !field.getClientRects().length) return false;
     if (!force && nativeKeyboardVisible()) return false;
     buildKeyboard();
+    var changed = activeField !== field;
+    if (changed) restoreInputMode();
     activeField = field;
+    if (!originalInputMode) {
+      originalInputMode = {present: field.hasAttribute('inputmode'), value: field.getAttribute('inputmode')};
+      var numberLayout = prefersNumberLayout(field);
+      field.setAttribute('inputmode', 'none');
+      capsLocked = false;
+      setLayout(numberLayout ? 'numbers' : 'letters');
+      syncShift();
+    }
     fieldLabel.textContent = fieldName(field);
-    updateQuickKeys(field);
-    setLayout(prefersNumberLayout(field) ? 'numbers' : 'letters');
-    syncShift();
+    root.querySelectorAll('[data-ios-kb-action="done"]').forEach(function (key) {
+      key.textContent = field.tagName === 'TEXTAREA' && field.enterKeyHint !== 'done' ? 'return' : 'Done';
+    });
     root.classList.add('ss-ios-kb-open');
     root.setAttribute('aria-hidden', 'false');
     document.documentElement.classList.add('ss-ios-keyboard-open');
-    window.setTimeout(function () {
-      if (!activeField || !root.classList.contains('ss-ios-kb-open')) return;
-      try { activeField.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' }); } catch (_) {}
-    }, 70);
+    scheduleGeometry();
     return true;
   }
 
   function hideKeyboard(options) {
     options = options || {};
-    if (focusTimer) {
-      clearTimeout(focusTimer);
-      focusTimer = null;
-    }
+    stopRepeat();
+    clearTimeout(focusTimer);
+    focusTimer = null;
     if (root) {
       root.classList.remove('ss-ios-kb-open');
       root.setAttribute('aria-hidden', 'true');
     }
     document.documentElement.classList.remove('ss-ios-keyboard-open');
+    document.documentElement.style.removeProperty('--ss-ios-keyboard-height');
     var field = activeField;
+    restoreInputMode();
     activeField = null;
     if (options.blur && field && typeof field.blur === 'function') field.blur();
   }
@@ -409,7 +509,12 @@
     var value = String(field.value || '');
     var start = typeof field.selectionStart === 'number' ? field.selectionStart : value.length;
     var end = typeof field.selectionEnd === 'number' ? field.selectionEnd : value.length;
-    if (start === end && start > 0) start -= 1;
+    if (start === end && start > 0) {
+      if (typeof Intl.Segmenter === 'function') {
+        var segments = Array.from(new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(value.slice(0, start)));
+        start = segments[segments.length - 1].index;
+      } else start -= Array.from(value.slice(0, start)).pop().length;
+    }
     if (start === end) return;
     if (!field.dispatchEvent(inputEvent('beforeinput', 'deleteContentBackward', null, true))) return;
     field.value = value.slice(0, start) + value.slice(end);
@@ -443,6 +548,9 @@
   function pressDone() {
     var field = activeField;
     if (!field) return;
+    if (field.tagName === 'TEXTAREA' && field.enterKeyHint !== 'done') {
+      replaceSelection('\n', 'insertLineBreak'); return;
+    }
     var allowed = true;
     try {
       allowed = field.dispatchEvent(new KeyboardEvent('keydown', {
@@ -469,8 +577,14 @@
     event.stopPropagation();
     var action = button.getAttribute('data-ios-kb-action');
     if (action === 'hide') { hideKeyboard({ blur: false }); return; }
-    if (action === 'shift') { setShift(!shifted); return; }
-    if (action === 'numbers' || action === 'letters') { setLayout(action); return; }
+    if (action === 'shift') {
+      var now = Date.now();
+      if (!capsLocked && now - lastShiftAt < 350) { capsLocked = true; setShift(true); }
+      else { capsLocked = false; setShift(!shifted); }
+      lastShiftAt = now;
+      return;
+    }
+    if (action === 'numbers' || action === 'letters' || action === 'symbols') { setLayout(action); return; }
     if (action === 'backspace') { backspace(); return; }
     if (action === 'clear') { clearField(); return; }
     if (action === 'done') { pressDone(); return; }
@@ -487,7 +601,6 @@
       hideKeyboard();
       return;
     }
-    activeField = field;
     if (root && root.classList.contains('ss-ios-kb-open')) {
       showKeyboard(field, true);
       return;
@@ -535,8 +648,22 @@
         baselineHeight = Math.max(baselineHeight, currentViewportHeight(), window.innerHeight || 0);
       }
     };
-    window.addEventListener('resize', trackViewport);
-    if (viewport) viewport.addEventListener('resize', trackViewport);
+    window.addEventListener('resize', function () { trackViewport(); scheduleGeometry(); });
+    window.addEventListener('orientationchange', function () { baselineHeight = 0; scheduleGeometry(); });
+    window.addEventListener('blur', function () { hideKeyboard(); });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) hideKeyboard(); });
+    document.addEventListener('focusout', function () {
+      window.setTimeout(function () {
+        if (activeField && document.activeElement !== activeField && !(root && root.contains(document.activeElement))) hideKeyboard();
+      }, 0);
+    }, true);
+    new MutationObserver(function () {
+      if (activeField && (!activeField.isConnected || !activeField.getClientRects().length)) hideKeyboard();
+    }).observe(document.body, {subtree: true, childList: true, attributes: true, attributeFilter: ['style', 'class', 'hidden']});
+    if (viewport) {
+      viewport.addEventListener('resize', function () { trackViewport(); scheduleGeometry(); });
+      viewport.addEventListener('scroll', scheduleGeometry);
+    }
   }
 
   window.IOSScannerKeyboard = {

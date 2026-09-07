@@ -1,0 +1,8 @@
+{
+  "source_parity_definitions": 1133,
+  "python_syntax_files": 160,
+  "jinja_templates": 71,
+  "package_modules": 90,
+  "entrypoint_lines": 30,
+  "largest_feature_lines": 2493
+}

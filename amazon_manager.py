@@ -889,7 +889,8 @@ class AmazonManager:
                 elif 'url' in report_data:
                     # Need to download from URL
                     import requests
-                    response = requests.get(report_data['url'])
+                    response = requests.get(report_data['url'], timeout=60)
+                    response.raise_for_status()
                     report_data = response.text
                 else:
                     # Try to get the actual content

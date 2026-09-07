@@ -1540,7 +1540,7 @@ function loadIOSScannerKeyboard() {
     || (/Macintosh/.test(ua) && ('ontouchend' in document || navigator.maxTouchPoints > 1));
   if (!isIOS || window.IOSScannerKeyboard || document.querySelector('script[data-ios-scanner-keyboard]')) return;
   const script = document.createElement('script');
-  script.src = '/static/ios-scanner-keyboard.js?v=20260715a';
+  script.src = '/static/ios-scanner-keyboard.js?v=20260907a';
   script.defer = true;
   script.setAttribute('data-ios-scanner-keyboard', '1');
   document.head.appendChild(script);

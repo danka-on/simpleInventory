@@ -1,4 +1,6 @@
 import json, time, os, requests, base64
+import tempfile
+import threading
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -11,6 +13,7 @@ CLIENT_SECRET = os.getenv("EBAY_CLIENT_SECRET", "your_secret")
 TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 GENERIC_SCOPE = "https://api.ebay.com/oauth/api_scope"
 DEFAULT_USER_SCOPES = [
+    "https://api.ebay.com/oauth/api_scope/sell.inventory.mapping",
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
     "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
     "https://api.ebay.com/oauth/api_scope/sell.logistics",
@@ -38,17 +41,32 @@ def _normalize_user_scope(value):
     return " ".join(scopes)
 
 SCOPE = _normalize_user_scope(os.getenv("EBAY_SCOPE") or " ".join(DEFAULT_USER_SCOPES))
+_token_lock = threading.RLock()
 
 def load_tokens():
     with open(TOKEN_FILE) as f:
         return json.load(f)
 
 def save_tokens(data):
-    with open(TOKEN_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    # Readers must see either the old or new complete JSON, even if a refresh
+    # fails or another worker reads while the replacement is being written.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                         dir=os.path.dirname(TOKEN_FILE),
+                                         prefix='.tokens-', suffix='.tmp', delete=False) as f:
+            temporary = f.name
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, TOKEN_FILE)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
 
 def is_expired(tokens):
-    return time.time() > tokens.get("expires_at", 0)
+    # Refresh early so the token remains valid while an API call is in flight.
+    return time.time() >= float(tokens.get("expires_at") or 0) - 60
 
 def refresh_access_token(refresh_token, previous_scope=""):
     encoded = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
@@ -66,7 +84,7 @@ def refresh_access_token(refresh_token, previous_scope=""):
         data["scope"] = requested_scope
         used_scope = requested_scope
 
-    res = requests.post(TOKEN_URL, headers=headers, data=data)
+    res = requests.post(TOKEN_URL, headers=headers, data=data, timeout=30)
     if res.status_code >= 400 and requested_scope:
         body = ""
         try:
@@ -80,7 +98,7 @@ def refresh_access_token(refresh_token, previous_scope=""):
                 "refresh_token": refresh_token
             }
             used_scope = ""
-            res = requests.post(TOKEN_URL, headers=headers, data=data)
+            res = requests.post(TOKEN_URL, headers=headers, data=data, timeout=30)
 
     res.raise_for_status()
     new_tokens = res.json()
@@ -96,7 +114,8 @@ def refresh_access_token(refresh_token, previous_scope=""):
     return new_tokens["access_token"]
 
 def get_access_token():
-    tokens = load_tokens()
-    if is_expired(tokens):
-        return refresh_access_token(tokens["refresh_token"], previous_scope=tokens.get("scope", ""))
-    return tokens["access_token"]
+    with _token_lock:
+        tokens = load_tokens()
+        if is_expired(tokens):
+            return refresh_access_token(tokens["refresh_token"], previous_scope=tokens.get("scope", ""))
+        return tokens["access_token"]

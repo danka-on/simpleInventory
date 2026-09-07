@@ -195,6 +195,11 @@
           <div id="queueCount" class="queue-count">0 items queued</div>
         </div>
         <div class="queue-actions">
+          <label for="dateSort">Date added</label>
+          <select id="dateSort" class="btn btn-ghost" title="Uses the earliest date added for grouped inventory">
+            <option value="asc">Oldest first (ascending)</option>
+            <option value="desc">Newest first (descending)</option>
+          </select>
           <button id="moveBtn" class="btn btn-blue" type="button">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             Move to Shelf
@@ -211,6 +216,7 @@
         <table>
           <thead>
             <tr>
+              <th><input id="selectAllDelete" type="checkbox" aria-label="Select all items for deletion" title="Select all for deletion"></th>
               <th>Item</th>
               <th>Qty</th>
               <th>Source Location</th>
@@ -219,7 +225,7 @@
             </tr>
           </thead>
           <tbody id="queueBody">
-            <tr class="empty-row"><td colspan="5">Scan a barcode or load a shelf to get started.</td></tr>
+            <tr class="empty-row"><td colspan="6">Scan a barcode or load a shelf to get started.</td></tr>
           </tbody>
         </table>
       </div>
@@ -491,18 +497,47 @@
     }
     function totalUnits(){ return queue.reduce((s,r)=>s+Number(r.scan_qty||0),0); }
 
+    function selectedDeleteRows(){ return queue.filter(row=>row.delete_selected); }
+    const selectAllDelete = document.getElementById('selectAllDelete');
+    selectAllDelete.addEventListener('change', ()=>{
+      if(busy) return;
+      queue.forEach(row=>{ row.delete_selected = selectAllDelete.checked; });
+      render();
+    });
+    const dateSort = document.getElementById('dateSort');
+    dateSort.addEventListener('change', render);
+    function addedTime(row){
+      return row.date_added ? Date.parse(row.date_added) : NaN;
+    }
+    function compareAdded(a, b){
+      const at = addedTime(a), bt = addedTime(b);
+      if(!Number.isFinite(at)) return Number.isFinite(bt) ? 1 : a.uid - b.uid;
+      if(!Number.isFinite(bt)) return -1;
+      return (dateSort.value === 'desc' ? bt - at : at - bt) || a.uid - b.uid;
+    }
+    function formatAdded(row){
+      const time = addedTime(row);
+      return Number.isFinite(time) ? new Date(time).toLocaleString() : 'Unknown';
+    }
+
     /* ─── render queue ─── */
     function render(){
+      const selectedCount = selectedDeleteRows().length;
+      selectAllDelete.checked = queue.length > 0 && selectedCount === queue.length;
+      selectAllDelete.indeterminate = selectedCount > 0 && selectedCount < queue.length;
+      selectAllDelete.disabled = busy || !queue.length;
+      removeBtn.textContent = `Remove Selected (${selectedCount})`;
+      removeBtn.disabled = busy || !selectedCount;
       const units = totalUnits();
       queueCount.textContent = `${units} unit${units===1?'':'s'} across ${queue.length} item${queue.length===1?'':'s'}`;
 
       if(!queue.length){
-        queueBody.innerHTML = '<tr class="empty-row"><td colspan="5">Scan a barcode or load a shelf to get started.</td></tr>';
+        queueBody.innerHTML = '<tr class="empty-row"><td colspan="6">Scan a barcode or load a shelf to get started.</td></tr>';
         return;
       }
 
       let html = '';
-      queue.forEach(row => {
+      [...queue].sort(compareAdded).forEach(row => {
         const {qty, maxQty: mq} = clampQty(row);
         syncSel(row);
         const selKeys  = new Set((row.selected_location_keys||[]).map(v=>String(v||'').trim()).filter(Boolean));
@@ -526,10 +561,12 @@
         const availClass = Number(row.total_available||0)>0 ? 'avail-ok' : 'avail-zero';
 
         html += `<tr class="${needsLoc?'needs-location':''}">
+          <td><input type="checkbox" data-delete-select="${row.uid}" ${row.delete_selected?'checked':''} ${busy?'disabled':''} aria-label="Select ${esc(row.title||row.barcode)} for deletion"></td>
           <td><div class="item-cell">
             <img class="thumb" src="${img}" onerror="this.src='${noImg()}'">
             <div>
               <div class="item-title">${esc(row.title||row.barcode||'Item')}</div>
+              <div class="item-code" title="Earliest recorded date added for this item">Date added: ${esc(formatAdded(row))}</div>
               <div class="item-code">${esc(barcodeDisplay(row.barcode_display||row.barcode||''))}</div>
             </div>
           </div></td>
@@ -553,6 +590,13 @@
       });
       queueBody.innerHTML = html;
 
+      queueBody.querySelectorAll('[data-delete-select]').forEach(input =>
+        input.addEventListener('change', ()=>{
+          if(busy) return;
+          const row = queue.find(r=>r.uid === Number(input.dataset.deleteSelect));
+          if(row) row.delete_selected = input.checked;
+          render();
+        }));
       queueBody.querySelectorAll('[data-adj]').forEach(btn =>
         btn.addEventListener('click', ()=>adjustQty(Number(btn.dataset.row), Number(btn.dataset.adj||0))));
       queueBody.querySelectorAll('.loc-bubble').forEach(btn =>
@@ -613,11 +657,11 @@
       barcodeInput.focus();
     }
 
-    function rowsMissingLocation(){
-      return queue.filter(r=>{ syncSel(r); return !((r.selected_location_keys||[]).length); });
+    function rowsMissingLocation(rows = queue){
+      return rows.filter(r=>{ syncSel(r); return !((r.selected_location_keys||[]).length); });
     }
-    function buildPayload(){
-      return queue.map(r=>({
+    function buildPayload(rows = queue){
+      return rows.map(r=>({
         barcode: r.barcode,
         from_location: String(((r.selected_location_codes||[])[0]||r.selected_location_code||'')).trim(),
         from_locations: (r.selected_location_codes||[]).map(v=>String(v||'').trim()).filter(Boolean),
@@ -625,10 +669,12 @@
         manifest_ids: []
       }));
     }
-    function applyResults(results){
+    function applyResults(results, submittedRows = queue){
       const warnings = [];
       const next = [];
-      queue.forEach((row,idx)=>{
+      queue.forEach(row=>{
+        const idx = submittedRows.indexOf(row);
+        if(idx < 0){ next.push(row); return; }
         const rr = results.find(x=>Number(x.index)===idx);
         if(!rr){ next.push(row); warnings.push(`${row.barcode}: no result returned`); return; }
         const moved = Number(rr.moved_qty||0);
@@ -697,7 +743,7 @@
         showMsg('Lookup Error', err.message||'Lookup failed', 'red');
         setStatus('err', err.message||'Lookup failed');
       }finally{
-        busy=false; scanBtn.disabled=false;
+        busy=false; scanBtn.disabled=false; render();
         barcodeInput.value=''; barcodeInput.focus();
       }
     }
@@ -741,6 +787,7 @@
             barcode_key:String(item.barcode_key||barcodeKey(item.barcode||'')),
             title:String(item.title||item.barcode||'Item'),
             image:String(item.image||''), total_available:avail,
+            date_added:item.date_added || null,
             locations:locs, scan_qty:avail,
             selected_location_keys:[], selected_location_codes:[],
             selected_location_key:'', selected_location_code:'', selected_preview_key:''
@@ -757,7 +804,7 @@
         showMsg('Shelf Error', err.message||'Shelf lookup failed', 'red');
         setStatus('err', err.message||'Shelf lookup failed');
       }finally{
-        busy=false; scanBtn.disabled=false;
+        busy=false; scanBtn.disabled=false; render();
         barcodeInput.value=''; barcodeInput.focus();
       }
     }
@@ -815,21 +862,23 @@
         showMsg('Move Failed', err.message||'Move failed', 'red');
         setStatus('err', err.message||'Move failed');
       }finally{
-        busy=false; destConfirmBtn.disabled=false;
+        busy=false; destConfirmBtn.disabled=false; render();
       }
     }
 
     /* ─── Remove flow ─── */
     function openRemoveConfirm(){
-      if(!queue.length){ showMsg('No Items', 'Add items to the queue first.', 'blue'); return; }
-      const missing = rowsMissingLocation();
+      if(busy) return;
+      const selected = selectedDeleteRows();
+      if(!selected.length){ showMsg('No Items Selected', 'Select items using the checkboxes first.', 'blue'); return; }
+      const missing = rowsMissingLocation(selected);
       if(missing.length){
         showMsg('Select Source Location', `Please select a source location for:\n\n${missing.map(r=>barcodeDisplay(r.barcode_display||r.barcode||'')).join('\n')}`, 'red');
-        setStatus('err','Select source location for all queued items');
+        setStatus('err','Select source location for selected items');
         return;
       }
-      const rows  = queue.length;
-      const units = totalUnits();
+      const rows  = selected.length;
+      const units = selected.reduce((sum,row)=>sum+Number(row.scan_qty||0),0);
       confirmTitle.textContent   = 'Remove from Inventory';
       confirmIcon.textContent    = '🗑️';
       confirmHeading.textContent = `Remove ${units} unit${units===1?'':'s'} from warehouse inventory?`;
@@ -844,7 +893,8 @@
     async function submitRemove(){
       if(busy) return;
       confirmModal.classList.remove('open');
-      const payload = buildPayload();
+      const selected = selectedDeleteRows();
+      const payload = buildPayload(selected);
       if(!payload.length) return;
       busy=true; removeBtn.disabled=true;
       setStatus('neutral',`Removing ${payload.length} row(s) from inventory…`);
@@ -855,7 +905,7 @@
         });
         const d = await r.json();
         if(!r.ok||!d||!d.success) throw new Error((d&&d.error)||'Remove failed');
-        const warnings = applyResults(Array.isArray(d.item_results)?d.item_results:[]);
+        const warnings = applyResults(Array.isArray(d.item_results)?d.item_results:[], selected);
         const mu = Number(d.moved_units||0);
         const mi = Number(d.moved_items||0);
         setStatus('ok',`Removed ${mu} unit(s) across ${mi} item(s) from inventory.`);
@@ -866,7 +916,7 @@
         showMsg('Remove Failed', err.message||'Remove failed', 'red');
         setStatus('err', err.message||'Remove failed');
       }finally{
-        busy=false; removeBtn.disabled=false;
+        busy=false; render();
         barcodeInput.focus();
       }
     }

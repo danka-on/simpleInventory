@@ -3,9 +3,8 @@ eBay Returns Manager
 Handles fetching and syncing eBay returns data
 """
 
-import os
-import sqlite3
 import time
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, timedelta
 import requests
 from token_manager import get_access_token
@@ -125,16 +124,36 @@ class EbayManager:
             updated_count = 0
 
             for order_id, fee_amount in fees_data.items():
-                # Update seller_fee for this order
+                # sold.db has one row per order line. Allocating the order fee
+                # by line revenue preserves the importer semantics and avoids
+                # charging the entire order's fee once for every item.
                 cur.execute('''
-                    UPDATE orders
-                    SET seller_fee = ?
+                    SELECT id, price, quantity FROM orders
                     WHERE order_id = ? AND store = 'ebay'
-                ''', (fee_amount, order_id))
+                    ORDER BY id
+                ''', (order_id,))
+                rows = cur.fetchall()
+                if not rows:
+                    continue
+                weights = [max(Decimal(0), Decimal(str(row[1] or 0))) *
+                           max(Decimal(0), Decimal(str(row[2] if row[2] is not None else 1)))
+                           for row in rows]
+                total_weight = sum(weights)
+                if not total_weight:
+                    weights = [Decimal(1)] * len(rows)
+                    total_weight = Decimal(len(rows))
+                cents = int((Decimal(str(fee_amount)) * 100).to_integral_value(rounding=ROUND_HALF_UP))
+                allocated = 0
+                cumulative_weight = Decimal(0)
+                for row, weight in zip(rows, weights):
+                    cumulative_weight += weight
+                    cumulative_cents = int((Decimal(cents) * cumulative_weight / total_weight).to_integral_value(rounding=ROUND_HALF_UP))
+                    cur.execute('UPDATE orders SET seller_fee = ? WHERE id = ?',
+                                ((cumulative_cents - allocated) / 100, row[0]))
+                    allocated = cumulative_cents
 
-                if cur.rowcount > 0:
-                    updated_count += 1
-                    print(f"  ✅ {order_id}: ${fee_amount:.2f} seller fee")
+                updated_count += 1
+                print(f"  ✅ {order_id}: ${fee_amount:.2f} seller fee")
 
         print(f"\n✅ Updated {updated_count} eBay orders with seller fees")
         return updated_count

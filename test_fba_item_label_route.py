@@ -4,7 +4,11 @@ from unittest.mock import patch
 
 os.environ.setdefault("DISABLE_BACKGROUND_SERVICES", "1")
 
-import app as app_module
+from sweetshelves.bootstrap import app  # Initialize routes once for Flask client tests.
+from sweetshelves import fba_readiness as ss_fba_readiness
+from sweetshelves import fba_shipments as ss_fba_shipments
+from sweetshelves import runtime as ss_runtime
+from printer_manager import printer_manager
 
 
 SESSION = {
@@ -38,21 +42,21 @@ WORKFLOW = {
 
 class FbaItemLabelRouteTest(unittest.TestCase):
     def setUp(self):
-        app_module.app.testing = True
-        self.client = app_module.app.test_client()
+        ss_runtime.app.testing = True
+        self.client = ss_runtime.app.test_client()
 
     def test_prints_authoritative_fnsku_on_item_prep_printer(self):
         with (
-            patch.object(app_module, "_fba_amazon_session", return_value=({}, SESSION, dict(WORKFLOW))),
-            patch.object(app_module, "_fba_amazon_barcode_guidance", return_value=dict(LIVE_GUIDANCE)) as guidance,
-            patch.object(app_module, "_fba_save_amazon_state"),
-            patch.object(app_module.printer_manager, "get_config_snapshot", return_value={
+            patch.object(ss_fba_shipments, "_fba_amazon_session", return_value=({}, SESSION, dict(WORKFLOW))),
+            patch.object(ss_fba_readiness, "_fba_amazon_barcode_guidance", return_value=dict(LIVE_GUIDANCE)) as guidance,
+            patch.object(ss_fba_shipments, "_fba_save_amazon_state"),
+            patch.object(printer_manager, "get_config_snapshot", return_value={
                 "print_method": "escpos", "label_height": 12, "printer_name": "Brother",
             }),
-            patch.object(app_module.printer_manager, "get_connection_status", return_value={
+            patch.object(printer_manager, "get_connection_status", return_value={
                 "can_print": True, "display_name": "Brother QL-820NWBc",
             }),
-            patch.object(app_module.printer_manager, "print_barcode", return_value=True) as print_barcode,
+            patch.object(printer_manager, "print_barcode", return_value=True) as print_barcode,
         ):
             response = self.client.post(
                 "/api/fba-prep/sessions/1/amazon/print-item-label",
@@ -78,12 +82,12 @@ class FbaItemLabelRouteTest(unittest.TestCase):
 
     def test_browser_print_mode_is_rejected_before_printing(self):
         with (
-            patch.object(app_module, "_fba_amazon_session", return_value=({}, SESSION, dict(WORKFLOW))),
-            patch.object(app_module, "_fba_amazon_barcode_guidance", return_value=dict(LIVE_GUIDANCE)),
-            patch.object(app_module.printer_manager, "get_config_snapshot", return_value={
+            patch.object(ss_fba_shipments, "_fba_amazon_session", return_value=({}, SESSION, dict(WORKFLOW))),
+            patch.object(ss_fba_readiness, "_fba_amazon_barcode_guidance", return_value=dict(LIVE_GUIDANCE)),
+            patch.object(printer_manager, "get_config_snapshot", return_value={
                 "print_method": "browser", "label_height": 30,
             }),
-            patch.object(app_module.printer_manager, "print_barcode", return_value=True) as print_barcode,
+            patch.object(printer_manager, "print_barcode", return_value=True) as print_barcode,
         ):
             response = self.client.post(
                 "/api/fba-prep/sessions/1/amazon/print-item-label",
@@ -101,9 +105,9 @@ class FbaItemLabelRouteTest(unittest.TestCase):
             "identifier_type": "seller_sku", "identifier": "SKU-1",
         }
         with (
-            patch.object(app_module, "_fba_amazon_session", return_value=({}, SESSION, dict(WORKFLOW))),
-            patch.object(app_module, "_fba_amazon_barcode_guidance", return_value=manufacturer_guidance),
-            patch.object(app_module.printer_manager, "print_barcode", return_value=True) as print_barcode,
+            patch.object(ss_fba_shipments, "_fba_amazon_session", return_value=({}, SESSION, dict(WORKFLOW))),
+            patch.object(ss_fba_readiness, "_fba_amazon_barcode_guidance", return_value=manufacturer_guidance),
+            patch.object(printer_manager, "print_barcode", return_value=True) as print_barcode,
         ):
             response = self.client.post(
                 "/api/fba-prep/sessions/1/amazon/print-item-label",
@@ -122,16 +126,16 @@ class FbaItemLabelRouteTest(unittest.TestCase):
             "prepInstructions": [{"prepType": "ITEM_LABELING", "prepOwner": "SELLER"}],
         }]
         with (
-            patch.object(app_module, "_fba_amazon_session", return_value=({}, SESSION, workflow)),
-            patch.object(app_module, "_fba_amazon_barcode_guidance") as guidance,
-            patch.object(app_module, "_fba_save_amazon_state"),
-            patch.object(app_module.printer_manager, "get_config_snapshot", return_value={
+            patch.object(ss_fba_shipments, "_fba_amazon_session", return_value=({}, SESSION, workflow)),
+            patch.object(ss_fba_readiness, "_fba_amazon_barcode_guidance") as guidance,
+            patch.object(ss_fba_shipments, "_fba_save_amazon_state"),
+            patch.object(printer_manager, "get_config_snapshot", return_value={
                 "print_method": "escpos", "label_height": 30,
             }),
-            patch.object(app_module.printer_manager, "get_connection_status", return_value={
+            patch.object(printer_manager, "get_connection_status", return_value={
                 "can_print": True, "display_name": "Item Prep printer",
             }),
-            patch.object(app_module.printer_manager, "print_barcode", return_value=True),
+            patch.object(printer_manager, "print_barcode", return_value=True),
         ):
             response = self.client.post(
                 "/api/fba-prep/sessions/1/amazon/print-item-label", json={"msku": "SKU-1"}

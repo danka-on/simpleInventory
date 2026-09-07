@@ -1,0 +1,31 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const html=fs.readFileSync('templates/listingagent.html','utf8');
+const start=html.indexOf('    function _ebaySimilarSearchParams(');
+const end=html.indexOf('    function renderAmazonTemplates(',start);
+const fields={ebayCatalogQ:{value:'Sony WH1000XM5'},upc:{value:'123456789012'},marketplaceId:{value:'EBAY_US'},title:{value:'Original'},ebayCatalogHint:{},ebayCatalogBox:{}};
+const pending=[];
+const ctx={URLSearchParams,state:{activeUpc:'123456789012',item:{title:'Original item'}},$:id=>fields[id],renderEbayCatalog(){},apiGet:url=>new Promise(resolve=>pending.push({url,resolve}))};
+vm.createContext(ctx);vm.runInContext(html.slice(start,end),ctx);
+assert.equal(ctx._ebaySimilarSearchParams().get('q'),'Sony WH1000XM5');
+assert.equal(ctx._ebaySimilarSearchParams().has('upc'),false);
+assert.equal(ctx._ebaySimilarSearchParams({automatic:true}).get('upc'),'123456789012');
+assert.equal(ctx._ebaySimilarSearchParams({automatic:true}).get('title'),'Original item');
+fields.ebayCatalogQ.value='0123456789012';assert.equal(ctx._ebaySimilarSearchParams().get('upc'),'0123456789012');
+(async()=>{
+ const old=ctx.ebayCatalogSearch();
+ fields.ebayCatalogQ.value='New query';const current=ctx.ebayCatalogSearch();
+ pending[1].resolve({results:[{title:'new'}]});await current;
+ pending[0].resolve({results:[{title:'old'}]});await old;
+ assert.equal(ctx.state.ebayCatalog[0].title,'new');
+ const other=ctx.ebayCatalogSearch();ctx.state.activeUpc='other-item';pending[2].resolve({results:[{title:'wrong item'}]});await other;
+ assert.equal(ctx.state.ebayCatalog[0].title,'new');
+ // Full detail must not overwrite manual edits made while the request is in flight.
+ const a=html.indexOf('    async function _loadEbayCatalogDetail('),b=html.indexOf('    async function _selectEbayCatalogResult(',a);
+ ctx._ebayCatalogResultKey=r=>r.itemId;ctx._pickEbayCatalogTemplatePrice=()=>10;
+ let applied=0;ctx._applyEbayCatalogProduct=(...args)=>{applied++;assert.equal(args[4].ifEmpty,true);};
+ vm.runInContext(html.slice(a,b),ctx);
+ ctx.state.ebayCatalogSelectedKey='match';ctx.state.ebaySimilarSelectionId=1;
+ const stale=ctx._loadEbayCatalogDetail({itemId:'match'});ctx.state.activeUpc='third-item';pending[3].resolve({result:{itemId:'match'}});await stale;assert.equal(applied,0);
+ const detail=ctx._loadEbayCatalogDetail({itemId:'match'});pending[4].resolve({result:{itemId:'match'}});await detail;assert.equal(applied,1);
+ console.log('PASS: typed searches, barcode/title fallback parameters, stale search/item responses, protected detail fill.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

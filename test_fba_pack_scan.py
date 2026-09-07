@@ -10,7 +10,13 @@ from unittest.mock import patch
 
 os.environ.setdefault("DISABLE_BACKGROUND_SERVICES", "1")
 
-import app as app_module
+from sweetshelves.bootstrap import app  # Initialize routes once for Flask client tests.
+from sweetshelves import caching as ss_caching
+from sweetshelves import config as ss_config
+from sweetshelves import fba_schema as ss_fba_schema
+from sweetshelves import inventory_age as ss_inventory_age
+from sweetshelves import runtime as ss_runtime
+from printer_manager import printer_manager
 
 
 class FbaPackScanTest(unittest.TestCase):
@@ -28,7 +34,7 @@ class FbaPackScanTest(unittest.TestCase):
         db.execute(
             "INSERT INTO SEARCHRACK VALUES (1, '025398232475', 'Test unit', 2, 'A1B1', '')"
         )
-        app_module._ensure_fba_prep_tables(db.cursor())
+        ss_fba_schema._ensure_fba_prep_tables(db.cursor())
         workflow = {
             "stage": "packing",
             "inbound_plan_id": "wf-test-plan",
@@ -54,8 +60,8 @@ class FbaPackScanTest(unittest.TestCase):
         ))
         db.commit()
         db.close()
-        app_module.app.testing = True
-        self.client = app_module.app.test_client()
+        ss_runtime.app.testing = True
+        self.client = ss_runtime.app.test_client()
 
     def tearDown(self):
         self.temp.cleanup()
@@ -88,10 +94,10 @@ class FbaPackScanTest(unittest.TestCase):
 
     def test_scan_removes_one_unit_logs_location_and_routes_box(self):
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
-            patch.object(app_module, "update_data_version"),
-            patch.object(app_module, "_invalidate_searchrack_cache"),
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
         ):
             response = self.post_scan()
 
@@ -115,10 +121,10 @@ class FbaPackScanTest(unittest.TestCase):
 
     def test_retry_token_is_idempotent_and_does_not_remove_twice(self):
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
-            patch.object(app_module, "update_data_version"),
-            patch.object(app_module, "_invalidate_searchrack_cache"),
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
         ):
             first = self.post_scan()
             second = self.post_scan()
@@ -132,10 +138,10 @@ class FbaPackScanTest(unittest.TestCase):
     def test_reset_last_scan_restores_inventory_box_and_rack_history_then_allows_rescan(self):
         first_token = "fba:1:reset-test:first-unit"
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
-            patch.object(app_module, "update_data_version"),
-            patch.object(app_module, "_invalidate_searchrack_cache"),
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
         ):
             packed = self.post_scan(token=first_token, label_printed=False)
             reset = self.reset_scan()
@@ -169,8 +175,8 @@ class FbaPackScanTest(unittest.TestCase):
 
     def test_reset_scan_without_inventory_removal_only_unpacks_the_unit(self):
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
         ):
             packed = self.post_scan(
                 token="fba:1:reset-test:no-inventory", locations=["OTHER-BIN"],
@@ -192,10 +198,10 @@ class FbaPackScanTest(unittest.TestCase):
 
     def test_two_workers_cannot_reset_and_restore_the_same_scan_twice(self):
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
-            patch.object(app_module, "update_data_version"),
-            patch.object(app_module, "_invalidate_searchrack_cache"),
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
         ):
             packed = self.post_scan(
                 token="fba:1:reset-race:only-unit", label_printed=False
@@ -203,7 +209,7 @@ class FbaPackScanTest(unittest.TestCase):
             barrier = threading.Barrier(2)
 
             def reset(_index):
-                client = app_module.app.test_client()
+                client = ss_runtime.app.test_client()
                 barrier.wait(timeout=5)
                 return client.post(
                     "/api/fba-prep/sessions/1/amazon/reset-pack-scan",
@@ -222,8 +228,8 @@ class FbaPackScanTest(unittest.TestCase):
 
     def test_scan_still_packs_when_inventory_is_not_in_active_locations(self):
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
         ):
             response = self.post_scan(locations=["OTHER-BIN"])
 
@@ -239,7 +245,7 @@ class FbaPackScanTest(unittest.TestCase):
         barrier = threading.Barrier(2)
 
         def scan(index):
-            client = app_module.app.test_client()
+            client = ss_runtime.app.test_client()
             barrier.wait(timeout=5)
             return client.post(
                 "/api/fba-prep/sessions/1/amazon/pack-scan",
@@ -255,10 +261,10 @@ class FbaPackScanTest(unittest.TestCase):
             )
 
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
-            patch.object(app_module, "update_data_version"),
-            patch.object(app_module, "_invalidate_searchrack_cache"),
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
             ThreadPoolExecutor(max_workers=2) as pool,
         ):
             responses = list(pool.map(scan, (1, 2)))
@@ -283,7 +289,7 @@ class FbaPackScanTest(unittest.TestCase):
             connection = sqlite3.connect(migration_db, timeout=30)
             try:
                 barrier.wait(timeout=5)
-                app_module._ensure_fba_prep_tables(connection.cursor())
+                ss_fba_schema._ensure_fba_prep_tables(connection.cursor())
                 connection.commit()
             finally:
                 connection.close()
@@ -298,7 +304,7 @@ class FbaPackScanTest(unittest.TestCase):
         self.assertIn("operator_name", columns)
 
     def test_live_session_reports_multiple_active_scanners(self):
-        with patch.object(app_module, "BASE_DIR", self.base_dir):
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
             first = self.client.post(
                 "/api/fba-prep/sessions/1/live",
                 json={"client_id": "scanner-live-01", "operator_name": "Alice"},
@@ -314,7 +320,7 @@ class FbaPackScanTest(unittest.TestCase):
         self.assertEqual({row["operator_name"] for row in payload["workers"]}, {"Alice", "Bob"})
 
     def test_server_allocates_unique_boxes_and_stale_save_keeps_them(self):
-        with patch.object(app_module, "BASE_DIR", self.base_dir):
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
             first = self.client.post(
                 "/api/fba-prep/sessions/1/amazon/create-box",
                 json={"packing_group_id": "pg-1"},
@@ -361,17 +367,17 @@ class FbaPackScanTest(unittest.TestCase):
         db.close()
 
         with (
-            patch.object(app_module, "BASE_DIR", self.base_dir),
-            patch.object(app_module, "_inventory_age_consume_fifo"),
-            patch.object(app_module, "update_data_version"),
-            patch.object(app_module, "_invalidate_searchrack_cache"),
-            patch.object(app_module.printer_manager, "get_config_snapshot", return_value={
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
+            patch.object(printer_manager, "get_config_snapshot", return_value={
                 "print_method": "escpos", "label_height": 30,
             }),
-            patch.object(app_module.printer_manager, "get_connection_status", return_value={
+            patch.object(printer_manager, "get_connection_status", return_value={
                 "can_print": True, "display_name": "Item Prep printer",
             }),
-            patch.object(app_module.printer_manager, "print_barcode", return_value=True) as printer,
+            patch.object(printer_manager, "print_barcode", return_value=True) as printer,
         ):
             packed = self.post_scan(token=token, label_printed=False)
             first = self.client.post(

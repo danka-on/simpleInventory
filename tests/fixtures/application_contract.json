@@ -1,0 +1,6582 @@
+{
+  "routes": [
+    {
+      "rule": "/static/<path:filename>",
+      "endpoint": "static",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/data_version",
+      "endpoint": "api_data_version",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/shelf-image/<path:code>.png",
+      "endpoint": "shelf_image",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/shelf-original/<path:code>.png",
+      "endpoint": "shelf_original",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/shelf-base/<path:code>.png",
+      "endpoint": "shelf_base_image",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/tools",
+      "endpoint": "tools",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/prep-media-cleaner",
+      "endpoint": "prep_media_cleaner_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/bulk-manifest",
+      "endpoint": "bulk_manifest_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/bulk-manifest/<int:manifest_id>/pictures",
+      "endpoint": "bulk_manifest_pictures_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/lookup",
+      "endpoint": "api_bulk_manifest_lookup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/search",
+      "endpoint": "api_bulk_manifest_search",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/create",
+      "endpoint": "api_bulk_manifest_create",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/update",
+      "endpoint": "api_bulk_manifest_update",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/refresh",
+      "endpoint": "api_bulk_manifest_refresh",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/history",
+      "endpoint": "api_bulk_manifest_history",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>",
+      "endpoint": "api_bulk_manifest_detail",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/delete",
+      "endpoint": "api_bulk_manifest_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/photos",
+      "endpoint": "api_bulk_manifest_photos",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/photos",
+      "endpoint": "api_bulk_manifest_add_photos",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/google-sheet",
+      "endpoint": "api_bulk_manifest_google_sheet",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/google-sheet-delete",
+      "endpoint": "api_bulk_manifest_google_sheet_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/google-sheet-status",
+      "endpoint": "api_bulk_manifest_google_sheet_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/google-sheet-health",
+      "endpoint": "api_bulk_manifest_google_sheet_health",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/<int:manifest_id>/mark-sold",
+      "endpoint": "api_bulk_manifest_mark_sold",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk-manifest/cleanup-items",
+      "endpoint": "api_bulk_manifest_cleanup_items",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/listingagent",
+      "endpoint": "listingagent",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/listingagent/mobile",
+      "endpoint": "listingagent_mobile",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/check-items",
+      "endpoint": "check_items",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/items-to-list/mobile-photos",
+      "endpoint": "items_to_list_mobile_photos",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/settings",
+      "endpoint": "api_listingagent_get_settings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/settings",
+      "endpoint": "api_listingagent_save_settings",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/working_draft",
+      "endpoint": "api_listingagent_get_working_draft",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/working_draft",
+      "endpoint": "api_listingagent_save_working_draft",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/working_draft",
+      "endpoint": "api_listingagent_delete_working_draft",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_request",
+      "endpoint": "api_listingagent_check_request_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_request",
+      "endpoint": "api_listingagent_check_request_save",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_request/complete",
+      "endpoint": "api_listingagent_check_request_complete",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_requests",
+      "endpoint": "api_listingagent_check_requests",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_notes",
+      "endpoint": "api_listingagent_check_notes_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_notes",
+      "endpoint": "api_listingagent_check_notes_add",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_media",
+      "endpoint": "api_listingagent_check_media_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/check_media/upload",
+      "endpoint": "api_listingagent_check_media_upload",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/queue",
+      "endpoint": "api_listingagent_queue",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/queue/statuses",
+      "endpoint": "api_listingagent_queue_statuses",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/queue/add",
+      "endpoint": "api_listingagent_queue_add",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/queue/mark_listed",
+      "endpoint": "api_listingagent_queue_mark_listed",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/queue/remove",
+      "endpoint": "api_listingagent_queue_remove",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/listing-log",
+      "endpoint": "page_listing_log",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listinglog/recent",
+      "endpoint": "api_listinglog_recent",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/preplog/recent",
+      "endpoint": "api_preplog_recent",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/preplog/update",
+      "endpoint": "api_preplog_update",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/preplog/undo",
+      "endpoint": "api_preplog_undo",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/preplog/reassign_lot",
+      "endpoint": "api_preplog_reassign_lot",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/photos",
+      "endpoint": "api_listingagent_photos_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/photos/upload",
+      "endpoint": "api_listingagent_photos_upload",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/live_listings/search",
+      "endpoint": "api_listingagent_live_listings_search",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/upc/search",
+      "endpoint": "api_listingagent_upc_search",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/upc/<upc>",
+      "endpoint": "api_listingagent_upc_detail",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/locations",
+      "endpoint": "api_listingagent_ebay_locations",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/business_policies",
+      "endpoint": "api_listingagent_ebay_business_policies",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/offers_for_sku",
+      "endpoint": "api_listingagent_ebay_offers_for_sku",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/comps",
+      "endpoint": "api_listingagent_ebay_comps",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/category_suggestions",
+      "endpoint": "api_listingagent_ebay_category_suggestions",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/category_aspects",
+      "endpoint": "api_listingagent_ebay_category_aspects",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/catalog_search",
+      "endpoint": "api_listingagent_ebay_catalog_search",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/product_specifics",
+      "endpoint": "api_listingagent_ebay_product_specifics",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/catalog_item",
+      "endpoint": "api_listingagent_ebay_catalog_item",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/generate_description",
+      "endpoint": "api_listingagent_ebay_generate_description",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/generate_title",
+      "endpoint": "api_listingagent_ebay_generate_title",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/draft",
+      "endpoint": "api_listingagent_ebay_draft",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/mapping/start",
+      "endpoint": "mapping_start",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/mapping/task",
+      "endpoint": "mapping_task",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/ebay/publish",
+      "endpoint": "api_listingagent_ebay_publish",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/amazon/account_check",
+      "endpoint": "api_listingagent_amazon_account_check",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/amazon/restriction_check",
+      "endpoint": "api_listingagent_amazon_restriction_check",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/amazon/catalog_search",
+      "endpoint": "api_listingagent_amazon_catalog_search",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/amazon/catalog_item",
+      "endpoint": "api_listingagent_amazon_catalog_item",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/amazon/listing",
+      "endpoint": "api_listingagent_amazon_get_listing",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/amazon/put_offer",
+      "endpoint": "api_listingagent_amazon_put_offer",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/emailer",
+      "endpoint": "emailer",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/emailer/settings",
+      "endpoint": "get_emailer_settings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/emailer/settings",
+      "endpoint": "save_emailer_settings",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/emailer/send-test",
+      "endpoint": "send_test_email",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/emailer/send-test-inventory",
+      "endpoint": "send_test_inventory_email",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/emailer/send-health",
+      "endpoint": "send_health_email",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/emailer/send-inventory",
+      "endpoint": "send_inventory_alert_email",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/telegram",
+      "endpoint": "telegram_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/settings",
+      "endpoint": "api_telegram_settings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/recent-chats",
+      "endpoint": "api_telegram_recent_chats",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/send-test",
+      "endpoint": "api_telegram_send_test",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/send-inventory",
+      "endpoint": "api_telegram_send_inventory",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/send-health",
+      "endpoint": "api_telegram_send_health",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/send-sync-overdue",
+      "endpoint": "api_telegram_send_sync_overdue",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/send-api-issue",
+      "endpoint": "api_telegram_send_api_issue",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/bol-stats",
+      "endpoint": "bol_stats_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/barcode-print-que",
+      "endpoint": "barcode_print_que",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/barcode-print-view",
+      "endpoint": "barcode_print_view",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/sync",
+      "endpoint": "sync",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/misc",
+      "endpoint": "misc",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/financial-analytics",
+      "endpoint": "financial_analytics",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/inventory-analytics",
+      "endpoint": "inventory_seller_analytics",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/inventory-cleanup",
+      "endpoint": "inventory_cleanup_decisions",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/inventory-cleanup",
+      "endpoint": "api_inventory_cleanup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/inventory-age-summary",
+      "endpoint": "api_inventory_age_summary",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/inventory-age/rescan",
+      "endpoint": "api_inventory_age_rescan",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/inventory-seller-analytics",
+      "endpoint": "api_inventory_seller_analytics",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/financial-analytics",
+      "endpoint": "api_financial_analytics",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon/financial-summary",
+      "endpoint": "api_amazon_financial_summary",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/refresh-sold-data",
+      "endpoint": "api_refresh_sold_data",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/warehouse/item-prep/<path:barcode>",
+      "endpoint": "api_warehouse_item_prep_context",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/item-prep",
+      "endpoint": "item_prep_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/item-prep/log",
+      "endpoint": "item_prep_log_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/item-prep/diagnostic",
+      "endpoint": "item_prep_diagnostic_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/item-prep/diagnostic/view",
+      "endpoint": "item_prep_diagnostic_view_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/item-prep-no-barcode",
+      "endpoint": "item_prep_no_barcode_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/search-rawbol",
+      "endpoint": "search_rawbol_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/printer-settings",
+      "endpoint": "printer_settings_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/printer-label-designer",
+      "endpoint": "printer_label_designer_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/config",
+      "endpoint": "get_printer_config",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/status",
+      "endpoint": "get_printer_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/config",
+      "endpoint": "save_printer_config",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/scan-bluetooth",
+      "endpoint": "scan_bluetooth_devices",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/wake",
+      "endpoint": "wake_printer",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/test",
+      "endpoint": "test_printer",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/test-sample",
+      "endpoint": "test_printer_sample",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/label-preview",
+      "endpoint": "printer_label_preview_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/print-barcode",
+      "endpoint": "print_barcode_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/browser-print",
+      "endpoint": "browser_print_barcode",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/generate-barcode",
+      "endpoint": "generate_barcode_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/label-presets",
+      "endpoint": "get_label_presets",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/label-presets",
+      "endpoint": "save_label_preset",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/label-presets/<int:preset_id>",
+      "endpoint": "update_label_preset",
+      "methods": [
+        "OPTIONS",
+        "PUT"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/printer/label-presets/<int:preset_id>",
+      "endpoint": "delete_label_preset",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/print-queue",
+      "endpoint": "get_print_queue",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/print-queue",
+      "endpoint": "add_to_print_queue",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/print-queue",
+      "endpoint": "clear_print_queue",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/print-queue/item",
+      "endpoint": "remove_from_print_queue",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/item-prep-create-item",
+      "endpoint": "item_prep_create_item_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items-prep/generate-barcode",
+      "endpoint": "generate_custom_barcode",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items-prep/temp-item",
+      "endpoint": "save_temp_item",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/custom-item/identity",
+      "endpoint": "save_custom_item_identity",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/clear_cache",
+      "endpoint": "api_clear_cache",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bol_lookup",
+      "endpoint": "api_bol_lookup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/auto_assign_lot",
+      "endpoint": "api_items_prep_auto_assign_lot",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/status/<upc>",
+      "endpoint": "api_items_prep_status_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/status",
+      "endpoint": "api_items_prep_status",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/allocate_lots",
+      "endpoint": "api_items_prep_allocate_lots",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/create_bad_entry",
+      "endpoint": "api_items_prep_create_bad_entry",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/create_return_entry",
+      "endpoint": "api_items_prep_create_return_entry",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/good_entries/<base_upc>",
+      "endpoint": "api_items_prep_good_entries",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/cleanup_temp",
+      "endpoint": "api_items_prep_cleanup_temp",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bol_items/quantity",
+      "endpoint": "api_bol_items_update_quantity",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/status/<upc>",
+      "endpoint": "api_items_prep_status_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/undo",
+      "endpoint": "api_items_prep_undo",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/history_entry/delete",
+      "endpoint": "api_items_prep_history_entry_delete",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic",
+      "endpoint": "api_items_prep_diagnostic",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>",
+      "endpoint": "api_items_prep_diagnostic_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/live_listings",
+      "endpoint": "api_items_prep_diagnostic_live_listings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/history",
+      "endpoint": "api_items_prep_diagnostic_history",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/photos",
+      "endpoint": "api_items_prep_diagnostic_delete_photos",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/photos",
+      "endpoint": "api_items_prep_diagnostic_add_photos",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/photo/<int:photo_id>",
+      "endpoint": "api_items_prep_delete_photo",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/set_display_image",
+      "endpoint": "api_items_prep_set_display_image",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/trash",
+      "endpoint": "api_items_prep_trash_list",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/trash/restore",
+      "endpoint": "api_items_prep_trash_restore",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/reset",
+      "endpoint": "api_items_prep_diagnostic_reset",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/shelfcreator",
+      "endpoint": "shelfcreator",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/shelfmanager",
+      "endpoint": "shelfmanager",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/extractor",
+      "endpoint": "extractor",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/notes/<upc>",
+      "endpoint": "api_items_prep_notes_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/notes",
+      "endpoint": "api_items_prep_notes_add",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/notes/<int:note_id>",
+      "endpoint": "api_items_prep_notes_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/media/<upc>",
+      "endpoint": "api_items_prep_media_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/media/<upc>",
+      "endpoint": "api_items_prep_media_add",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/media/<int:media_id>",
+      "endpoint": "api_items_prep_media_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/prep-media-cleaner/overview",
+      "endpoint": "api_prep_media_cleaner_overview",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/prep-media-cleaner/query",
+      "endpoint": "api_prep_media_cleaner_query",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/prep-media-cleaner/delete",
+      "endpoint": "api_prep_media_cleaner_delete",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/location/<upc>",
+      "endpoint": "api_items_prep_location_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/location",
+      "endpoint": "api_items_prep_location_set",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/location/clear",
+      "endpoint": "api_items_prep_location_clear",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/reset",
+      "endpoint": "api_items_prep_reset",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/items-to-list",
+      "endpoint": "items_to_list_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/price-master",
+      "endpoint": "price_master_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/readytoship",
+      "endpoint": "ready_to_ship_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/ready_to_ship",
+      "endpoint": "ready_to_ship_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/ready-to-ship",
+      "endpoint": "ready_to_ship_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/prep-summaries",
+      "endpoint": "ready_to_ship_prep_summaries",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/prep-context/<barcode>",
+      "endpoint": "ready_to_ship_prep_context",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/alerts",
+      "endpoint": "alerts_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/store-manager",
+      "endpoint": "store_manager_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/mail-center",
+      "endpoint": "mail_center_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon-sns-webhook",
+      "endpoint": "api_amazon_sns_webhook",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/mail-center/sync",
+      "endpoint": "api_mail_center_sync",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/mail-center/messages",
+      "endpoint": "api_mail_center_messages",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/mail-center/messages",
+      "endpoint": "api_mail_center_create_message",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/mail-center/send",
+      "endpoint": "api_mail_center_send",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/mail-center/reply",
+      "endpoint": "api_mail_center_reply",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/mail-center/messages/<int:message_id>/read",
+      "endpoint": "api_mail_center_mark_read",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/label-master",
+      "endpoint": "label_master_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/fb-listings",
+      "endpoint": "fb_listings_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/store-listing-helper",
+      "endpoint": "store_listing_helper_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/labelmaster/settings",
+      "endpoint": "api_labelmaster_get_settings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/labelmaster/settings",
+      "endpoint": "api_labelmaster_save_settings",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/labelmaster/status",
+      "endpoint": "api_labelmaster_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/labelmaster/orders",
+      "endpoint": "api_labelmaster_orders",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/labelmaster/buy",
+      "endpoint": "api_labelmaster_buy",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/labelmaster/print",
+      "endpoint": "api_labelmaster_print",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/labelmaster/label",
+      "endpoint": "api_labelmaster_label_file",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/pricemaster/listings",
+      "endpoint": "api_pricemaster_listings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/pricemaster/bulk_update",
+      "endpoint": "api_pricemaster_bulk_update",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/pricemaster/ebay_verify",
+      "endpoint": "api_pricemaster_ebay_verify",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/pricemaster/feed_status",
+      "endpoint": "api_pricemaster_feed_status",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listing-helper/scan",
+      "endpoint": "api_listing_helper_scan",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listing-helper/inventory-match",
+      "endpoint": "api_listing_helper_inventory_match",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listing-helper/dismiss",
+      "endpoint": "api_listing_helper_dismiss",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listing-helper/undismiss",
+      "endpoint": "api_listing_helper_undismiss",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listing-helper/dismissed",
+      "endpoint": "api_listing_helper_dismissed",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings",
+      "endpoint": "api_fb_listings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/add",
+      "endpoint": "api_fb_listings_add",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/search_rawbol",
+      "endpoint": "api_fb_listings_search_rawbol",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/sync_sold",
+      "endpoint": "api_fb_listings_sync_sold",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/log",
+      "endpoint": "api_fb_listings_log",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/log/undo",
+      "endpoint": "api_fb_listings_log_undo",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/notes/<upc>",
+      "endpoint": "api_fb_listings_notes_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/notes",
+      "endpoint": "api_fb_listings_notes_add",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/notes/<int:note_id>",
+      "endpoint": "api_fb_listings_notes_update",
+      "methods": [
+        "OPTIONS",
+        "PUT"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/notes/<int:note_id>",
+      "endpoint": "api_fb_listings_notes_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/quantity",
+      "endpoint": "api_fb_listings_quantity",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb/listings/unlist",
+      "endpoint": "api_fb_listings_unlist",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/trash-manager",
+      "endpoint": "trash_manager_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/trash/settings",
+      "endpoint": "api_trash_settings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/trash/list",
+      "endpoint": "api_trash_list",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/trash/restore",
+      "endpoint": "api_trash_restore",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/trash/hard_delete",
+      "endpoint": "api_trash_hard_delete",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/trash/hard_delete_all",
+      "endpoint": "api_trash_hard_delete_all",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/trash/purge_expired",
+      "endpoint": "api_trash_purge_expired",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/debug/db_check",
+      "endpoint": "api_debug_db_check",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bol_items",
+      "endpoint": "api_bol_items",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bulk_delete_bol_items",
+      "endpoint": "api_bulk_delete_bol_items",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lots/select",
+      "endpoint": "api_set_selected_lot",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bol_lots",
+      "endpoint": "api_bol_lots",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lots",
+      "endpoint": "api_bol_lots",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bol_items/list_status",
+      "endpoint": "api_bol_items_set_list_status",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/debug/migrate_listings",
+      "endpoint": "api_debug_migrate_listings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/debug/check_item/<upc>",
+      "endpoint": "api_debug_check_item",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/cleanup_temporary_entry",
+      "endpoint": "api_cleanup_temporary_entry",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items_prep/diagnostic/<upc>/photos.zip",
+      "endpoint": "api_items_prep_diagnostic_photos_zip",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/token-status",
+      "endpoint": "token_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/token-status",
+      "endpoint": "api_token_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/",
+      "endpoint": "home",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/callback",
+      "endpoint": "callback",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/privacy",
+      "endpoint": "privacy",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/search",
+      "endpoint": "search",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/refresh_searchrack",
+      "endpoint": "api_refresh_searchrack",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/enrich_status",
+      "endpoint": "api_enrich_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/highlight",
+      "endpoint": "highlight",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/database",
+      "endpoint": "show_inventory",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/additemtrue",
+      "endpoint": "additemtrue",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/barcode",
+      "endpoint": "barcode_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/pictures",
+      "endpoint": "pictures_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/position",
+      "endpoint": "position_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/movelocation",
+      "endpoint": "movelocation_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/fba-prep",
+      "endpoint": "fba_prep_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/fba-labels",
+      "endpoint": "fba_labels_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/position/diagnostic",
+      "endpoint": "position_diagnostic",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/submitposition",
+      "endpoint": "process_position",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/submitbarcode",
+      "endpoint": "process_barcode",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/add-item/screen",
+      "endpoint": "api_add_item_screen",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/additem",
+      "endpoint": "additem_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/additem-multi",
+      "endpoint": "additem_multi_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/multibarcode",
+      "endpoint": "multibarcode_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/toggle",
+      "endpoint": "toggle",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/extractor/upload",
+      "endpoint": "extractor_upload",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/upload",
+      "endpoint": "api_rawbol_upload",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/backfill-retail",
+      "endpoint": "api_rawbol_backfill_retail",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/view",
+      "endpoint": "api_rawbol_view",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/logs",
+      "endpoint": "api_rawbol_logs",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/stats",
+      "endpoint": "api_rawbol_stats",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/delete/<lot_number>",
+      "endpoint": "api_rawbol_delete_lot",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/update/<lot_number>",
+      "endpoint": "api_rawbol_update_lot",
+      "methods": [
+        "OPTIONS",
+        "PUT"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/desync",
+      "endpoint": "api_rawbol_desync_all",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/enrich-lot-numbers",
+      "endpoint": "api_sold_enrich_lot_numbers",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/enrich-recent",
+      "endpoint": "api_sold_enrich_recent",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/rawbol/items/<lot_number>",
+      "endpoint": "api_rawbol_items",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/get-sold-orders",
+      "endpoint": "get_sold_orders_route",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon/test-connection",
+      "endpoint": "test_amazon_connection",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon/sync-orders",
+      "endpoint": "sync_amazon_orders",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon/sync-listings",
+      "endpoint": "sync_amazon_listings",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon/repair-titles",
+      "endpoint": "repair_amazon_listing_titles",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon/orders",
+      "endpoint": "get_amazon_orders",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/sold-orders",
+      "endpoint": "sold_orders",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/clear-location/<int:order_id>",
+      "endpoint": "ready_to_ship_clear_location",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/count",
+      "endpoint": "ready_to_ship_count",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/get-order",
+      "endpoint": "get_order",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/note/<int:order_id>",
+      "endpoint": "ready_to_ship_save_note",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/label/<int:order_id>",
+      "endpoint": "ready_to_ship_upload_label",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/labels/upload",
+      "endpoint": "ready_to_ship_upload_labels_bulk",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/labels/unmatched",
+      "endpoint": "ready_to_ship_unmatched_labels",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/labels/all",
+      "endpoint": "ready_to_ship_delete_all_labels",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/labels/unmatched/<int:label_id>",
+      "endpoint": "ready_to_ship_delete_unmatched_label",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/labels/unmatched/<int:label_id>/file",
+      "endpoint": "ready_to_ship_unmatched_label_file",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/labels/unmatched/<int:label_id>/print",
+      "endpoint": "ready_to_ship_unmatched_label_print",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/label/<int:order_id>",
+      "endpoint": "ready_to_ship_delete_label",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/label/<int:order_id>/<int:label_id>",
+      "endpoint": "ready_to_ship_delete_order_label",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/label/<int:order_id>/file",
+      "endpoint": "ready_to_ship_label_file",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/label/<int:order_id>/file/<int:label_id>",
+      "endpoint": "ready_to_ship_order_label_file",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/label/<int:order_id>/print",
+      "endpoint": "ready_to_ship_label_print",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/label/<int:order_id>/print/<int:label_id>",
+      "endpoint": "ready_to_ship_order_label_print",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/location-options/<int:order_id>",
+      "endpoint": "ready_to_ship_location_options",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ready-to-ship/order-stats/<int:order_id>",
+      "endpoint": "ready_to_ship_order_stats",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/mark-order-handled",
+      "endpoint": "mark_order_handled",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/mark-order-unhandled",
+      "endpoint": "mark_order_unhandled",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/pending-removals",
+      "endpoint": "get_pending_removals",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/cancel-removal/<int:order_id>",
+      "endpoint": "cancel_automatic_removal",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/allow-removal/<int:order_id>",
+      "endpoint": "allow_automatic_removal",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/trigger-automatic-removal",
+      "endpoint": "trigger_automatic_removal",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/repair-missing-removals",
+      "endpoint": "repair_missing_removals",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/removal-history/<int:order_id>",
+      "endpoint": "get_sold_removal_history",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/find-inventory/<int:order_id>",
+      "endpoint": "find_inventory_for_sold",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/match-barcode/<int:order_id>",
+      "endpoint": "match_barcode_to_sold",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/debug-order/<int:order_id>",
+      "endpoint": "debug_sold_order",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/debug-by-barcode/<barcode>",
+      "endpoint": "debug_sold_order_by_barcode",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/reset-order/<int:order_id>",
+      "endpoint": "reset_sold_order",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/manual-remove/<int:order_id>",
+      "endpoint": "manual_remove_sold_inventory",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/grace_period",
+      "endpoint": "api_get_grace_period",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/grace_period",
+      "endpoint": "api_set_grace_period",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/zero_qty_settings",
+      "endpoint": "api_get_zero_qty_settings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/zero_qty_settings",
+      "endpoint": "api_set_zero_qty_settings",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/zero_qty_pending",
+      "endpoint": "api_get_zero_qty_pending",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/zero_qty_delete_now/<barcode>",
+      "endpoint": "api_zero_qty_delete_now",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/zero_qty_cancel/<barcode>",
+      "endpoint": "api_zero_qty_cancel",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/zero_qty_allow/<barcode>",
+      "endpoint": "api_zero_qty_allow",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/zero_qty/trigger-purge",
+      "endpoint": "api_trigger_zero_qty_purge",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/inventory/history",
+      "endpoint": "api_inventory_history",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/removed",
+      "endpoint": "api_removed_list",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/removed",
+      "endpoint": "removed_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/removed/undo/<int:rem_id>",
+      "endpoint": "api_removed_undo",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold/remove-now/<int:order_id>",
+      "endpoint": "api_sold_remove_now",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/undo_match",
+      "endpoint": "undo_match",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/get_bol_upcs",
+      "endpoint": "get_bol_upcs",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/upload_position_picture",
+      "endpoint": "upload_position_picture",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/pictureposition",
+      "endpoint": "pictureposition_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/set_pictureposition_path",
+      "endpoint": "set_pictureposition_path",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/searchrack",
+      "endpoint": "searchrack_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/inventory-quantity-history",
+      "endpoint": "api_inventory_quantity_history",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sold-performance-history",
+      "endpoint": "api_sold_performance_history",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/finder",
+      "endpoint": "finder_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/finder",
+      "endpoint": "api_finder",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/finder/records",
+      "endpoint": "api_finder_records",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/finder/aliases/forget",
+      "endpoint": "api_finder_forget_alias",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lookup-image-by-barcode",
+      "endpoint": "api_lookup_image_by_barcode",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/finder/assign",
+      "endpoint": "api_finder_assign",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/finder/remove",
+      "endpoint": "api_finder_remove",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/finder/undo-remove",
+      "endpoint": "api_finder_undo_remove",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/cleanup",
+      "endpoint": "cleanup_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/unified-search",
+      "endpoint": "unified_search_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/searchrack_api",
+      "endpoint": "searchrack_api",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/searchbol_api",
+      "endpoint": "searchbol_api",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/view_all/<db_type>",
+      "endpoint": "view_all",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/update_item/<db_type>/<int:item_id>",
+      "endpoint": "update_item",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/search/<db_key>",
+      "endpoint": "api_search_db",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/search-all",
+      "endpoint": "api_search_all",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/get_lot_numbers",
+      "endpoint": "api_get_lot_numbers",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bol_stats",
+      "endpoint": "api_bol_stats",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/bol_stats/auto_assigned",
+      "endpoint": "api_bol_stats_auto_assigned",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lookup_location",
+      "endpoint": "api_lookup_location",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/set_rack_location",
+      "endpoint": "api_set_rack_location",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/update/<db_key>/<int:item_id>",
+      "endpoint": "api_update_row",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/check_shelf_code",
+      "endpoint": "api_check_shelf_code",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/create_shelf",
+      "endpoint": "api_create_shelf",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/update_shelf",
+      "endpoint": "api_update_shelf",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/clear_shelf_inventory/<code>",
+      "endpoint": "api_clear_shelf_inventory",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/list_shelves",
+      "endpoint": "api_list_shelves",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/shelf_counts",
+      "endpoint": "api_shelf_counts",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/groups",
+      "endpoint": "api_get_groups",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/create_group",
+      "endpoint": "api_create_group",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/delete_group",
+      "endpoint": "api_delete_group",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/move_shelves",
+      "endpoint": "api_move_shelves",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/upload_shelf",
+      "endpoint": "api_upload_shelf",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/delete_shelf",
+      "endpoint": "api_delete_shelf",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/valid_shelves",
+      "endpoint": "api_valid_shelves",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/location_hierarchy",
+      "endpoint": "api_location_hierarchy",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/barcode-guidance",
+      "endpoint": "api_fba_prep_barcode_guidance",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/movelocation_lookup",
+      "endpoint": "api_movelocation_lookup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/location-family",
+      "endpoint": "api_fba_prep_location_family",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/movelocation_lookup_shelf",
+      "endpoint": "api_movelocation_lookup_shelf",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/movelocation_execute",
+      "endpoint": "api_movelocation_execute",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/complete",
+      "endpoint": "api_movelocation_execute",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/amazon/readiness",
+      "endpoint": "api_fba_prep_amazon_readiness",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/amazon/plans",
+      "endpoint": "api_fba_prep_amazon_plans",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/sync",
+      "endpoint": "api_fba_prep_amazon_sync",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/<action>",
+      "endpoint": "api_fba_prep_amazon_action",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/box-labels/<shipment_id>",
+      "endpoint": "api_fba_prep_amazon_box_labels",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-labels/resolve",
+      "endpoint": "api_fba_labels_resolve",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/print-item-label",
+      "endpoint": "api_fba_prep_amazon_print_item_label",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/pack-scan",
+      "endpoint": "api_fba_prep_amazon_pack_scan",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/reset-pack-scan",
+      "endpoint": "api_fba_prep_amazon_reset_pack_scan",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/count-scan",
+      "endpoint": "api_fba_prep_count_scan",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/resolve-amazon-skus",
+      "endpoint": "api_fba_prep_resolve_amazon_skus",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/validate-inbound",
+      "endpoint": "api_fba_prep_validate_inbound",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/enable-fba",
+      "endpoint": "api_fba_prep_enable_fba",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/resolve-fba-safety",
+      "endpoint": "api_fba_prep_resolve_fba_safety",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/enable-fba-status",
+      "endpoint": "api_fba_prep_enable_fba_status",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/live",
+      "endpoint": "api_fba_prep_session_live",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions",
+      "endpoint": "api_fba_prep_sessions",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>",
+      "endpoint": "api_fba_prep_session_detail",
+      "methods": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/batches",
+      "endpoint": "api_fba_prep_batches",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/batches/<int:batch_id>",
+      "endpoint": "api_fba_prep_batch_detail",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/reviews",
+      "endpoint": "api_fba_prep_reviews",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/reviews/<int:review_id>",
+      "endpoint": "api_fba_prep_review_update",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/movelocation_bulk_cleanup",
+      "endpoint": "api_movelocation_bulk_cleanup",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/location_items",
+      "endpoint": "api_location_items",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/move_location",
+      "endpoint": "api_move_location",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/delete/<db_key>/<int:item_id>",
+      "endpoint": "api_delete_row",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/undelete/<int:archive_id>",
+      "endpoint": "api_undelete",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/location_duplicates",
+      "endpoint": "api_location_duplicates",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/archived",
+      "endpoint": "api_archived_list",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/delete_archive/<int:archive_id>",
+      "endpoint": "api_delete_archive",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/refresh_searchrack",
+      "endpoint": "refresh_searchrack",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/test_sold_item",
+      "endpoint": "test_sold_item",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/status",
+      "endpoint": "get_sync_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/settings",
+      "endpoint": "save_sync_settings",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/all",
+      "endpoint": "sync_all",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/ebay-orders",
+      "endpoint": "sync_ebay_orders_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/ebay-listings",
+      "endpoint": "sync_ebay_listings_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/amazon-orders",
+      "endpoint": "sync_amazon_orders_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/amazon-listings",
+      "endpoint": "sync_amazon_listings_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/amazon-upcs",
+      "endpoint": "sync_amazon_upcs_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/recover-upcs",
+      "endpoint": "recover_corrupted_upcs_api",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/fix-amazon-barcodes",
+      "endpoint": "fix_amazon_barcodes",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/sync/debug",
+      "endpoint": "sync_debug",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/marketplace-sale",
+      "endpoint": "marketplace_sale",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/marketplace-session",
+      "endpoint": "marketplace_session",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/marketplace-stats",
+      "endpoint": "marketplace_stats",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/marketplace-schedule-pickup",
+      "endpoint": "marketplace_schedule_pickup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/marketplace-live-pickups",
+      "endpoint": "marketplace_live_pickups",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/generate-barcode",
+      "endpoint": "marketplace_generate_barcode",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/lookup",
+      "endpoint": "api_marketplace_lookup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/search",
+      "endpoint": "api_marketplace_search",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/pickups/search",
+      "endpoint": "api_marketplace_pickups_search",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/pickups",
+      "endpoint": "api_marketplace_pickups",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/pickups",
+      "endpoint": "api_marketplace_pickups_create",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/sale",
+      "endpoint": "api_marketplace_sale",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/decrement",
+      "endpoint": "api_marketplace_decrement",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/sales",
+      "endpoint": "api_marketplace_sales",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/sale/<int:sale_id>",
+      "endpoint": "api_marketplace_sale_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/marketplace/sale/<int:sale_id>",
+      "endpoint": "api_marketplace_sale_update",
+      "methods": [
+        "OPTIONS",
+        "PUT"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/payouts",
+      "endpoint": "payouts_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/payouts",
+      "endpoint": "api_get_payouts",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/payouts/sync",
+      "endpoint": "api_sync_payouts",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/returns",
+      "endpoint": "returns_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns",
+      "endpoint": "api_get_returns",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns",
+      "endpoint": "api_create_return",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/amazon/sync-returns",
+      "endpoint": "api_sync_amazon_returns",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ebay/sync-returns",
+      "endpoint": "api_sync_ebay_returns",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>/mark-received",
+      "endpoint": "api_mark_return_received",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>/restock",
+      "endpoint": "api_restock_return",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>",
+      "endpoint": "api_update_return",
+      "methods": [
+        "OPTIONS",
+        "PUT"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>",
+      "endpoint": "api_delete_return",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>/relist",
+      "endpoint": "api_relist_return",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>/resold",
+      "endpoint": "api_resold_return",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>/restart-lifecycle",
+      "endpoint": "api_restart_return_lifecycle",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>/history",
+      "endpoint": "api_get_return_history",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/returns/<int:return_id>/undo-last-event",
+      "endpoint": "api_undo_last_return_event",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/test-sold-orders",
+      "endpoint": "test_sold_orders_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/test-sold-order",
+      "endpoint": "api_create_test_sold_order",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/duplicate_shelf",
+      "endpoint": "api_duplicate_shelf",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/admin/cache/clear",
+      "endpoint": "api_admin_clear_cache",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/enrich-sold-db",
+      "endpoint": "api_enrich_sold_db",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/admin/cache/settings",
+      "endpoint": "api_cache_settings",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    }
+  ],
+  "hooks": {
+    "before_request_funcs": [],
+    "after_request_funcs": [
+      "after_request",
+      "add_no_cache_headers"
+    ],
+    "teardown_request_funcs": [],
+    "teardown_appcontext_funcs": [
+      "close_db_connections"
+    ],
+    "template_context_processors": [
+      "_default_template_ctx_processor",
+      "inject_server_info"
+    ]
+  },
+  "signatures": {
+    "get_db_connection": "(db_name)",
+    "db_connection": "(db_name, row_factory=True)",
+    "enable_wal_mode": "()",
+    "create_database_indexes": "()",
+    "_ensure_bol_items_fast_indexes": "()",
+    "_safe_error": "(e, context='')",
+    "require_debug_mode": "(f)",
+    "_ensure_removed_items_table": "(cur)",
+    "_ensure_legacy_removed_table": "(cur)",
+    "_sqlite_ident": "(name)",
+    "_row_casefold_dict": "(row)",
+    "_searchrack_snapshot_location": "(snapshot)",
+    "_searchrack_snapshot_value": "(snapshot, *names, default='')",
+    "_ensure_searchrack_history_outbox": "(cur)",
+    "_ensure_searchrack_undo_claims": "(cur)",
+    "_searchrack_trigger_value": "(prefix, column, fallback='NULL')",
+    "_searchrack_trigger_location": "(prefix, pos_col, pic_col)",
+    "_searchrack_trigger_snapshot": "(prefix, columns)",
+    "_searchrack_trigger_integral_quantity": "(value_sql)",
+    "_install_searchrack_history_guard": "(conn)",
+    "_strict_inventory_quantity": "(value)",
+    "_ensure_searchrack_snapshot_columns": "(conn)",
+    "_capture_legacy_zero_searchrack_rows": "(conn, guard_info)",
+    "_history_timestamp": "(value)",
+    "_history_event_candidate": "(rem_cur, event)",
+    "_flush_searchrack_history_outbox": "(limit=250, settle_seconds=0)",
+    "_initialize_searchrack_history_guard": "()",
+    "_ensure_inventory_age_schema": "(conn)",
+    "_inventory_age_received_at": "(value, fallback=None)",
+    "_inventory_age_insert_batch": "(cur, searchrack_id, barcode, received_at, quantity, *, source='inventory', source_history_id=None, estimated=False, lot_number='', evidence_source='', confidence='low', confidence_score=0, evidence_json='{}', rebuild_run_id=None)",
+    "_inventory_age_consume_fifo": "(cur, searchrack_id, quantity)",
+    "_inventory_age_transfer_fifo": "(cur, source_row_id, destination_row_id, quantity, barcode='')",
+    "_backfill_inventory_age_batches": "(conn)",
+    "_reconcile_inventory_age_batches": "(conn)",
+    "_inventory_age_exact_key": "(value)",
+    "_inventory_age_base_key": "(value)",
+    "_inventory_age_lot_key": "(value)",
+    "_inventory_age_confidence_label": "(score)",
+    "_inventory_age_evidence_paths": "(evidence_paths=None)",
+    "_inventory_age_load_receipt_evidence": "(evidence_paths=None)",
+    "_inventory_age_load_history": "(active_barcode_keys, history_path=None, active_base_keys=None)",
+    "_inventory_age_replay_history": "(history_events, evidence, match_window_days=2)",
+    "_inventory_age_depleted_raw_capacity": "(history_events, evidence)",
+    "_inventory_age_read_ledger_rows": "(cur)",
+    "_inventory_age_ledger_signature": "(rows)",
+    "_inventory_age_unit_signature": "(unit)",
+    "_inventory_age_group_plan": "(units, row_id, barcode)",
+    "_rescan_inventory_age_from_history": "(conn, history_path=None, match_window_days=2, evidence_paths=None)",
+    "_inventory_age_lookup": "(conn, searchrack_ids)",
+    "_history_restore_quantity": "(history_row)",
+    "_restore_searchrack_from_history": "(rack_cur, history_row, restore_quantity)",
+    "_restore_searchrack_with_undo_claim": "(rack_cur, history_row, restore_quantity, *, history_source='removed_items')",
+    "_insert_inventory_undo_history": "(history_cur, source_row, restored, removal_type, *, order_id=None, undone_at=None)",
+    "_mark_zero_qty_for_deletion_external": "(item_id)",
+    "_clear_zero_qty_pending_deletions": "(searchrack_id=None)",
+    "_ensure_order_removal_allocations_table": "(cur)",
+    "_ensure_ready_to_ship_notes_table": "(cur)",
+    "_ensure_ready_to_ship_unmatched_labels_table": "(cur)",
+    "_ensure_ready_to_ship_order_labels_table": "(cur)",
+    "_ready_to_ship_row_value": "(row, key, default='')",
+    "_ready_to_ship_order_label_payload": "(row=None, order_id=None)",
+    "_ready_to_ship_legacy_label_row": "(note_row=None)",
+    "_ready_to_ship_label_payload": "(note_row=None, label_rows=None)",
+    "_ready_to_ship_unmatched_label_payload": "(row=None)",
+    "_ready_to_ship_label_dir": "()",
+    "_ready_to_ship_label_path": "(filename)",
+    "_ready_to_ship_delete_label_file": "(filename)",
+    "_ready_to_ship_extract_pdf_text": "(pdf_path)",
+    "_ready_to_ship_match_norm": "(value)",
+    "_ready_to_ship_match_compact": "(value)",
+    "_ready_to_ship_address_norm": "(value)",
+    "_ready_to_ship_state_variants": "(value)",
+    "_ready_to_ship_insert_unmatched_label": "(cur, filename, original_filename, size_bytes, extracted_text='', match_error='No address match found')",
+    "_ready_to_ship_label_match_score": "(label_text, order_row)",
+    "_ready_to_ship_find_label_match": "(cur, label_text, days=2)",
+    "_ready_to_ship_save_uploaded_label_file": "(file_storage)",
+    "_ready_to_ship_get_note_row": "(cur, order_id)",
+    "_ready_to_ship_get_order_label_rows": "(cur, order_id)",
+    "_ready_to_ship_sync_legacy_label_columns": "(cur, order_id)",
+    "_ready_to_ship_payload_for_order": "(cur, order_id)",
+    "_ready_to_ship_attach_label": "(cur, order_id, filename, original_filename, size_bytes)",
+    "_ensure_order_finder_matches_table": "(cur)",
+    "_ready_to_ship_note_payload": "(note_row=None, label_rows=None)",
+    "_apply_ready_to_ship_note_payload": "(order_dict, note_row=None, label_rows=None)",
+    "_load_ready_to_ship_note_lookup": "(cur, order_row_ids)",
+    "_load_ready_to_ship_label_lookup": "(cur, order_row_ids)",
+    "_load_order_finder_match_lookup": "(cur, order_row_ids)",
+    "_sold_location_key": "(value)",
+    "_sold_location_label": "(value)",
+    "_sold_removal_barcode_key": "(value)",
+    "_sold_removal_barcode_variants": "(value)",
+    "_searchrack_removal_schema": "(cur)",
+    "_searchrack_matches_for_barcode": "(cur, barcode, schema=None, include_zero=False)",
+    "_ready_to_ship_suffix_inventory_matches": "(cur, barcode, schema=None)",
+    "_ready_to_ship_condition_is_new": "(order)",
+    "_ready_to_ship_valid_suffix_suggestion": "(order_barcode, suggested_barcode)",
+    "_ready_to_ship_valid_requested_match": "(order, suggested_barcode)",
+    "_ready_to_ship_suffix_alternatives": "(matches, selected_barcode='')",
+    "_searchrack_matches_for_removal_context": "(cur, barcode, *, fallback_barcodes=None, preferred_location='')",
+    "_ready_to_ship_searchrack_match_from_row": "(row, schema)",
+    "_ready_to_ship_rank_inventory_matches": "(matches, order)",
+    "_ready_to_ship_match_display_location": "(match)",
+    "_ready_to_ship_searchrack_match_by_id": "(cur, searchrack_id, schema=None)",
+    "_ready_to_ship_match_location_equals": "(match, location)",
+    "_ready_to_ship_resolve_searchrack_location_match": "(cur, barcode, location, fallback_barcodes=None)",
+    "_group_searchrack_matches_by_location": "(matches)",
+    "_serialize_prep_location_entry": "(group)",
+    "_prep_history_inventory_fallback": "(base_upc)",
+    "_prep_history_inventory_bucket_for_upc": "(upc)",
+    "_prep_select_inventory_match": "(upc, preferred_location='', preferred_preview='')",
+    "_clear_searchrack_row_location": "(row_id)",
+    "_items_prep_delete_legacy_inventory_entry": "(*, upc, qty=1, row_ids=None)",
+    "_load_order_removal_allocations": "(cur, order_row_id)",
+    "_save_order_removal_allocations": "(cur, order_row_id, allocations)",
+    "_marketplace_lookup_rawbol_item": "(barcode)",
+    "_normalize_marketplace_allocations": "(incoming_allocations)",
+    "_build_marketplace_removal_plan": "(barcode, quantity, allocations=None, fallback_barcodes=None, preferred_location='')",
+    "_apply_marketplace_removal_plan": "(plan, *, order_ref, barcode, title, removal_type='manual_sold_removal')",
+    "_ensure_listing_alerts_tables": "()",
+    "_listing_alert_upc_key": "(raw_upc)",
+    "_normalize_store_listing_identity": "(store, listing_key)",
+    "_store_listing_order_identity_candidates": "(order)",
+    "_load_listing_inventory_match_lookup": "()",
+    "_listing_inventory_match_for_order": "(order, lookup=None)",
+    "_listing_alert_base_upc_key": "(raw_upc)",
+    "_coerce_int": "(value, default=0)",
+    "_parse_iso_utc_naive": "(raw)",
+    "_sold_order_sale_datetime": "(order)",
+    "_sold_removal_event_is_current": "(order, removal)",
+    "_probe_ebay_listing_live": "(item_id, url='')",
+    "_searchrack_total_qty_for_key": "(conn, upc_key)",
+    "_sold_order_value": "(order, key, default='')",
+    "_ensure_order_processing_claim_column": "(cur)",
+    "_is_order_processing_claim_stale": "(claimed_at_value, timeout_minutes=10)",
+    "_effective_sold_order_barcode": "(order, prefer_manual_override=False)",
+    "_ready_to_ship_image_value": "(value)",
+    "_ready_to_ship_rawbol_image": "(rawbol_cur, values)",
+    "_is_exact_traced_suffixed_sold_order": "(order)",
+    "_barcode_base_without_suffix": "(value)",
+    "_ready_to_ship_warehouse_qty_for_barcode": "(barcode)",
+    "_ready_to_ship_rawbol_total_qty_for_barcode": "(barcode)",
+    "_ready_to_ship_sold_count_for_barcode": "(barcode)",
+    "_ready_to_ship_items_to_list_stats_for_barcode": "(barcode)",
+    "_record_inventory_zero_transition": "(upc_key, prev_total_qty, current_total_qty, observed_at=None)",
+    "_ensure_fbstore_tables": "()",
+    "_ensure_fbstore_log_tables": "()",
+    "_ensure_fbstore_notes_tables": "()",
+    "_normalize_mail_store": "(value)",
+    "_ensure_storemail_tables": "()",
+    "_log_fb_listing_action": "(action, upc=None, delta_qty=None, prev_qty=None, new_qty=None, prev_listed=None, prev_listed_date=None, order_id=None, item_id=None, store=None, title=None, note=None)",
+    "_track_fb_listing": "(upc, quantity=1, listed=True, title=None, image=None)",
+    "update_data_version": "()",
+    "_listing_helper_scan_cache_get": "(max_age_seconds=15)",
+    "_listing_helper_scan_cache_set": "(payload)",
+    "_listing_helper_scan_cache_clear": "()",
+    "_invalidate_searchrack_cache": "()",
+    "get_data_version": "()",
+    "close_db_connections": "(exception)",
+    "api_data_version": "()",
+    "inject_server_info": "()",
+    "_shelf_area_for_code": "(code)",
+    "_area_storage_dir": "(area, kind)",
+    "_add_unique_path": "(candidates, path)",
+    "_validate_shelf_code_input": "(value, *, required=True)",
+    "_safe_shelf_lookup_code": "(value)",
+    "_shelf_code_exists": "(cur, code, *, exclude_code='')",
+    "_preview_base_path_for_code": "(code)",
+    "_legacy_preview_base_path_for_code": "(code)",
+    "_preview_base_lookup_codes": "(code)",
+    "_original_shelf_image_path_for_code": "(code)",
+    "_shelf_original_path_candidates": "(code)",
+    "_resolve_shelf_original_path": "(code, existing_only=False)",
+    "_truthy_form_value": "(value)",
+    "_save_uploaded_shelf_png": "(upload, target_path)",
+    "_preferred_shelf_display_dir": "(code)",
+    "_shelf_display_path_candidates": "(code)",
+    "_shelf_exact_display_path_candidates": "(code)",
+    "_resolve_exact_shelf_display_path": "(code, existing_only=False)",
+    "_shelf_exact_original_path_candidates": "(code)",
+    "_resolve_exact_shelf_original_path": "(code, existing_only=False)",
+    "_resolve_shelf_display_path": "(code, existing_only=False)",
+    "_iter_shelf_display_files": "()",
+    "shelf_image": "(code)",
+    "_preview_base_path_candidates": "(code)",
+    "_resolve_preview_base_path": "(code)",
+    "shelf_original": "(code)",
+    "shelf_base_image": "(code)",
+    "_sync_preview_base_image": "(code, source_path)",
+    "_sync_original_to_preview_base": "(code)",
+    "_rename_preview_base_image": "(old_code, new_code)",
+    "_delete_preview_base_image": "(code)",
+    "add_no_cache_headers": "(response)",
+    "_run_enrich_in_background": "()",
+    "send_email_smtp": "(to_emails, subject, body, html_body=None)",
+    "tools": "()",
+    "prep_media_cleaner_page": "()",
+    "bulk_manifest_page": "()",
+    "bulk_manifest_pictures_page": "(manifest_id)",
+    "_bulk_manifest_candidate_barcodes": "(raw_barcode)",
+    "_bulk_manifest_pick_price_column": "(raw_cols)",
+    "_bulk_manifest_rawbol_price_column": "(cur)",
+    "_bulk_manifest_price_numeric_expr": "(price_col)",
+    "_bulk_manifest_lot_average_price": "(cur, lot_number, price_col=None, cache=None)",
+    "_bulk_manifest_random_unit_price": "(min_cents=999, max_cents=2999)",
+    "_bulk_manifest_resolve_unit_price": "(raw_value, *, lot_avg_price=0.0, default=None)",
+    "_bulk_manifest_lookup_rawbol": "(raw_barcode)",
+    "api_bulk_manifest_lookup": "()",
+    "api_bulk_manifest_search": "()",
+    "_marketplace_sale_store_key": "(value)",
+    "_bulk_manifest_status_key": "(value)",
+    "_bulk_manifest_parse_ids": "(raw_value)",
+    "_bulk_manifest_money": "(value, default=0.0)",
+    "_bulk_manifest_next_title": "(cur)",
+    "_ensure_bulk_manifest_tables": "(cur)",
+    "_bulk_manifest_prepare_items": "(raw_items, *, force_lookup_refresh=False)",
+    "_bulk_manifest_replace_items": "(cur, manifest_id, items, total_units, total_original_retail, now_iso)",
+    "_bulk_manifest_photo_label_text": "(manifest_id, manifest_title='')",
+    "_bulk_manifest_photo_url": "(image_path)",
+    "_bulk_manifest_photo_payload": "(row)",
+    "_bulk_manifest_load_photos": "(cur, manifest_id)",
+    "_bulk_manifest_photo_counts": "(cur, manifest_ids)",
+    "_bulk_manifest_photo_abs_path": "(image_path)",
+    "_bulk_manifest_delete_photo_files": "(image_paths)",
+    "_bulk_manifest_delete_manifest": "(manifest_id)",
+    "_bulk_manifest_save_labeled_photo": "(file_storage, label_text, abs_path)",
+    "_bulk_manifest_google_share_email": "()",
+    "_bulk_manifest_google_shared_spreadsheet_id": "()",
+    "_bulk_manifest_google_tab_title": "(manifest_id, shared_mode=False)",
+    "_bulk_manifest_google_timeout": "(default_seconds=8)",
+    "_bulk_manifest_google_request_error": "(prefix, exc)",
+    "_bulk_manifest_google_access_token": "(scopes=None)",
+    "_bulk_manifest_google_request": "(method, url, *, token, params=None, json_body=None, timeout=45)",
+    "_bulk_manifest_google_health": "(include_token_probe=False)",
+    "_bulk_manifest_google_sheet_range": "(sheet_title, cell_range='A1')",
+    "_bulk_manifest_google_get_spreadsheet": "(spreadsheet_id, token)",
+    "_bulk_manifest_google_ensure_manifest_sheet": "(spreadsheet_id, token, desired_title='Manifest', allow_rename_singleton=True)",
+    "_bulk_manifest_google_style_sheet": "(spreadsheet_id, worksheet_id, worksheet_title, sheet_title, token, update_spreadsheet_title=True, row_count=0, image_row_indexes=None, emphasis_row_indexes=None, header_row_index=0, frozen_row_count=1)",
+    "_bulk_manifest_google_write_sheet_rows": "(spreadsheet_id, worksheet_title, rows, token)",
+    "_bulk_manifest_google_should_recreate_sheet": "(message)",
+    "_bulk_manifest_google_share_sheet": "(spreadsheet_id, token)",
+    "_bulk_manifest_google_export_sheet": "(existing_sheet_id, sheet_title, rows, token, *, worksheet_title='Manifest', update_spreadsheet_title=True, allow_rename_singleton=True, image_row_indexes=None, emphasis_row_indexes=None, header_row_index=0, frozen_row_count=1)",
+    "_bulk_manifest_google_job_get": "(manifest_id)",
+    "_bulk_manifest_google_job_set": "(manifest_id, **updates)",
+    "_bulk_manifest_google_job_clear": "(manifest_id)",
+    "_bulk_manifest_google_delete_sheet_resource": "(manifest_id, spreadsheet_id, token)",
+    "_bulk_manifest_google_delete_manifest": "(manifest_id)",
+    "_bulk_manifest_google_state": "(manifest_id, row=None)",
+    "_bulk_manifest_queue_google_export": "(manifest_id, origin_base='', manifest_title='', force_refresh=False)",
+    "_bulk_manifest_google_manifest_meta": "(manifest_id)",
+    "_bulk_manifest_google_export_manifest": "(manifest_id, origin_base='')",
+    "_bulk_manifest_google_export_worker": "(manifest_id, origin_base='')",
+    "_bulk_manifest_google_status_payload": "(manifest_id)",
+    "_bulk_manifest_normalize_image_url": "(raw_value, origin_base='')",
+    "_bulk_manifest_is_macy_image_host": "(hostname)",
+    "_listagent_is_macy_image_url": "(image_url, origin_base='')",
+    "_listagent_prioritize_macy_thumbnail": "(images, origin_base='')",
+    "_bulk_manifest_macy_thumb_url": "(image_url, origin_base='')",
+    "_bulk_manifest_macy_full_image_url": "(image_url, origin_base='')",
+    "_bulk_manifest_google_image_formula": "(url, origin_base='', width=None, height=None)",
+    "_bulk_manifest_google_link_formula": "(url, label='Open', origin_base='')",
+    "_bulk_manifest_load_detail": "(cur, manifest_id)",
+    "_bulk_manifest_build_google_sheet_rows": "(manifest, items, origin_base='')",
+    "api_bulk_manifest_create": "()",
+    "api_bulk_manifest_update": "(manifest_id)",
+    "api_bulk_manifest_refresh": "()",
+    "api_bulk_manifest_history": "()",
+    "api_bulk_manifest_detail": "(manifest_id)",
+    "api_bulk_manifest_delete": "(manifest_id)",
+    "api_bulk_manifest_photos": "(manifest_id)",
+    "api_bulk_manifest_add_photos": "(manifest_id)",
+    "api_bulk_manifest_google_sheet": "(manifest_id)",
+    "api_bulk_manifest_google_sheet_delete": "(manifest_id)",
+    "api_bulk_manifest_google_sheet_status": "(manifest_id)",
+    "api_bulk_manifest_google_sheet_health": "()",
+    "api_bulk_manifest_mark_sold": "(manifest_id)",
+    "api_bulk_manifest_cleanup_items": "()",
+    "listingagent": "()",
+    "listingagent_mobile": "()",
+    "check_items": "()",
+    "items_to_list_mobile_photos": "()",
+    "_listingagent_init_settings_table": "(cur)",
+    "_listingagent_get_settings": "()",
+    "_listingagent_upsert_settings": "(settings: dict)",
+    "_listingagent_parse_float": "(val, default=None)",
+    "_listingagent_parse_int": "(val, default=None)",
+    "_listagent_normalize_added_mode": "(val, default='my')",
+    "_listagent_init_tables": "(cur)",
+    "_listagent_row_to_dict": "(row)",
+    "_listagent_now_iso": "()",
+    "_listagent_check_request_defaults": "()",
+    "_listagent_get_check_request": "(upc)",
+    "_listagent_set_check_request": "(*, upc, check_quantity=None, take_pictures=None, check_color=None, check_condition=None, custom_note=None, status=None, source=None)",
+    "_listagent_mark_check_request_complete": "(*, upc, complete=True, completed_by=None)",
+    "_listagent_get_check_requests": "(*, limit=100, status='open')",
+    "_listagent_enrich_check_request_rows": "(rows, *, base_url='')",
+    "_listagent_get_check_notes": "(upc)",
+    "_listagent_add_check_note": "(*, upc, note, note_type='checker')",
+    "_listagent_get_check_media": "(upc)",
+    "_listagent_get_check_request_statuses": "(upcs)",
+    "_listagent_add_check_media": "(*, upc, media_type='image', file_path='', original_filename='', size_bytes=None, note_type='checker')",
+    "_listinglog_init_tables": "(cur)",
+    "_listinglog_add_entry": "(*, upc, platform, action='listed', source='listingagent', created_at=None, marketplace_id=None, listing_id=None, offer_id=None, sku=None, asin=None, url=None, title=None, price=None, quantity=None, success=True, error=None, meta=None)",
+    "_preplog_init_tables": "(cur)",
+    "_preplog_add_entry": "(*, upc, status, quantity=1, created_at=None, base_upc=None, note=None, reason=None, source='item-prep', meta=None, dedupe=False)",
+    "_preplog_recent": "(*, limit=200, include_undone=True)",
+    "_preplog_mark_undone": "(log_id: int, *, undone_at=None, undo_error=None)",
+    "_preplog_sync_downstream_delete": "(*, upc, status, qty=1, lot_number='', base_upc=None)",
+    "_preplog_set_undo_error": "(log_id: int, error: str)",
+    "_preplog_meta_dict": "(entry)",
+    "_listinglog_meta_dict": "(entry)",
+    "_preplog_enrich_row": "(entry)",
+    "_preplog_update_meta": "(log_id: int, meta: dict)",
+    "_preplog_auto_assigned_entries": "(*, include_undone=False, lot_number='', limit=None)",
+    "_preplog_attach_voice_notes": "(items)",
+    "_preplog_attach_titles": "(items)",
+    "_preplog_apply_quantity_change": "(entry, *, old_qty, new_qty)",
+    "_listagent_format_upc12": "(value)",
+    "_listagent_upc_variants": "(value)",
+    "_items_to_list_upc_search_variants": "(value)",
+    "_listagent_add_to_queue": "(upc, *, title=None, source=None, item_status=None, added_mode=None)",
+    "_listagent_get_queue": "(*, limit=50, added_mode='')",
+    "_listagent_get_queue_statuses": "(upcs, *, added_mode='')",
+    "_listagent_mark_listed": "(upc, *, platform=None, listing_id=None, offer_id=None, sku=None, asin=None, url=None, marketplace_id=None, title=None, price=None, quantity=None, source='listingagent', action='listed', success=True, error=None, meta=None)",
+    "_listagent_remove_from_queue": "(upc)",
+    "_listagent_add_photo": "(upc, *, image_path, original_filename=None, size_bytes=None)",
+    "_listagent_get_photos": "(upc, *, limit=30)",
+    "_listagent_photo_path_exists": "(image_path)",
+    "_listagent_get_working_draft": "(upc)",
+    "_listagent_upsert_working_draft": "(upc, draft)",
+    "_listagent_delete_working_draft": "(upc)",
+    "_listagent_get_working_draft_statuses": "(upcs)",
+    "_listagent_localize_image_urls": "(upc, images, *, request_base_url='')",
+    "_listagent_search_live_listings": "(q, *, limit=60)",
+    "api_listingagent_get_settings": "()",
+    "api_listingagent_save_settings": "()",
+    "api_listingagent_get_working_draft": "()",
+    "api_listingagent_save_working_draft": "()",
+    "api_listingagent_delete_working_draft": "()",
+    "api_listingagent_check_request_get": "()",
+    "api_listingagent_check_request_save": "()",
+    "api_listingagent_check_request_complete": "()",
+    "api_listingagent_check_requests": "()",
+    "api_listingagent_check_notes_get": "()",
+    "api_listingagent_check_notes_add": "()",
+    "api_listingagent_check_media_get": "()",
+    "api_listingagent_check_media_upload": "()",
+    "api_listingagent_queue": "()",
+    "api_listingagent_queue_statuses": "()",
+    "api_listingagent_queue_add": "()",
+    "api_listingagent_queue_mark_listed": "()",
+    "api_listingagent_queue_remove": "()",
+    "page_listing_log": "()",
+    "api_listinglog_recent": "()",
+    "api_preplog_recent": "()",
+    "api_preplog_update": "()",
+    "api_preplog_undo": "()",
+    "api_preplog_reassign_lot": "()",
+    "api_listingagent_photos_get": "()",
+    "api_listingagent_photos_upload": "()",
+    "api_listingagent_live_listings_search": "()",
+    "api_listingagent_upc_search": "()",
+    "api_listingagent_upc_detail": "(upc)",
+    "_ebay_api_request": "(method, path, *, params=None, payload=None, timeout=30)",
+    "_ebay_extract_error": "(resp)",
+    "_extract_missing_ebay_aspect": "(error_text)",
+    "api_listingagent_ebay_locations": "()",
+    "_listingagent_get_ebay_business_policies": "(marketplace_id: str)",
+    "_listingagent_get_ebay_locations": "(*, force_refresh=False)",
+    "_listingagent_get_ebay_location_keys": "(*, force_refresh=False)",
+    "_listingagent_resolve_ebay_location_key": "(preferred_key, *, force_refresh=False)",
+    "api_listingagent_ebay_business_policies": "()",
+    "api_listingagent_ebay_offers_for_sku": "()",
+    "_listingagent_is_ebay_eps_url": "(url: str) -> bool",
+    "_listingagent_is_amazon_image_url": "(url: str) -> bool",
+    "_listingagent_dedupe_image_urls": "(images)",
+    "_listingagent_has_mixed_ebay_image_sources": "(images)",
+    "_listingagent_prefer_single_ebay_image_source": "(images)",
+    "_listingagent_is_likely_ebay_image_mix_error": "(error_text: str) -> bool",
+    "_build_ebay_inventory_item_payload": "(upc, title, description, images, quantity, condition, *, aspects=None, epid='', condition_description='')",
+    "_build_ebay_offer_payload": "(sku, marketplace_id, currency, price, quantity, category_id, listing_description, merchant_location_key, fulfillment_policy_id, payment_policy_id, return_policy_id, listing_duration='GTC', format_='FIXED_PRICE')",
+    "_listingagent_find_existing_offer_for_sku": "(sku: str, marketplace_id: str = '')",
+    "_listingagent_condition_enum_from_policy": "(condition_id, condition_desc='')",
+    "_listingagent_get_ebay_allowed_condition_enums": "(category_id: str, marketplace_id: str)",
+    "_listingagent_get_condition_candidates": "(current_condition='', *, category_id='', marketplace_id='')",
+    "_listingagent_put_inventory_item_with_condition_fallback": "(sku: str, inventory_item_payload: dict, *, category_id='', marketplace_id='')",
+    "_listingagent_get_ebay_app_token": "(scope=None)",
+    "_ebay_buy_api_request": "(method, path, *, params=None, timeout=30, marketplace_id='EBAY_US', scope=None)",
+    "api_listingagent_ebay_comps": "()",
+    "_listingagent_get_ebay_category_tree_id": "(marketplace_id: str)",
+    "api_listingagent_ebay_category_suggestions": "()",
+    "_listingagent_get_ebay_category_aspects": "(category_id: str, marketplace_id: str, *, values_limit: int = 140)",
+    "api_listingagent_ebay_category_aspects": "()",
+    "_ebay_catalog_aspects_to_dict": "(aspects_raw)",
+    "_listingagent_ebay_user_request": "(method, path, *, params=None, payload=None, timeout=30, marketplace_id='')",
+    "_listingagent_ebay_browse_category_fields": "(item)",
+    "_listingagent_ebay_browse_aspects_to_dict": "(item)",
+    "_listingagent_normalize_ebay_catalog_summary": "(summary)",
+    "_listingagent_ebay_candidate_key": "(candidate)",
+    "_listingagent_merge_ebay_candidates": "(existing, incoming, *, limit=10)",
+    "_listingagent_browse_items_to_candidates": "(items, *, limit=10)",
+    "_listingagent_search_ebay_browse_candidates": "(*, marketplace_id, queries, limit=12)",
+    "_listingagent_ebay_title_tokens": "(text)",
+    "_listingagent_detect_color_tokens": "(text)",
+    "_listingagent_score_ebay_candidate": "(candidate, *, upc='', preferred_title='')",
+    "_listingagent_pick_best_ebay_candidate": "(candidates, *, upc='', preferred_title='')",
+    "_listingagent_get_ebay_browse_item_detail": "(item_id, marketplace_id)",
+    "api_listingagent_ebay_catalog_search": "()",
+    "api_listingagent_ebay_product_specifics": "()",
+    "api_listingagent_ebay_catalog_item": "()",
+    "_listingagent_ebay_create_draft_offer": "(data, *, dry_run=False)",
+    "api_listingagent_ebay_generate_description": "()",
+    "api_listingagent_ebay_generate_title": "()",
+    "api_listingagent_ebay_draft": "()",
+    "api_listingagent_ebay_publish": "()",
+    "_amazon_marketplace_from_id": "(marketplace_id: str)",
+    "_amazon_spapi_context": "()",
+    "_amazon_get_listing_product_type": "(li, seller_id, sku, marketplace_id, cache=None)",
+    "_amazon_get_catalog_product_type": "(credentials, marketplace, marketplace_id, asin)",
+    "_amazon_resolve_asin_from_upc": "(credentials, marketplace, marketplace_id, upc)",
+    "_amazon_find_local_sku_by_asin": "(asin)",
+    "_amazon_build_price_feed_xml": "(*, seller_id, jobs, currency='USD')",
+    "_amazon_submit_price_feed_json": "(*, credentials, marketplace, marketplace_id, seller_id, jobs, currency='USD', offer_audience='ALL')",
+    "_amazon_submit_price_feed_xml": "(*, credentials, marketplace, marketplace_id, seller_id, jobs, currency='USD')",
+    "_amazon_submit_price_feed": "(*, credentials, marketplace, marketplace_id, seller_id, jobs, currency='USD', offer_audience='ALL')",
+    "_amazon_parse_feed_report": "(body_bytes)",
+    "_amazon_get_feed_document_info": "(feeds, feed_document_id)",
+    "_amazon_get_feed_status": "(credentials, marketplace, feed_id)",
+    "_amazon_download_feed_document": "(url)",
+    "api_listingagent_amazon_account_check": "()",
+    "api_listingagent_amazon_restriction_check": "()",
+    "api_listingagent_amazon_catalog_search": "()",
+    "api_listingagent_amazon_catalog_item": "()",
+    "api_listingagent_amazon_get_listing": "()",
+    "_amazon_normalize_condition_type": "(raw, default_condition='used_good')",
+    "_amazon_normalize_fulfillment_channel": "(raw, default_fc='DEFAULT')",
+    "_amazon_format_spapi_error": "(err)",
+    "_amazon_feeds_error": "(err, step='')",
+    "_amazon_create_feed_document": "(feeds, content_type, body_bytes)",
+    "_amazon_create_feed": "(feeds, *, feed_type, marketplace_ids, input_feed_document_id)",
+    "_amazon_update_price_spapi": "(li, seller_id, sku, mp_id, *, product_type, requirements, attrs)",
+    "_amazon_price_value_key": "(marketplace_id)",
+    "_amazon_offer_audience": "(settings=None)",
+    "_amazon_restriction_error_hints": "(restriction_info, marketplace_id)",
+    "_amazon_check_listing_restrictions": "(credentials, marketplace, seller_id, marketplace_id, asin, condition_type='')",
+    "_amazon_check_listing_restrictions_cached": "(credentials, marketplace, seller_id, marketplace_id, asin, condition_type='', force_refresh=False)",
+    "_build_amazon_offer_attributes": "(*, upc, asin, condition_type, fulfillment_channel_code, quantity, currency, price, include_identifiers=True, marketplace_id=None, offer_audience='ALL', merchant_shipping_group=None, price_value_key_override=None, include_identifier_marketplace=False, include_marketplace_fields=True, include_offer_audience=True, force_include_upc_when_asin=False, force_exclude_asin_identifier=False, price_model='purchasable_offer', condition_note='')",
+    "_amazon_manual_listing_text": "(value, limit=2000)",
+    "_amazon_manual_listing_bullets": "(description_text, limit=5)",
+    "_build_amazon_manual_listing_attributes": "(*, upc, asin, title, description_html, brand, condition_type, condition_note, fulfillment_channel_code, quantity, currency, price, include_identifiers=True, marketplace_id=None, offer_audience='ALL', merchant_shipping_group=None, price_value_key_override=None, include_identifier_marketplace=False, include_marketplace_fields=True, include_offer_audience=True, force_include_upc_when_asin=False, force_exclude_asin_identifier=False, price_model='purchasable_offer', submitted_images=None)",
+    "_amazon_offer_price_attrs": "(currency, price, marketplace_id=None, offer_audience='ALL', include_marketplace_fields=True, include_offer_audience=True)",
+    "api_listingagent_amazon_put_offer": "()",
+    "emailer": "()",
+    "get_emailer_settings": "()",
+    "save_emailer_settings": "()",
+    "send_test_email": "()",
+    "send_test_inventory_email": "()",
+    "send_health_email": "()",
+    "send_inventory_alert_email": "()",
+    "_ensure_telegram_tables": "()",
+    "_telegram_get_config_value": "(key, default='')",
+    "_telegram_set_config_value": "(key, value)",
+    "_telegram_get_bot_token": "()",
+    "_telegram_api_base": "()",
+    "_telegram_send_message": "(chat_id, text, disable_notification=True)",
+    "_telegram_parse_interval_minutes": "(interval)",
+    "_telegram_disable_notification_value": "(value, default=True)",
+    "_api_credential_age_issue": "(label, path, *, warn_days=165, reset_days=180)",
+    "_api_status_probe": "()",
+    "_telegram_alert_state_update": "(alert_key, signature, *, required_count=1, minimum_age_minutes=0, metadata=None)",
+    "_telegram_alert_state_mark_notified": "(alert_keys)",
+    "_api_alert_failure_is_confirmed": "(platform, state, message)",
+    "_collect_api_issue_alert": "(require_confirmation=False)",
+    "_generate_api_issue_text": "(alert)",
+    "_telegram_collect_recipient_rows": "()",
+    "_telegram_recipient_label": "(recipient)",
+    "_telegram_recipient_value": "(recipient, key, default='')",
+    "_telegram_subscription_targets": "(alert_type)",
+    "_telegram_send_alert_to_recipients": "(alert_type, text_builder, *, recipients=None)",
+    "_telegram_format_age_hours": "(value)",
+    "_telegram_system_uptime": "()",
+    "_telegram_latest_backup_file": "(directory, pattern='*.sqlite3.gz')",
+    "_telegram_backup_log_result": "(path)",
+    "_telegram_backup_status": "()",
+    "_telegram_recent_metric_summary": "(key, hours=1)",
+    "_telegram_metric_line": "(label, current, recent, unit='%')",
+    "_telegram_api_status_text": "(probe=None)",
+    "_telegram_backup_status_text": "(status=None)",
+    "_telegram_command_response": "(command)",
+    "_telegram_authorized_chat_ids": "()",
+    "_telegram_store_recent_chat": "(update_id, message)",
+    "_telegram_normalize_command": "(text)",
+    "_telegram_register_commands": "()",
+    "telegram_command_worker": "()",
+    "_start_telegram_command_thread": "()",
+    "telegram_page": "()",
+    "api_telegram_settings": "()",
+    "api_telegram_recent_chats": "()",
+    "api_telegram_send_test": "()",
+    "api_telegram_send_inventory": "()",
+    "api_telegram_send_health": "()",
+    "api_telegram_send_sync_overdue": "()",
+    "api_telegram_send_api_issue": "()",
+    "_telegram_signature_event_ready": "(alert_key, signature, metadata=None)",
+    "_telegram_server_monitor_events": "()",
+    "_telegram_send_server_events": "(events)",
+    "telegram_alert_worker": "()",
+    "_start_telegram_alert_thread": "()",
+    "collect_health_stats": "()",
+    "generate_health_email_html": "(stats)",
+    "generate_health_email_plain": "(stats)",
+    "format_time_ago": "(timestamp_str)",
+    "_server_metrics_env_int": "(name, default, minimum, maximum)",
+    "_ensure_server_metrics_schema": "(cur)",
+    "_server_metrics_cpu_percent": "(sample_seconds=0.2)",
+    "_server_metrics_memory_stats": "()",
+    "_server_metrics_disk_stats": "()",
+    "_server_metrics_cpu_temp_c": "()",
+    "_collect_server_metrics_snapshot": "()",
+    "_record_server_metrics_snapshot": "(force=False)",
+    "server_metrics_history_worker": "()",
+    "_start_server_metrics_history_thread": "()",
+    "collect_inventory_mismatches": "()",
+    "generate_inventory_email_html": "(issues)",
+    "generate_inventory_email_plain": "(issues)",
+    "bol_stats_page": "()",
+    "barcode_print_que": "()",
+    "barcode_print_view": "()",
+    "sync": "()",
+    "misc": "()",
+    "financial_analytics": "()",
+    "inventory_seller_analytics": "()",
+    "inventory_cleanup_decisions": "()",
+    "api_inventory_cleanup": "()",
+    "api_inventory_age_summary": "()",
+    "api_inventory_age_rescan": "()",
+    "api_inventory_seller_analytics": "()",
+    "api_financial_analytics": "()",
+    "api_amazon_financial_summary": "()",
+    "api_refresh_sold_data": "()",
+    "_normalize_upc": "(upc)",
+    "_format_upc_display": "(upc)",
+    "_normalize_scanned_upc": "(upc)",
+    "_strip_leading_zeros_numeric": "(value)",
+    "_normalize_upc_preserve_suffix_for_match": "(value)",
+    "_normalize_lot_number": "(value)",
+    "_normalize_listing_source": "(value, default='system')",
+    "_normalize_prep_row_status": "(value)",
+    "_is_items_to_list_suffixed_upc": "(upc)",
+    "_items_to_list_bucket_status": "(upc, good_qty=0, bad_qty=0)",
+    "_items_to_list_effective_status": "(upc, explicit_status='', good_qty=0, bad_qty=0)",
+    "_items_to_list_asset_scope": "(upc, row_status='')",
+    "_items_prep_scope_has_actionable_status": "(cur, upc, row_status='', lot_number='')",
+    "_ready_to_ship_prep_related_like": "(base_upc)",
+    "_ready_to_ship_prep_sort_value": "(value)",
+    "_ready_to_ship_prep_relevance": "(requested_upc, scope_upc)",
+    "_ready_to_ship_prep_relevance_label": "(requested_upc, scope_upc)",
+    "_build_ready_to_ship_prep_context": "(cur, barcode, include_details=True, max_notes_per_entry=12, max_images_per_entry=8)",
+    "_suffixed_item_prep_variants": "(barcode)",
+    "_empty_suffixed_item_prep_summary": "(barcode='')",
+    "_load_suffixed_item_prep_summary_lookup": "(barcodes)",
+    "_build_suffixed_item_prep_context": "(cur, barcode)",
+    "api_warehouse_item_prep_context": "(barcode)",
+    "_listing_source_label": "(value)",
+    "_marketplace_upc_lookup_variants": "(raw_upc)",
+    "_is_marketplace_live_for_upc": "(upc, live_key_set)",
+    "_chunk_list": "(items, size)",
+    "_fetch_live_marketplace_upc_keys": "(upcs, *, max_lookup_keys=4000)",
+    "_fetch_auto_marketplace_listing_links": "(upcs, *, max_lookup_keys=4000, max_links_per_platform=40)",
+    "_apply_marketplace_status_overlay": "(rows)",
+    "_listing_center_mark_bol_listed": "(marketplace, *, upc='', lot_number='', item_id=None)",
+    "_coerce_bool": "(value)",
+    "_request_lot_scope_is_all": "(data=None)",
+    "_preferred_lot_from_request": "(data=None)",
+    "_select_prep_status_row": "(cur, upc, lot_number='', columns='*')",
+    "_resolve_prep_status_lot": "(cur, upc, preferred_lot='')",
+    "_resolve_bol_lot_for_upc": "(cur, upc, preferred_lot='')",
+    "_select_canonical_bol_row": "(cur, upc, lot_number='', columns='id, upc, lot_number', strict_lot=False)",
+    "_has_multiple_lot_rows": "(cur, upc)",
+    "_resolve_action_lot_assignment": "(cur, upc, requested_lot='')",
+    "_check_requested_lot_mismatch": "(cur, upc, requested_lot='')",
+    "_lot_mismatch_payload": "(*, upc, requested_lot, suggested_lot='')",
+    "_items_prep_items_to_list_url": "(upc, lot_number='')",
+    "_items_prep_overage_payload": "(*, upc, lot_number='', unchecked_remaining=0, requested_qty=1, action='add')",
+    "_items_prep_record_exception": "(cur, *, upc, base_upc=None, lot_number='', action='overage_override', quantity=1, unchecked_remaining=None, source='item-prep', note=None, meta=None)",
+    "_ensure_items_prep_tables": "(force=False)",
+    "_now_iso": "()",
+    "_trash_retention_days": "()",
+    "_ensure_app_settings": "()",
+    "_set_trash_retention_days": "(days: int)",
+    "_move_to_trash": "(abs_path, upc)",
+    "_items_prep_delete_media_rows": "(cur, upc, row_status=None, media_type=None)",
+    "_items_prep_delete_image_rows": "(cur, upc, row_status=None)",
+    "_items_prep_delete_note_rows": "(cur, upc, row_status=None)",
+    "_items_prep_delete_diagnostic_assets": "(cur, upc, row_status=None, delete_notes=True)",
+    "_prep_media_cleaner_abs_path": "(raw_path)",
+    "_prep_media_cleaner_format_bytes": "(size_bytes)",
+    "_prep_media_cleaner_allowed_types": "(raw_types=None)",
+    "_prep_media_cleaner_normalize_upc_filter": "(raw_upc)",
+    "_prep_media_cleaner_row_lots": "(raw_upc, row_status, status_lot_map, any_status_lots, bol_lot_map)",
+    "_prep_media_cleaner_load_rows": "()",
+    "_prep_media_cleaner_filter_rows": "(rows, *, media_types=None, upc='', lot='', date_from='', date_to='')",
+    "_prep_media_cleaner_summary": "(rows)",
+    "_prep_media_cleaner_delete_rows": "(rows)",
+    "_purge_expired_trash": "()",
+    "_start_trash_purger_thread": "()",
+    "_purge_zero_qty_items": "()",
+    "_start_zero_qty_deleter_thread": "()",
+    "_process_automatic_inventory_removals": "()",
+    "_start_automatic_removal_thread": "()",
+    "_ensure_bol_list_status_column": "()",
+    "_legacy_migrate_list_status_to_amazon": "(cur)",
+    "item_prep_page": "()",
+    "item_prep_log_page": "()",
+    "item_prep_diagnostic_page": "()",
+    "item_prep_diagnostic_view_page": "()",
+    "item_prep_no_barcode_page": "()",
+    "search_rawbol_api": "()",
+    "printer_settings_page": "()",
+    "printer_label_designer_page": "()",
+    "get_printer_config": "()",
+    "get_printer_status": "()",
+    "save_printer_config": "()",
+    "scan_bluetooth_devices": "()",
+    "wake_printer": "()",
+    "test_printer": "()",
+    "test_printer_sample": "()",
+    "printer_label_preview_api": "()",
+    "print_barcode_api": "()",
+    "browser_print_barcode": "()",
+    "generate_barcode_api": "()",
+    "_ensure_label_presets_table": "(cur)",
+    "get_label_presets": "()",
+    "save_label_preset": "()",
+    "update_label_preset": "(preset_id)",
+    "delete_label_preset": "(preset_id)",
+    "get_print_queue": "()",
+    "add_to_print_queue": "()",
+    "clear_print_queue": "()",
+    "remove_from_print_queue": "()",
+    "item_prep_create_item_page": "()",
+    "_ensure_custom_item_registry": "(cur)",
+    "generate_custom_barcode": "()",
+    "save_temp_item": "()",
+    "save_custom_item_identity": "()",
+    "api_clear_cache": "()",
+    "api_bol_lookup": "()",
+    "api_items_prep_auto_assign_lot": "()",
+    "api_items_prep_status_get": "(upc)",
+    "api_items_prep_status": "()",
+    "api_items_prep_allocate_lots": "()",
+    "api_items_prep_create_bad_entry": "()",
+    "api_items_prep_create_return_entry": "()",
+    "api_items_prep_good_entries": "(base_upc)",
+    "api_items_prep_cleanup_temp": "()",
+    "api_bol_items_update_quantity": "()",
+    "api_items_prep_status_delete": "(upc)",
+    "_items_prep_undo_core": "(*, upc, status, qty=1, base_upc=None, lot_number=None, action=None)",
+    "_items_prep_delete_orphan_history_status": "(*, upc, status, lot_number='', undo_error='')",
+    "api_items_prep_undo": "()",
+    "api_items_prep_history_entry_delete": "()",
+    "api_items_prep_diagnostic": "()",
+    "handle_file_too_large": "(e)",
+    "api_items_prep_diagnostic_get": "(upc)",
+    "api_items_prep_diagnostic_live_listings": "(upc)",
+    "api_items_prep_diagnostic_history": "(upc)",
+    "api_items_prep_diagnostic_delete_photos": "(upc)",
+    "api_items_prep_diagnostic_add_photos": "(upc)",
+    "api_items_prep_delete_photo": "(photo_id)",
+    "api_items_prep_set_display_image": "()",
+    "api_items_prep_trash_list": "(upc)",
+    "api_items_prep_trash_restore": "(upc)",
+    "api_items_prep_diagnostic_reset": "(upc)",
+    "shelfcreator": "()",
+    "shelfmanager": "()",
+    "extractor": "()",
+    "api_items_prep_notes_get": "(upc)",
+    "api_items_prep_notes_add": "()",
+    "api_items_prep_notes_delete": "(note_id)",
+    "api_items_prep_media_get": "(upc)",
+    "api_items_prep_media_add": "(upc)",
+    "api_items_prep_media_delete": "(media_id)",
+    "api_prep_media_cleaner_overview": "()",
+    "api_prep_media_cleaner_query": "()",
+    "api_prep_media_cleaner_delete": "()",
+    "api_items_prep_location_get": "(upc)",
+    "api_items_prep_location_set": "()",
+    "api_items_prep_location_clear": "()",
+    "api_items_prep_reset": "()",
+    "items_to_list_page": "()",
+    "price_master_page": "()",
+    "ready_to_ship_page": "()",
+    "ready_to_ship_prep_summaries": "()",
+    "ready_to_ship_prep_context": "(barcode)",
+    "alerts_page": "()",
+    "store_manager_page": "()",
+    "mail_center_page": "()",
+    "_mail_center_env_int": "(name, default, min_value, max_value)",
+    "_mail_center_hourly_refresh_once": "()",
+    "_mail_parse_payload": "(value)",
+    "_mail_message_to_dict": "(row)",
+    "_mail_store_upsert_external": "(*, store, direction, status, sender_name, recipient_name, subject, body, external_source, external_id, external_payload=None, created_at=None)",
+    "_mail_ebay_headers": "(call_name)",
+    "_mail_ebay_get_member_messages": "(hours_back=72, page=1, entries_per_page=50, message_type='All')",
+    "_mail_sync_ebay": "(hours_back=72, max_pages=3)",
+    "_mail_decode_header_value": "(value)",
+    "_mail_date_to_iso": "(value)",
+    "_mail_clean_message_id": "(value)",
+    "_mail_strip_subject_prefixes": "(value)",
+    "_mail_html_to_text": "(html_body)",
+    "_mail_extract_text_body": "(msg_obj)",
+    "_mail_parse_forwarded_amazon_email": "(raw_bytes, *, uid='', flags='')",
+    "_mail_sync_amazon_forwarded_emails": "(days_back=7, max_messages=120)",
+    "_mail_sync_amazon": "(days_back=7, max_orders=60)",
+    "_verify_sns_signature": "(message)",
+    "api_amazon_sns_webhook": "()",
+    "_mail_ebay_send_reply": "(*, item_id, recipient_id, parent_message_id, subject, body)",
+    "api_mail_center_sync": "()",
+    "api_mail_center_messages": "()",
+    "api_mail_center_create_message": "()",
+    "api_mail_center_send": "()",
+    "api_mail_center_reply": "()",
+    "api_mail_center_mark_read": "(message_id)",
+    "label_master_page": "()",
+    "fb_listings_page": "()",
+    "store_listing_helper_page": "()",
+    "_labelmaster_get_settings": "()",
+    "_labelmaster_missing_settings": "(settings: dict)",
+    "_labelmaster_init_label_tables": "(cur)",
+    "_labelmaster_safe_name": "(s)",
+    "_labelmaster_store_label": "(store, order_id, *, label_id=None, label_url=None, label_format=None, label_bytes=None, cost=None, currency=None, raw=None)",
+    "_labelmaster_latest_label": "(store, order_id)",
+    "_labelmaster_find_order": "(order_id, store)",
+    "_labelmaster_amazon_ship_from": "(settings)",
+    "_labelmaster_ebay_ship_from": "(settings)",
+    "_labelmaster_package_dims": "(settings)",
+    "_labelmaster_package_weight": "(settings)",
+    "_labelmaster_validate_package": "(settings)",
+    "_labelmaster_amazon_decode_label": "(label)",
+    "_labelmaster_pick_cheapest_rate": "(rates)",
+    "_labelmaster_collect_scope_tokens": "(*values)",
+    "_labelmaster_ebay_scope_state": "()",
+    "_labelmaster_ebay_error_message": "(payload, status_code, *, stage='request')",
+    "_labelmaster_ebay_request": "(method, path, token, *, json_payload=None, marketplace_id='EBAY_US', timeout=30)",
+    "_labelmaster_buy_ebay": "(order, settings)",
+    "_labelmaster_resolve_amazon_address": "(order_id, credentials, marketplace)",
+    "_labelmaster_buy_amazon": "(order, settings, ship_to=None)",
+    "api_labelmaster_get_settings": "()",
+    "api_labelmaster_save_settings": "()",
+    "api_labelmaster_status": "()",
+    "api_labelmaster_orders": "()",
+    "api_labelmaster_buy": "()",
+    "api_labelmaster_print": "()",
+    "api_labelmaster_label_file": "()",
+    "_pricemaster_now_iso": "()",
+    "_pricemaster_parse_decimal": "(val)",
+    "_pricemaster_money_2dp": "(val: decimal.Decimal)",
+    "_pricemaster_compute_new_price": "(old_price: decimal.Decimal, mode: str, value: decimal.Decimal)",
+    "_pricemaster_init_tables": "(cur)",
+    "_pricemaster_touch_meta": "(rows)",
+    "_pricemaster_get_meta_map": "(platform: str, keys: list)",
+    "_pricemaster_save_feed_job": "(feed_id, marketplace_id, items, error=None, status='SUBMITTED')",
+    "_pricemaster_get_feed_job": "(feed_id)",
+    "_pricemaster_update_feed_job": "(feed_id, *, status=None, error=None, result_document_id=None)",
+    "_pricemaster_record_change": "(*, platform, listing_key, old_price, new_price, mode, value, success, error=None)",
+    "_pricemaster_ebay_trading_call": "(call_name: str, xml_payload: str, timeout=30)",
+    "_pricemaster_ebay_revise_prices_bulk": "(updates: list, currency='USD')",
+    "_pricemaster_ebay_get_item_price": "(item_id: str)",
+    "_pricemaster_fetch_ebay_rows": "(item_ids: list)",
+    "_pricemaster_fetch_amazon_rows": "(skus: list)",
+    "api_pricemaster_listings": "()",
+    "api_pricemaster_bulk_update": "()",
+    "api_pricemaster_ebay_verify": "()",
+    "api_pricemaster_feed_status": "()",
+    "api_listing_helper_scan": "()",
+    "api_listing_helper_inventory_match": "()",
+    "api_listing_helper_dismiss": "()",
+    "api_listing_helper_undismiss": "()",
+    "api_listing_helper_dismissed": "()",
+    "api_fb_listings": "()",
+    "api_fb_listings_add": "()",
+    "api_fb_listings_search_rawbol": "()",
+    "api_fb_listings_sync_sold": "()",
+    "api_fb_listings_log": "()",
+    "api_fb_listings_log_undo": "()",
+    "api_fb_listings_notes_get": "(upc)",
+    "api_fb_listings_notes_add": "()",
+    "api_fb_listings_notes_update": "(note_id)",
+    "api_fb_listings_notes_delete": "(note_id)",
+    "api_fb_listings_quantity": "()",
+    "api_fb_listings_unlist": "()",
+    "trash_manager_page": "()",
+    "api_trash_settings": "()",
+    "api_trash_list": "()",
+    "api_trash_restore": "()",
+    "api_trash_hard_delete": "()",
+    "api_trash_hard_delete_all": "()",
+    "api_trash_purge_expired": "()",
+    "api_debug_db_check": "()",
+    "api_bol_items": "()",
+    "api_bulk_delete_bol_items": "()",
+    "api_set_selected_lot": "()",
+    "api_bol_lots": "()",
+    "api_bol_items_set_list_status": "()",
+    "api_debug_migrate_listings": "()",
+    "api_debug_check_item": "(upc)",
+    "api_cleanup_temporary_entry": "()",
+    "api_items_prep_diagnostic_photos_zip": "(upc)",
+    "token_status": "()",
+    "api_token_status": "()",
+    "home": "()",
+    "callback": "()",
+    "privacy": "()",
+    "search": "()",
+    "maybe_run_startup_enrich": "()",
+    "api_refresh_searchrack": "()",
+    "api_enrich_status": "()",
+    "load_image_efficiently": "(image_path, max_size=(1920, 1920), convert_rgb=True)",
+    "highlight": "()",
+    "show_inventory": "()",
+    "_clean_warehouse_note": "(value)",
+    "_load_add_item_warehouse_notes": "(raw_value)",
+    "_warehouse_note_existing_suffixes": "(cur, base_barcode)",
+    "_next_warehouse_note_suffix": "(cur, base_barcode, reserved_suffixes)",
+    "additemtrue": "()",
+    "barcode_page": "()",
+    "pictures_page": "()",
+    "position_page": "()",
+    "movelocation_page": "()",
+    "fba_prep_page": "()",
+    "fba_labels_page": "()",
+    "position_diagnostic": "()",
+    "process_position": "()",
+    "process_barcode": "()",
+    "_add_item_screening_lookup": "(barcode)",
+    "api_add_item_screen": "()",
+    "additem_page": "()",
+    "additem_multi_page": "()",
+    "multibarcode_page": "()",
+    "toggle": "()",
+    "get_high_res_image_url": "(url)",
+    "_ebay_item_text_details": "(item_node, namespace)",
+    "orders": "()",
+    "get_ebay_orders": "(days=90)",
+    "finalize_barcodes": "()",
+    "ensure_lifecycle_tables": "()",
+    "start_flask": "()",
+    "start_tunnel": "()",
+    "extractor_upload": "()",
+    "api_rawbol_upload": "()",
+    "api_rawbol_backfill_retail": "()",
+    "api_rawbol_view": "()",
+    "api_rawbol_logs": "()",
+    "api_rawbol_stats": "()",
+    "api_rawbol_delete_lot": "(lot_number)",
+    "api_rawbol_update_lot": "(lot_number)",
+    "api_rawbol_desync_all": "()",
+    "api_sold_enrich_lot_numbers": "()",
+    "api_sold_enrich_recent": "()",
+    "api_rawbol_items": "(lot_number)",
+    "get_sold_orders_route": "()",
+    "test_amazon_connection": "()",
+    "sync_amazon_orders": "()",
+    "sync_amazon_listings": "()",
+    "repair_amazon_listing_titles": "()",
+    "get_amazon_orders": "()",
+    "sold_orders": "()",
+    "_invalidate_ready_to_ship_cache": "(day_values=None)",
+    "ready_to_ship_clear_location": "(order_id)",
+    "_ready_to_ship_poll_state": "(days)",
+    "ready_to_ship_count": "()",
+    "get_order": "()",
+    "ready_to_ship_save_note": "(order_id)",
+    "ready_to_ship_upload_label": "(order_id)",
+    "ready_to_ship_upload_labels_bulk": "()",
+    "ready_to_ship_unmatched_labels": "()",
+    "ready_to_ship_delete_all_labels": "()",
+    "ready_to_ship_delete_unmatched_label": "(label_id)",
+    "ready_to_ship_unmatched_label_file": "(label_id)",
+    "ready_to_ship_unmatched_label_print": "(label_id)",
+    "ready_to_ship_delete_label": "(order_id)",
+    "ready_to_ship_delete_order_label": "(order_id, label_id)",
+    "ready_to_ship_label_file": "(order_id)",
+    "ready_to_ship_order_label_file": "(order_id, label_id)",
+    "ready_to_ship_label_print": "(order_id)",
+    "ready_to_ship_order_label_print": "(order_id, label_id)",
+    "ready_to_ship_location_options": "(order_id)",
+    "ready_to_ship_order_stats": "(order_id)",
+    "mark_order_handled": "()",
+    "mark_order_unhandled": "()",
+    "get_pending_removals": "()",
+    "cancel_automatic_removal": "(order_id)",
+    "allow_automatic_removal": "(order_id)",
+    "trigger_automatic_removal": "()",
+    "repair_missing_removals": "()",
+    "get_sold_removal_history": "(order_id)",
+    "find_inventory_for_sold": "(order_id)",
+    "match_barcode_to_sold": "(order_id)",
+    "debug_sold_order": "(order_id)",
+    "debug_sold_order_by_barcode": "(barcode)",
+    "reset_sold_order": "(order_id)",
+    "manual_remove_sold_inventory": "(order_id)",
+    "api_get_grace_period": "()",
+    "api_set_grace_period": "()",
+    "api_get_zero_qty_settings": "()",
+    "api_set_zero_qty_settings": "()",
+    "api_get_zero_qty_pending": "()",
+    "api_zero_qty_delete_now": "(barcode)",
+    "api_zero_qty_cancel": "(barcode)",
+    "api_zero_qty_allow": "(barcode)",
+    "api_trigger_zero_qty_purge": "()",
+    "api_inventory_history": "()",
+    "_find_legacy_removed_detail": "(rem_cur, legacy_row)",
+    "api_removed_list": "()",
+    "removed_page": "()",
+    "api_removed_undo": "(rem_id: int)",
+    "api_sold_remove_now": "(order_id: int)",
+    "undo_match": "()",
+    "get_bol_upcs": "()",
+    "upload_position_picture": "()",
+    "pictureposition_page": "()",
+    "set_pictureposition_path": "()",
+    "searchrack_page": "()",
+    "api_inventory_quantity_history": "()",
+    "api_sold_performance_history": "()",
+    "finder_page": "()",
+    "_finder_barcode_search_variants": "(value)",
+    "api_finder": "()",
+    "api_finder_records": "()",
+    "api_finder_forget_alias": "()",
+    "api_lookup_image_by_barcode": "()",
+    "api_finder_assign": "()",
+    "api_finder_remove": "()",
+    "api_finder_undo_remove": "()",
+    "cleanup_page": "()",
+    "unified_search_page": "()",
+    "searchrack_api": "()",
+    "searchbol_api": "()",
+    "view_all": "(db_type)",
+    "update_item": "(db_type, item_id)",
+    "api_search_db": "(db_key)",
+    "api_search_all": "()",
+    "api_get_lot_numbers": "()",
+    "api_bol_stats": "()",
+    "api_bol_stats_auto_assigned": "()",
+    "api_lookup_location": "()",
+    "api_set_rack_location": "()",
+    "_get_table_and_pk": "(db_path, table_hint=None)",
+    "api_update_row": "(db_key, item_id)",
+    "api_check_shelf_code": "()",
+    "api_create_shelf": "()",
+    "api_update_shelf": "()",
+    "api_clear_shelf_inventory": "(code)",
+    "api_list_shelves": "()",
+    "api_shelf_counts": "()",
+    "ensure_shelf_groups_table": "()",
+    "api_get_groups": "()",
+    "api_create_group": "()",
+    "api_delete_group": "()",
+    "api_move_shelves": "()",
+    "api_upload_shelf": "()",
+    "api_delete_shelf": "()",
+    "api_valid_shelves": "()",
+    "api_location_hierarchy": "()",
+    "_movelocation_barcode_key": "(value)",
+    "_movelocation_barcode_variants": "(value)",
+    "_fba_macy_bol_lookup": "(barcode)",
+    "_movelocation_parse_qty": "(value, default=1)",
+    "_movelocation_pick_image": "(row_dict, image_col=None, images_col=None)",
+    "_movelocation_row_location": "(row_dict, pos_col=None, pic_col=None)",
+    "_ensure_fba_prep_tables": "(cur)",
+    "_fba_json_list": "(value)",
+    "_fba_json_dict": "(value)",
+    "_fba_trim": "(value, limit=250)",
+    "_fba_client_identity": "(data)",
+    "_fba_touch_session_worker": "(cur, session_id, client_id, operator_name='', active_box_id='')",
+    "_fba_bin_parent_code": "(code, known_location_keys=None)",
+    "_fba_working_locations_payload": "(value)",
+    "_fba_session_item_payload": "(raw_item)",
+    "_fba_plan_item_signature": "(items)",
+    "_fba_session_row_payload": "(row, *, include_items=False)",
+    "_fba_inventory_state_for_barcode": "(cur, barcode)",
+    "_fba_proposed_seller_sku": "(source_sku)",
+    "_fba_apply_inventory_offer_strategy": "(cur, items)",
+    "_fba_marketplace_status_for_barcodes": "(barcodes)",
+    "_fba_local_amazon_listing": "(barcode)",
+    "_fba_local_amazon_listing_by_asin": "(asin)",
+    "_fba_inbound_unavailable_skus": "(exc)",
+    "_fba_inbound_activation_message": "(unavailable_mskus, items)",
+    "_fba_missing_prep_mskus": "(mskus, prep_by_msku)",
+    "_fba_listings_client": "()",
+    "_fba_listing_issue_message": "(issue)",
+    "_fba_issue_is_missing_safety_info": "(issue)",
+    "_fba_error_is_missing_safety_info": "(value)",
+    "_fba_listing_readiness": "(msku, *, force_refresh=False, client=None)",
+    "_fba_apply_listing_readiness": "(item, readiness, *, checked_at=None)",
+    "_fba_patch_listing_to_fba": "(msku, readiness, *, client=None)",
+    "_fba_patch_listing_no_battery_safety": "(msku, readiness, *, client=None)",
+    "_fba_create_separate_fba_offer": "(source_sku, target_sku, readiness, *, client=None)",
+    "_fba_amazon_barcode_guidance_result": "(instruction='', *, identifier_type='', identifier='', detail='')",
+    "_fba_amazon_barcode_guidance_unavailable": "(detail, *, status='unavailable', label='Barcode rule unavailable', identifier_type='', identifier='')",
+    "_fba_amazon_barcode_guidance_for_listings": "(listings, *, force_refresh=False)",
+    "_fba_amazon_barcode_guidance": "(listing, *, force_refresh=False)",
+    "api_fba_prep_barcode_guidance": "()",
+    "_fba_review_reasons": "(*, remaining_quantity=0, listed_ebay=False, listed_amazon=False)",
+    "_fba_batch_payload": "(conn, batch_id, *, include_dynamic=True)",
+    "api_movelocation_lookup": "()",
+    "api_fba_prep_location_family": "()",
+    "api_movelocation_lookup_shelf": "()",
+    "api_movelocation_execute": "()",
+    "_fba_review_rows": "(conn, *, status='open', limit=250)",
+    "_fba_amazon_source_from_settings": "(settings=None)",
+    "_fba_amazon_client": "(*, legacy=False)",
+    "_fba_amazon_payload": "(response)",
+    "_fba_amazon_collect": "(callable_fn, result_key, *, page_size=100, limit=5000)",
+    "_fba_amazon_state": "(row)",
+    "_fba_save_amazon_state": "(conn, session_id, state, *, preserve_concurrent_pack=False)",
+    "_fba_amazon_session": "(conn, session_id)",
+    "_fba_amazon_option_summary": "(option, kind)",
+    "_fba_transport_option_can_purchase": "(option)",
+    "_fba_amazon_transport_summary": "(option)",
+    "_fba_amazon_refresh_operation": "(api, state)",
+    "_fba_amazon_sync_snapshot": "(api, state)",
+    "api_fba_prep_amazon_readiness": "()",
+    "api_fba_prep_amazon_plans": "()",
+    "api_fba_prep_amazon_sync": "(session_id)",
+    "api_fba_prep_amazon_action": "(session_id, action)",
+    "api_fba_prep_amazon_box_labels": "(session_id, shipment_id)",
+    "_fba_planned_label_match": "(barcode, session_rows)",
+    "api_fba_labels_resolve": "()",
+    "api_fba_prep_amazon_print_item_label": "(session_id)",
+    "api_fba_prep_amazon_pack_scan": "(session_id)",
+    "api_fba_prep_amazon_reset_pack_scan": "(session_id)",
+    "api_fba_prep_count_scan": "(session_id)",
+    "api_fba_prep_resolve_amazon_skus": "(session_id)",
+    "api_fba_prep_validate_inbound": "(session_id)",
+    "_fba_enablement_progress": "(items)",
+    "_fba_update_enablement_results": "(items, results)",
+    "api_fba_prep_enable_fba": "(session_id)",
+    "api_fba_prep_resolve_fba_safety": "(session_id)",
+    "api_fba_prep_enable_fba_status": "(session_id)",
+    "api_fba_prep_session_live": "(session_id)",
+    "api_fba_prep_sessions": "()",
+    "api_fba_prep_session_detail": "(session_id)",
+    "api_fba_prep_batches": "()",
+    "api_fba_prep_batch_detail": "(batch_id)",
+    "api_fba_prep_reviews": "()",
+    "api_fba_prep_review_update": "(review_id)",
+    "api_movelocation_bulk_cleanup": "()",
+    "api_location_items": "()",
+    "api_move_location": "()",
+    "api_delete_row": "(db_key, item_id)",
+    "api_undelete": "(archive_id)",
+    "api_location_duplicates": "()",
+    "api_archived_list": "()",
+    "api_delete_archive": "(archive_id)",
+    "refresh_searchrack": "()",
+    "test_sold_item": "()",
+    "get_sync_status": "()",
+    "save_sync_settings": "()",
+    "update_sync_timestamp": "(key)",
+    "_sync_status_parse_timestamp": "(raw_value)",
+    "_sync_manager_overdue_alert": "()",
+    "sync_all": "()",
+    "sync_ebay_orders_api": "()",
+    "sync_ebay_listings_api": "()",
+    "sync_amazon_orders_api": "()",
+    "sync_amazon_listings_api": "()",
+    "sync_missing_upcs": "(max_items=25)",
+    "sync_amazon_upcs_api": "()",
+    "recover_corrupted_upcs_api": "()",
+    "fix_amazon_barcodes": "()",
+    "sync_debug": "()",
+    "marketplace_sale": "()",
+    "marketplace_session": "()",
+    "marketplace_stats": "()",
+    "marketplace_schedule_pickup": "()",
+    "marketplace_live_pickups": "()",
+    "marketplace_generate_barcode": "()",
+    "api_marketplace_lookup": "()",
+    "api_marketplace_search": "()",
+    "api_marketplace_pickups_search": "()",
+    "api_marketplace_pickups": "()",
+    "api_marketplace_pickups_create": "()",
+    "api_marketplace_sale": "()",
+    "api_marketplace_decrement": "()",
+    "api_marketplace_sales": "()",
+    "api_marketplace_sale_delete": "(sale_id)",
+    "api_marketplace_sale_update": "(sale_id)",
+    "payouts_page": "()",
+    "api_get_payouts": "()",
+    "api_sync_payouts": "()",
+    "returns_page": "()",
+    "_normalize_return_text": "(value)",
+    "_return_signature_from_row": "(row)",
+    "_returns_find_duplicate_ids": "(cur, source_row)",
+    "_returns_row_value": "(row, key, default=None)",
+    "_returns_group_ids_for_return": "(cur, return_id)",
+    "_returns_query_events_for_ids": "(cur, return_ids)",
+    "_returns_status_from_row": "(row)",
+    "_returns_calculate_state": "(events, fallback_row=None)",
+    "_returns_recompute_group_state": "(cur, return_ids, fallback_row=None)",
+    "_returns_recompute_state_from_events": "(cur, return_id)",
+    "api_get_returns": "()",
+    "api_create_return": "()",
+    "api_sync_amazon_returns": "()",
+    "api_sync_ebay_returns": "()",
+    "api_mark_return_received": "(return_id)",
+    "api_restock_return": "(return_id)",
+    "api_update_return": "(return_id)",
+    "api_delete_return": "(return_id)",
+    "api_relist_return": "(return_id)",
+    "api_resold_return": "(return_id)",
+    "api_restart_return_lifecycle": "(return_id)",
+    "api_get_return_history": "(return_id)",
+    "api_undo_last_return_event": "(return_id)",
+    "test_sold_orders_page": "()",
+    "api_create_test_sold_order": "()",
+    "auto_sync_worker": "()",
+    "_start_auto_sync_thread": "()",
+    "emailer_alert_worker": "()",
+    "_start_emailer_alert_thread": "()",
+    "mail_center_refresh_worker": "()",
+    "_start_mail_center_refresh_thread": "()",
+    "start_background_services": "()",
+    "delayed_start": "()",
+    "api_duplicate_shelf": "()",
+    "load_cache_config": "()",
+    "save_cache_config": "(config)",
+    "api_admin_clear_cache": "()",
+    "api_enrich_sold_db": "()",
+    "api_cache_settings": "()",
+    "cache_scheduler_loop": "()"
+  }
+}
