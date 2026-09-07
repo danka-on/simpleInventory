@@ -1769,7 +1769,7 @@ def api_movelocation_execute():
                             json.dumps(inventory_state['locations'], ensure_ascii=False),
                             ss_fba_schema._fba_trim((raw_item or {}).get('asin') or amazon_defaults.get('asin'), 30) or None,
                             ss_fba_schema._fba_trim((raw_item or {}).get('seller_sku') or amazon_defaults.get('seller_sku'), 120) or None,
-                            ss_fba_schema._fba_trim((raw_item or {}).get('fnsku'), 80) or None,
+                            ss_fba_schema._fba_trim((raw_item or {}).get('fnsku') or (raw_item or {}).get('amazon_fnsku'), 80) or None,
                             ss_fba_schema._fba_trim((raw_item or {}).get('condition') or amazon_defaults.get('condition'), 80) or None,
                             prep_type,
                             item_label_owner,
@@ -2491,3 +2491,6 @@ def api_move_location():
             rem_conn.close()
         except Exception:
             pass
+
+
+

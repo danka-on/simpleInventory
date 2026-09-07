@@ -123,6 +123,8 @@ def _ensure_fba_prep_tables(cur):
     ''')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_batch ON fba_prep_items(batch_id, item_index, id)')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_barcode ON fba_prep_items(barcode, created_at DESC)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_seller_sku ON fba_prep_items(seller_sku, created_at DESC)')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_prep_items_fnsku ON fba_prep_items(fnsku, created_at DESC)')
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS fba_listing_reviews (
@@ -171,6 +173,25 @@ def _ensure_fba_prep_tables(cur):
     add_column_if_missing(pack_scan_columns, 'client_id', 'ALTER TABLE fba_pack_scans ADD COLUMN client_id TEXT')
     add_column_if_missing(pack_scan_columns, 'operator_name', 'ALTER TABLE fba_pack_scans ADD COLUMN operator_name TEXT')
     cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_pack_scans_session ON fba_pack_scans(session_id, id)')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS fba_box_move_scans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            move_token TEXT NOT NULL UNIQUE,
+            pack_scan_id INTEGER NOT NULL,
+            barcode TEXT NOT NULL,
+            msku TEXT NOT NULL,
+            from_box_id TEXT NOT NULL,
+            to_box_id TEXT NOT NULL,
+            client_id TEXT,
+            operator_name TEXT,
+            moved_at TEXT NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES fba_prep_sessions(id),
+            FOREIGN KEY(pack_scan_id) REFERENCES fba_pack_scans(id)
+        )
+    ''')
+    cur.execute('CREATE INDEX IF NOT EXISTS idx_fba_box_move_scans_session ON fba_box_move_scans(session_id, id)')
 
     cur.execute('''
         CREATE TABLE IF NOT EXISTS fba_count_scans (
@@ -256,3 +277,6 @@ def _fba_touch_session_worker(cur, session_id, client_id, operator_name='', acti
         int(session_id), client_id, operator_name or None,
         _fba_trim(active_box_id, 40).upper() or None, ss_listing_checks._listagent_now_iso(), time.time(),
     ))
+
+
+

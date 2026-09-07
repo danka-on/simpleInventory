@@ -87,6 +87,14 @@ When user says "push", "p", "push to pi", or "commit changes", treat it as:
 
 ## Architecture
 
+### Main working checkout (2026-09-07)
+
+- Continue development in `C:\Users\boxatron\Documents\ChatGPT\sweetshelves\push-small-parcel-fix`, on branch `codex/main-working-project`. The folder has not moved.
+- This is a linked Git worktree of `C:\Users\boxatron\Desktop\simpleInventory`; both folders share the repository history. The Desktop checkout remains on `debby` at `4bff175` (`before overhaul`).
+- The modularized Documents checkpoint is preserved on `codex/codebase-overhaul` at `24c08d0`. The main working branch merges both checkpoints, including Desktop FBA/receiving/token changes and the Documents audit/refactor.
+- The merged contract has 473 routes and 1,153 function signatures. Validation: 173 Python tests and 10 JavaScript/browser suites passed. See `docs/merged-project-2026-09-07.md` for details and incremental Pi commands.
+- The user reported running the earlier Pi commands; this new merged revision has not been deployed by the agent. Keep the last-successful-deployment checkpoint unchanged until the user confirms success for the relevant deployment.
+
 - **`app.py`** (30 lines) — WSGI/local-development entrypoint. `gunicorn -c gunicorn_config.py app:app` and `python app.py` still work.
 - **`sweetshelves/`** — 86 feature/core modules, plus package initialization, startup, route registration, and legacy exports. The migration preserved all 471 Flask URL rules and 1,132 helper/endpoint function signatures. See `docs/architecture.md` for ownership and extension rules.
 - **`sweetshelves/bootstrap.py`** — initializes schemas, registers routes, and starts optional workers once. Feature imports do not open databases or start background services.

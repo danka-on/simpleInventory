@@ -69,6 +69,7 @@ def is_expired(tokens):
     return time.time() >= float(tokens.get("expires_at") or 0) - 60
 
 def refresh_access_token(refresh_token, previous_scope=""):
+    previous_tokens = load_tokens()
     encoded = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -104,6 +105,11 @@ def refresh_access_token(refresh_token, previous_scope=""):
     new_tokens = res.json()
     new_tokens["expires_at"] = time.time() + new_tokens["expires_in"]
     new_tokens["refresh_token"] = refresh_token
+    # eBay does not repeat refresh-token lifetime metadata during access-token
+    # refreshes, so preserve the exact expiry captured during authorization.
+    for key in ("refresh_token_expires_at", "refresh_token_issued_at"):
+        if previous_tokens.get(key) is not None:
+            new_tokens[key] = previous_tokens[key]
     if not new_tokens.get("scope"):
         # eBay refresh responses may omit scope; keep best-known scope metadata for downstream capability checks.
         if used_scope:

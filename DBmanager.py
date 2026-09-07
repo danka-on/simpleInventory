@@ -680,7 +680,6 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                 """, (new_qty, title, itemid, image, custom_title, int(RESOLVED_METADATA is not None), custom_title, warehouse_note, warehouse_note, now_iso, existing_id))
                 action = f"incremented quantity to {new_qty} for barcode={barcode_norm}, position={position_norm}"
 
-                _log_rack_history(barcode_norm, title, 1, existing_id, existing_qty, new_qty, 'add_to_shelf', position_norm)
             else:
                 cursor.execute("""
                     INSERT INTO SEARCHRACK (TITLE, BARCODE, ITEM_POSITION, IMAGES, PICTUREPOSITION, ITEMID, QUANTITY, IMAGE, CUSTOM_TITLE, WAREHOUSE_NOTE, CREATED_AT)
@@ -692,11 +691,16 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                 else:
                     action = f"added new shelf entry: barcode={barcode_norm}, position={position_norm}"
 
-                _log_rack_history(barcode_norm, title, 1, new_id, 0, 1, 'add_to_shelf', PICTUREPOSITION if has_picture else position_norm)
-
+            # SEARCHRACK's durable outbox trigger records this mutation in the
+            # same transaction.  Writing rackhistory.db here while holding the
+            # SEARCHRACK write lock created a cross-database lock cycle during
+            # large multi-barcode adds, sometimes stalling every item for the
+            # full SQLite busy timeout.
             print(f"{action} to searchRack: position={ITEM_POSITION}, barcode={BARCODE}, title={title}")
+            return True
         except sqlite3.Error as e:
             print("Error in addToSearchRack:", e)
+            return False
 
 def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None, List_State=None, Sold_Date=None, List_Date=None, URL=None, condition=None, description=None, condition_description=None):
     with connect_db('ebayStore.db') as conn:

@@ -4582,6 +4582,17 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/move-box-scan",
+      "endpoint": "api_fba_prep_amazon_move_box_scan",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/reset-pack-scan",
       "endpoint": "api_fba_prep_amazon_reset_pack_scan",
       "methods": [
@@ -4700,6 +4711,18 @@
     {
       "rule": "/api/fba-prep/batches",
       "endpoint": "api_fba_prep_batches",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/items",
+      "endpoint": "api_fba_prep_items",
       "methods": [
         "GET",
         "HEAD",
@@ -5913,6 +5936,7 @@
     "_telegram_parse_interval_minutes": "(interval)",
     "_telegram_disable_notification_value": "(value, default=True)",
     "_api_credential_age_issue": "(label, path, *, warn_days=165, reset_days=180)",
+    "_telegram_token_statuses": "(force=False)",
     "_api_status_probe": "()",
     "_telegram_alert_state_update": "(alert_key, signature, *, required_count=1, minimum_age_minutes=0, metadata=None)",
     "_telegram_alert_state_mark_notified": "(alert_keys)",
@@ -6435,6 +6459,14 @@
     "_fba_inbound_unavailable_skus": "(exc)",
     "_fba_inbound_activation_message": "(unavailable_mskus, items)",
     "_fba_missing_prep_mskus": "(mskus, prep_by_msku)",
+    "_fba_normalize_prep_detail": "(raw, *, msku='')",
+    "_fba_item_prep_details": "(msku, *, api=None, marketplace_id='')",
+    "_fba_existing_prep_conflict": "(exc)",
+    "_fba_package_measurement_issues": "(state)",
+    "_fba_positive_measurement": "(value, label, *, maximum=1000000)",
+    "_fba_patch_listing_package_measurements": "(msku, item, measurements, *, client=None)",
+    "_fba_catalog_measurement_reference_from_payload": "(payload, marketplace_id='')",
+    "_fba_catalog_measurement_reference": "(asin, *, client=None)",
     "_fba_listings_client": "()",
     "_fba_listing_issue_message": "(issue)",
     "_fba_issue_is_missing_safety_info": "(issue)",
@@ -6459,6 +6491,7 @@
     "_fba_amazon_source_from_settings": "(settings=None)",
     "_fba_amazon_client": "(*, legacy=False)",
     "_fba_amazon_payload": "(response)",
+    "_fba_amazon_exception_detail": "(exc)",
     "_fba_amazon_collect": "(callable_fn, result_key, *, page_size=100, limit=5000)",
     "_fba_amazon_state": "(row)",
     "_fba_save_amazon_state": "(conn, session_id, state, *, preserve_concurrent_pack=False)",
@@ -6468,15 +6501,25 @@
     "_fba_amazon_transport_summary": "(option)",
     "_fba_amazon_refresh_operation": "(api, state)",
     "_fba_amazon_sync_snapshot": "(api, state)",
+    "_fba_prepare_and_create_plan": "(api, marketplace_id, session_data, state)",
+    "_fba_set_amazon_operation": "(state, response_payload, kind, next_stage, success_flag='')",
+    "_fba_packed_quantities": "(conn, session_id)",
+    "_fba_recovery_fnsku_mismatches": "(recovery, plan_items)",
+    "_fba_recovery_option_groups": "(api, plan_id, option)",
+    "_fba_choose_compatible_recovery_packing": "(api, state)",
+    "_fba_recovery_save_updated_items": "(conn, session_id, updated_items)",
+    "_fba_amazon_sync_recovery": "(api, marketplace_id, conn, session_id, session_data, state)",
     "api_fba_prep_amazon_readiness": "()",
     "api_fba_prep_amazon_plans": "()",
     "api_fba_prep_amazon_sync": "(session_id)",
     "api_fba_prep_amazon_action": "(session_id, action)",
+    "_fba_amazon_box_label_document": "(api, legacy_api, plan_id, shipment_id, confirmation_id)",
     "api_fba_prep_amazon_box_labels": "(session_id, shipment_id)",
     "_fba_planned_label_match": "(barcode, session_rows)",
     "api_fba_labels_resolve": "()",
     "api_fba_prep_amazon_print_item_label": "(session_id)",
     "api_fba_prep_amazon_pack_scan": "(session_id)",
+    "api_fba_prep_amazon_move_box_scan": "(session_id)",
     "api_fba_prep_amazon_reset_pack_scan": "(session_id)",
     "api_fba_prep_count_scan": "(session_id)",
     "api_fba_prep_resolve_amazon_skus": "(session_id)",
@@ -6490,6 +6533,7 @@
     "api_fba_prep_sessions": "()",
     "api_fba_prep_session_detail": "(session_id)",
     "api_fba_prep_batches": "()",
+    "api_fba_prep_items": "()",
     "api_fba_prep_batch_detail": "(batch_id)",
     "api_fba_prep_reviews": "()",
     "api_fba_prep_review_update": "(review_id)",

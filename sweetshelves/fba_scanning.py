@@ -60,15 +60,47 @@ def _fba_planned_label_match(barcode, session_rows):
             )
             plan_item = plan_by_msku.get(msku.casefold()) if msku else None
             fnsku = ss_fba_schema._fba_trim((plan_item or {}).get('fnsku'), 30).upper()
+            box_assignments = []
+            for raw_box in state.get('boxes') or []:
+                if not isinstance(raw_box, dict):
+                    continue
+                box_id = ss_fba_schema._fba_trim(
+                    raw_box.get('local_id') or raw_box.get('box_id') or raw_box.get('box_number'),
+                    40,
+                ).upper()
+                if not box_id:
+                    continue
+                packed_quantity = sum(
+                    max(0, ss_listing_settings._listingagent_parse_int(content.get('quantity'), 0) or 0)
+                    for content in (raw_box.get('contents') or [])
+                    if isinstance(content, dict)
+                    and ss_fba_schema._fba_trim(
+                        content.get('msku') or content.get('seller_sku'), 255
+                    ).casefold() == msku.casefold()
+                )
+                if packed_quantity > 0:
+                    box_assignments.append({
+                        'box_id': box_id,
+                        'quantity': packed_quantity,
+                    })
+            box_assignments.sort(key=lambda assignment: assignment['box_id'])
             match = {
                 'session_id': int(session.get('id') or 0),
                 'session_name': ss_fba_schema._fba_trim(session.get('session_name') or session.get('batch_name'), 120),
+                # The operator-facing shipment is the FBA prep session. Keep a
+                # separate named field so the scanner does not confuse it with
+                # Amazon's shipment IDs after placement splits are selected.
+                'shipment_name': ss_fba_schema._fba_trim(session.get('session_name') or session.get('batch_name'), 120),
                 'inbound_plan_id': ss_fba_schema._fba_trim(state.get('inbound_plan_id'), 38),
                 'barcode': ss_fba_schema._fba_trim(item.get('barcode'), 160),
                 'title': ss_fba_schema._fba_trim(item.get('title') or item.get('barcode'), 500),
                 'image': ss_fba_schema._fba_trim(item.get('image'), 1500),
                 'msku': msku,
                 'fnsku': fnsku,
+                'box_assignments': box_assignments,
+                'box_ids': [assignment['box_id'] for assignment in box_assignments],
+                'packed_quantity': sum(assignment['quantity'] for assignment in box_assignments),
+                'packing_status': 'packed' if box_assignments else 'not_packed',
                 'printable': bool(msku and len(fnsku) == 10 and fnsku.isalnum()),
             }
             if match['printable']:
@@ -837,6 +869,9 @@ def api_fba_prep_count_scan(session_id):
                     match['title'] = ss_fba_schema._fba_trim(amazon_listing.get('title'), 500)
                     match['condition'] = ss_fba_schema._fba_trim(amazon_listing.get('condition') or 'New', 80)
                     match.setdefault('fba', {})['amazon_listing'] = amazon_listing
+                # The UI renders this persisted list in reverse order, so move a
+                # rescanned item to the end to keep the latest scan at the top.
+                items.append(items.pop(items.index(match)))
             else:
                 new_item = ss_fba_inventory._fba_session_item_payload({
                     'barcode': barcode, 'barcode_display': barcode, 'barcode_key': barcode_key,
@@ -883,6 +918,176 @@ def api_fba_prep_count_scan(session_id):
         if conn is not None:
             conn.rollback()
         return jsonify({'success': False, 'error': ss_errors._safe_error(exc, 'fba count scan')}), 500
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def api_fba_prep_amazon_move_box_scan(session_id):
+    """Move one previously packed physical unit between compatible cartons."""
+    conn = None
+    try:
+        data = request.get_json() or {}
+        move_token = ss_fba_schema._fba_trim(data.get('move_token'), 100)
+        barcode = ss_fba_schema._fba_trim(data.get('barcode'), 160)
+        msku = ss_fba_schema._fba_trim(data.get('msku') or data.get('seller_sku'), 255)
+        from_box_id = ss_fba_schema._fba_trim(data.get('from_box_id'), 40).upper()
+        to_box_id = ss_fba_schema._fba_trim(data.get('to_box_id'), 40).upper()
+        client_id, operator_name = ss_fba_schema._fba_client_identity(data)
+        active_box_id = ss_fba_schema._fba_trim(data.get('active_box_id'), 40).upper()
+        if not move_token or not re.fullmatch(r'[A-Za-z0-9._:-]{8,100}', move_token):
+            raise FbaInboundValidationError('A valid box-move scan token is required')
+        if not barcode:
+            raise FbaInboundValidationError('Scan an item barcode to move')
+        if not msku:
+            raise FbaInboundValidationError('The scanned item is not matched to an Amazon Seller SKU')
+        if not from_box_id or not to_box_id:
+            raise FbaInboundValidationError('Choose both the source and destination cartons')
+        if from_box_id == to_box_id:
+            raise FbaInboundValidationError('Choose two different cartons')
+
+        conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        ss_fba_schema._ensure_fba_prep_tables(cur)
+        conn.commit()
+        conn.execute('BEGIN IMMEDIATE')
+        cur = conn.cursor()
+
+        existing = cur.execute(
+            'SELECT * FROM fba_box_move_scans WHERE move_token = ? LIMIT 1', (move_token,)
+        ).fetchone()
+        if existing:
+            if int(existing['session_id']) != int(session_id):
+                raise FbaInboundValidationError('That box-move token belongs to another session')
+            session_row = cur.execute(
+                'SELECT * FROM fba_prep_sessions WHERE id = ?', (session_id,)
+            ).fetchone()
+            return jsonify({
+                'success': True, 'idempotent': True, 'move': dict(existing),
+                'amazon_workflow': ss_fba_shipments._fba_amazon_state(session_row),
+            })
+
+        _row, _session_data, state = ss_fba_shipments._fba_amazon_session(conn, session_id)
+        ss_fba_schema._fba_touch_session_worker(cur, session_id, client_id, operator_name, active_box_id)
+        if not state.get('packing_confirmed'):
+            raise FbaInboundValidationError('Packing has not started for this Amazon plan')
+        if state.get('boxes_submitted'):
+            raise FbaInboundValidationError('Box contents have already been submitted to Amazon and cannot be moved')
+
+        boxes = state.get('boxes') if isinstance(state.get('boxes'), list) else []
+        source_box = next((
+            box for box in boxes if isinstance(box, dict)
+            and ss_fba_schema._fba_trim(box.get('local_id'), 40).upper() == from_box_id
+        ), None)
+        destination_box = next((
+            box for box in boxes if isinstance(box, dict)
+            and ss_fba_schema._fba_trim(box.get('local_id'), 40).upper() == to_box_id
+        ), None)
+        if source_box is None or destination_box is None:
+            raise FbaInboundValidationError('One of the selected cartons no longer exists; refresh and choose again')
+        source_group_id = ss_fba_schema._fba_trim(source_box.get('packing_group_id'), 38)
+        destination_group_id = ss_fba_schema._fba_trim(destination_box.get('packing_group_id'), 38)
+        if not source_group_id or source_group_id != destination_group_id:
+            raise FbaInboundValidationError('Items can only move between cartons in the same Amazon packing group')
+
+        packing_group = next((
+            group for group in state.get('packing_groups') or [] if isinstance(group, dict)
+            and ss_fba_schema._fba_trim(group.get('packing_group_id'), 38) == source_group_id
+            and any(
+                isinstance(item, dict)
+                and ss_fba_schema._fba_trim(item.get('msku') or item.get('seller_sku'), 255).casefold() == msku.casefold()
+                for item in group.get('items') or []
+            )
+        ), None)
+        if packing_group is None:
+            raise FbaInboundValidationError(f'{msku} cannot be placed in the selected destination carton')
+
+        source_contents = source_box.get('contents') if isinstance(source_box.get('contents'), list) else []
+        source_item = next((
+            item for item in source_contents if isinstance(item, dict)
+            and ss_fba_schema._fba_trim(item.get('msku'), 255).casefold() == msku.casefold()
+        ), None)
+        source_quantity = max(0, ss_listing_settings._listingagent_parse_int((source_item or {}).get('quantity'), 0) or 0)
+        if source_item is None or source_quantity <= 0:
+            raise FbaInboundValidationError(f'{msku} is not packed in {from_box_id}')
+
+        packed_scan = cur.execute('''
+            SELECT * FROM fba_pack_scans
+            WHERE session_id = ? AND box_id = ? COLLATE NOCASE AND msku = ? COLLATE NOCASE
+            ORDER BY id DESC LIMIT 1
+        ''', (session_id, from_box_id, msku)).fetchone()
+        if not packed_scan:
+            raise FbaInboundValidationError(
+                f'The saved physical scan for {msku} in {from_box_id} could not be found'
+            )
+        packed_scan = dict(packed_scan)
+
+        if source_quantity == 1:
+            source_box['contents'] = [item for item in source_contents if item is not source_item]
+        else:
+            source_item['quantity'] = source_quantity - 1
+            source_box['contents'] = source_contents
+        destination_contents = (
+            destination_box.get('contents') if isinstance(destination_box.get('contents'), list) else []
+        )
+        destination_item = next((
+            item for item in destination_contents if isinstance(item, dict)
+            and ss_fba_schema._fba_trim(item.get('msku'), 255).casefold() == msku.casefold()
+        ), None)
+        if destination_item is None:
+            destination_item = {'msku': msku, 'quantity': 0}
+            destination_contents.append(destination_item)
+        destination_item['quantity'] = max(
+            0, ss_listing_settings._listingagent_parse_int(destination_item.get('quantity'), 0) or 0
+        ) + 1
+        destination_box['contents'] = destination_contents
+        # The physical contents changed, so both cartons must be weighed again.
+        source_box['weight_lb'] = ''
+        destination_box['weight_lb'] = ''
+        state['boxes'] = boxes
+        moved_at = ss_listing_checks._listagent_now_iso()
+        state['last_box_move'] = {
+            'move_token': move_token, 'barcode': barcode, 'msku': msku,
+            'from_box_id': from_box_id, 'to_box_id': to_box_id,
+            'pack_scan_id': int(packed_scan.get('id') or 0),
+            'client_id': client_id, 'operator_name': operator_name, 'moved_at': moved_at,
+        }
+
+        cur.execute('''
+            UPDATE fba_pack_scans
+            SET box_id = ?, packing_group_id = ?
+            WHERE id = ? AND session_id = ? AND box_id = ? COLLATE NOCASE
+        ''', (
+            to_box_id, destination_group_id, int(packed_scan.get('id') or 0),
+            session_id, from_box_id,
+        ))
+        if cur.rowcount != 1:
+            raise FbaInboundValidationError('Another scanner moved this unit first; refresh the cartons')
+        cur.execute('''
+            INSERT INTO fba_box_move_scans (
+                session_id, move_token, pack_scan_id, barcode, msku,
+                from_box_id, to_box_id, client_id, operator_name, moved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            session_id, move_token, int(packed_scan.get('id') or 0), barcode, msku,
+            from_box_id, to_box_id, client_id or None, operator_name or None, moved_at,
+        ))
+        state['last_box_move']['id'] = int(cur.lastrowid or 0)
+        ss_fba_shipments._fba_save_amazon_state(conn, session_id, state)
+        conn.commit()
+        return jsonify({
+            'success': True, 'amazon_workflow': state, 'move': state['last_box_move'],
+            'reweigh_box_ids': [from_box_id, to_box_id],
+        })
+    except FbaInboundValidationError as exc:
+        if conn is not None:
+            conn.rollback()
+        return jsonify({'success': False, 'error': str(exc)}), 409
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+        return jsonify({'success': False, 'error': ss_errors._safe_error(exc, 'fba box move scan')}), 500
     finally:
         if conn is not None:
             conn.close()

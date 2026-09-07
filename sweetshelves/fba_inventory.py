@@ -176,6 +176,18 @@ def _fba_session_item_payload(raw_item):
         'fba_enablement_checked_at': ss_fba_schema._fba_trim(raw.get('fba_enablement_checked_at'), 40),
         'amazon_fnsku': ss_fba_schema._fba_trim(raw.get('amazon_fnsku') or raw.get('fnsku'), 80),
         'amazon_product_type': ss_fba_schema._fba_trim(raw.get('amazon_product_type'), 120),
+        'amazon_prep': ss_fba_readiness._fba_normalize_prep_detail(
+            raw.get('amazon_prep'), msku=raw.get('seller_sku')
+        ) if isinstance(raw.get('amazon_prep'), dict) else {},
+        'amazon_package_measurements': {
+            'length_in': ss_listing_settings._listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('length_in'), 0.0),
+            'width_in': ss_listing_settings._listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('width_in'), 0.0),
+            'height_in': ss_listing_settings._listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('height_in'), 0.0),
+            'weight_lb': ss_listing_settings._listingagent_parse_float((raw.get('amazon_package_measurements') or {}).get('weight_lb'), 0.0),
+            'updated_at': ss_fba_schema._fba_trim((raw.get('amazon_package_measurements') or {}).get('updated_at'), 40),
+            'source': ss_fba_schema._fba_trim((raw.get('amazon_package_measurements') or {}).get('source'), 40),
+            'amazon_status': ss_fba_schema._fba_trim((raw.get('amazon_package_measurements') or {}).get('amazon_status'), 40),
+        } if isinstance(raw.get('amazon_package_measurements'), dict) else {},
         'batteries_required': ss_normalization._coerce_bool(raw.get('batteries_required')),
         'dg_not_applicable_confirmed': bool(raw.get('dg_not_applicable_confirmed')),
         'fbm_seller_sku': ss_fba_schema._fba_trim(raw.get('fbm_seller_sku'), 255),
@@ -518,3 +530,6 @@ def _fba_batch_payload(conn, batch_id, *, include_dynamic=True):
         item['listingagent_url'] = '/listingagent?upc=' + quote(str(item.get('barcode') or '').strip())
     batch['items'] = items
     return batch
+
+
+

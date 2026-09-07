@@ -1,5 +1,9 @@
 """Telegram for Sweet Shelves."""
 
+from token_expiry import collect_token_statuses
+from token_expiry import expiring_token_reminders
+from token_expiry import format_token_statuses
+
 import datetime
 import json
 import os
@@ -292,10 +296,12 @@ def _api_status_probe():
             status['amazon'] = 'issue'
         status['details']['amazon'] = f'Amazon SP-API check failed: {e}'
 
-    # Token-file modification time is not credential issuance time. eBay access
-    # token refreshes rewrite tokens.json, and Amazon credentials live elsewhere,
-    # so file age produced misleading expiry reminders.
-    status['reminders'] = []
+    # Never infer token age from a file timestamp. Provider-reported dates and
+    # explicitly configured authorization dates are the only alert sources.
+    status['token_statuses'] = _telegram_token_statuses()
+    status['reminders'] = expiring_token_reminders(
+        status['token_statuses'], within_days=14
+    )
     return status
 
 
@@ -448,7 +454,16 @@ def _collect_api_issue_alert(require_confirmation=False):
             'message': detail or f'{label} API status is {state}.'
         })
     for reminder in probe.get('reminders') or []:
+        if require_confirmation:
+            ready = _telegram_alert_state_update(
+                reminder.get('alert_key'),
+                reminder.get('signature'),
+                metadata=reminder,
+            )
+            if not ready:
+                continue
         issues.append({
+            'alert_key': reminder.get('alert_key'),
             'platform': reminder.get('label') or 'Token',
             'status': reminder.get('status') or 'reminder',
             'message': reminder.get('message') or ''
@@ -664,9 +679,6 @@ def _telegram_backup_status():
     elif not writable:
         health = 'failed'
         status = 'USB backup drive is read-only'
-    elif not daily_scheduled:
-        health = 'failed'
-        status = 'Daily backup schedule is missing'
     elif daily_log.get('result') == 'failed':
         health = 'failed'
         status = 'Latest daily backup attempt failed'
@@ -676,9 +688,6 @@ def _telegram_backup_status():
     elif daily['age_hours'] > 36:
         health = 'overdue'
         status = 'Daily backup is overdue'
-    elif not weekly_scheduled:
-        health = 'warning'
-        status = 'Weekly backup schedule is missing'
     elif weekly_log.get('result') == 'failed':
         health = 'failed'
         status = 'Latest weekly backup attempt failed'
@@ -752,6 +761,8 @@ def _telegram_api_status_text(probe=None):
         detail = str((probe.get('details') or {}).get(key) or '').strip()
         if detail and state != 'ok':
             lines.append(f'  {detail[:500]}')
+    token_statuses = probe.get('token_statuses') or _telegram_token_statuses()
+    lines.extend(['', format_token_statuses(token_statuses)])
     return '\n'.join(lines)
 
 
@@ -1104,6 +1115,8 @@ def api_telegram_send_test():
         data = request.get_json() or {}
         chat_ids = data.get('chat_ids', [])
         message = str(data.get('message') or 'Telegram test message from Sweet Shelves').strip()
+        token_text = format_token_statuses(_telegram_token_statuses(force=True))
+        message = f'{message}\n\n{token_text}'
         if not chat_ids:
             return jsonify({'success': False, 'error': 'No chat_ids provided'}), 400
         results = []
@@ -1448,3 +1461,23 @@ def _start_telegram_alert_thread():
     telegram_thread = threading.Thread(target=telegram_alert_worker, daemon=True)
     telegram_thread.start()
     print("🚀 Telegram alert thread started")
+
+
+_TELEGRAM_TOKEN_STATUS_CACHE = {'checked_at': 0.0, 'statuses': []}
+
+
+_TELEGRAM_TOKEN_STATUS_CACHE_LOCK = threading.Lock()
+
+
+def _telegram_token_statuses(force=False):
+    """Cache provider expiry lookups so the alert worker does not poll them every pass."""
+    now = time.time()
+    with _TELEGRAM_TOKEN_STATUS_CACHE_LOCK:
+        cached_at = float(_TELEGRAM_TOKEN_STATUS_CACHE.get('checked_at') or 0)
+        cached = _TELEGRAM_TOKEN_STATUS_CACHE.get('statuses') or []
+        if cached and not force and now - cached_at < 21600:
+            return [dict(item) for item in cached]
+        statuses = collect_token_statuses(ss_config.BASE_DIR)
+        _TELEGRAM_TOKEN_STATUS_CACHE['checked_at'] = now
+        _TELEGRAM_TOKEN_STATUS_CACHE['statuses'] = [dict(item) for item in statuses]
+        return statuses

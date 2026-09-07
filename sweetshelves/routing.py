@@ -1,33 +1,72 @@
-"""Register feature endpoints without changing existing URLs or endpoint names."""
+"""Register feature endpoints with their existing URLs and endpoint names."""
 
-import requests
 from listing_mapping_routes import register as _register_listing_mapping
 from token_manager import get_access_token
 from werkzeug.exceptions import RequestEntityTooLarge
-from . import (
-    amazon_catalog as ss_amazon_catalog, amazon_orders as ss_amazon_orders, amazon_publish as
-    ss_amazon_publish, analytics as ss_analytics, bol_inventory as ss_bol_inventory, bulk_manifest as
-    ss_bulk_manifest, cache_admin as ss_cache_admin, caching as ss_caching, database as ss_database,
-    diagnostics as ss_diagnostics, ebay_auth as ss_ebay_auth, ebay_catalog as ss_ebay_catalog,
-    ebay_policies as ss_ebay_policies, ebay_publish as ss_ebay_publish, email_settings as
-    ss_email_settings, enrichment as ss_enrichment, errors as ss_errors, facebook as ss_facebook,
-    fba_readiness as ss_fba_readiness, fba_scanning as ss_fba_scanning, fba_sessions as ss_fba_sessions,
-    fba_shipments as ss_fba_shipments, finder as ss_finder, inventory_alerts as ss_inventory_alerts,
-    inventory_archives as ss_inventory_archives, inventory_cleanup as ss_inventory_cleanup,
-    inventory_history_views as ss_inventory_history_views, listing_alerts as ss_listing_alerts,
-    listing_lifecycle as ss_listing_lifecycle, listing_log as ss_listing_log, listing_queue as
-    ss_listing_queue, listing_settings as ss_listing_settings, mail_center as ss_mail_center,
-    marketplace_sales as ss_marketplace_sales, pages as ss_pages, payouts as ss_payouts, prep_actions as
-    ss_prep_actions, prep_context as ss_prep_context, prep_diagnostics as ss_prep_diagnostics,
-    prep_locations as ss_prep_locations, prep_log as ss_prep_log, prep_media as ss_prep_media, prep_undo
-    as ss_prep_undo, prep_views as ss_prep_views, pricing as ss_pricing, printing as ss_printing, raw_bol
-    as ss_raw_bol, returns as ss_returns, runtime as ss_runtime, sales as ss_sales, sales_actions as
-    ss_sales_actions, sales_repair as ss_sales_repair, shelf_assets as ss_shelf_assets, shelves as
-    ss_shelves, shipping_labels as ss_shipping_labels, shipping_orders as ss_shipping_orders, sync as
-    ss_sync, telegram as ss_telegram, warehouse_locations as ss_warehouse_locations, warehouse_maps as
-    ss_warehouse_maps, warehouse_receiving as ss_warehouse_receiving, warehouse_search as
-    ss_warehouse_search, web_hooks as ss_web_hooks,
-)
+import requests
+from . import amazon_catalog as ss_amazon_catalog
+from . import amazon_orders as ss_amazon_orders
+from . import amazon_publish as ss_amazon_publish
+from . import analytics as ss_analytics
+from . import bol_inventory as ss_bol_inventory
+from . import bulk_manifest as ss_bulk_manifest
+from . import cache_admin as ss_cache_admin
+from . import caching as ss_caching
+from . import database as ss_database
+from . import diagnostics as ss_diagnostics
+from . import ebay_auth as ss_ebay_auth
+from . import ebay_catalog as ss_ebay_catalog
+from . import ebay_policies as ss_ebay_policies
+from . import ebay_publish as ss_ebay_publish
+from . import email_settings as ss_email_settings
+from . import enrichment as ss_enrichment
+from . import errors as ss_errors
+from . import facebook as ss_facebook
+from . import fba_readiness as ss_fba_readiness
+from . import fba_scanning as ss_fba_scanning
+from . import fba_sessions as ss_fba_sessions
+from . import fba_shipments as ss_fba_shipments
+from . import finder as ss_finder
+from . import inventory_alerts as ss_inventory_alerts
+from . import inventory_archives as ss_inventory_archives
+from . import inventory_cleanup as ss_inventory_cleanup
+from . import inventory_history_views as ss_inventory_history_views
+from . import listing_alerts as ss_listing_alerts
+from . import listing_lifecycle as ss_listing_lifecycle
+from . import listing_log as ss_listing_log
+from . import listing_queue as ss_listing_queue
+from . import listing_settings as ss_listing_settings
+from . import mail_center as ss_mail_center
+from . import marketplace_sales as ss_marketplace_sales
+from . import pages as ss_pages
+from . import payouts as ss_payouts
+from . import prep_actions as ss_prep_actions
+from . import prep_context as ss_prep_context
+from . import prep_diagnostics as ss_prep_diagnostics
+from . import prep_locations as ss_prep_locations
+from . import prep_log as ss_prep_log
+from . import prep_media as ss_prep_media
+from . import prep_undo as ss_prep_undo
+from . import prep_views as ss_prep_views
+from . import pricing as ss_pricing
+from . import printing as ss_printing
+from . import raw_bol as ss_raw_bol
+from . import returns as ss_returns
+from . import runtime as ss_runtime
+from . import sales as ss_sales
+from . import sales_actions as ss_sales_actions
+from . import sales_repair as ss_sales_repair
+from . import shelf_assets as ss_shelf_assets
+from . import shelves as ss_shelves
+from . import shipping_labels as ss_shipping_labels
+from . import shipping_orders as ss_shipping_orders
+from . import sync as ss_sync
+from . import telegram as ss_telegram
+from . import warehouse_locations as ss_warehouse_locations
+from . import warehouse_maps as ss_warehouse_maps
+from . import warehouse_receiving as ss_warehouse_receiving
+from . import warehouse_search as ss_warehouse_search
+from . import web_hooks as ss_web_hooks
 
 
 def register_routes():
@@ -271,7 +310,7 @@ def register_routes():
     ss_runtime.app.route('/api/fb/listings/quantity', methods=['POST'])(ss_facebook.api_fb_listings_quantity)
     ss_runtime.app.route('/api/fb/listings/unlist', methods=['POST'])(ss_facebook.api_fb_listings_unlist)
     ss_runtime.app.route('/trash-manager')(ss_inventory_archives.trash_manager_page)
-    ss_runtime.app.route('/api/trash/settings', methods=['GET','POST'])(ss_inventory_archives.api_trash_settings)
+    ss_runtime.app.route('/api/trash/settings', methods=['GET', 'POST'])(ss_inventory_archives.api_trash_settings)
     ss_runtime.app.route('/api/trash/list', methods=['GET'])(ss_inventory_archives.api_trash_list)
     ss_runtime.app.route('/api/trash/restore', methods=['POST'])(ss_inventory_archives.api_trash_restore)
     ss_runtime.app.route('/api/trash/hard_delete', methods=['POST'])(ss_inventory_archives.api_trash_hard_delete)
@@ -288,23 +327,23 @@ def register_routes():
     ss_runtime.app.route('/api/debug/check_item/<upc>', methods=['GET'])(ss_diagnostics.api_debug_check_item)
     ss_runtime.app.route('/api/cleanup_temporary_entry', methods=['POST'])(ss_diagnostics.api_cleanup_temporary_entry)
     ss_runtime.app.route('/api/items_prep/diagnostic/<upc>/photos.zip', methods=['GET'])(ss_prep_media.api_items_prep_diagnostic_photos_zip)
-    ss_runtime.app.route("/token-status")(ss_ebay_auth.token_status)
-    ss_runtime.app.route("/api/token-status")(ss_ebay_auth.api_token_status)
-    ss_runtime.app.route("/", methods=["GET", "POST"])(ss_ebay_auth.home)
-    ss_runtime.app.route("/callback")(ss_ebay_auth.callback)
-    ss_runtime.app.route("/privacy")(ss_pages.privacy)
-    ss_runtime.app.route("/search", methods=["POST"])(ss_pages.search)
+    ss_runtime.app.route('/token-status')(ss_ebay_auth.token_status)
+    ss_runtime.app.route('/api/token-status')(ss_ebay_auth.api_token_status)
+    ss_runtime.app.route('/', methods=['GET', 'POST'])(ss_ebay_auth.home)
+    ss_runtime.app.route('/callback')(ss_ebay_auth.callback)
+    ss_runtime.app.route('/privacy')(ss_pages.privacy)
+    ss_runtime.app.route('/search', methods=['POST'])(ss_pages.search)
     ss_runtime.app.route('/api/refresh_searchrack', methods=['POST'])(ss_enrichment.api_refresh_searchrack)
     ss_runtime.app.route('/api/enrich_status', methods=['GET'])(ss_enrichment.api_enrich_status)
-    ss_runtime.app.route("/highlight")(ss_warehouse_maps.highlight)
-    ss_runtime.app.route("/database")(ss_warehouse_maps.show_inventory)
+    ss_runtime.app.route('/highlight')(ss_warehouse_maps.highlight)
+    ss_runtime.app.route('/database')(ss_warehouse_maps.show_inventory)
     ss_runtime.app.route('/additemtrue', methods=['POST'])(ss_warehouse_receiving.additemtrue)
-    ss_runtime.app.route("/barcode")(ss_warehouse_receiving.barcode_page)
-    ss_runtime.app.route("/pictures")(ss_warehouse_receiving.pictures_page)
-    ss_runtime.app.route("/position")(ss_warehouse_receiving.position_page)
-    ss_runtime.app.route("/movelocation")(ss_warehouse_receiving.movelocation_page)
-    ss_runtime.app.route("/fba-prep")(ss_warehouse_receiving.fba_prep_page)
-    ss_runtime.app.route("/fba-labels")(ss_warehouse_receiving.fba_labels_page)
+    ss_runtime.app.route('/barcode')(ss_warehouse_receiving.barcode_page)
+    ss_runtime.app.route('/pictures')(ss_warehouse_receiving.pictures_page)
+    ss_runtime.app.route('/position')(ss_warehouse_receiving.position_page)
+    ss_runtime.app.route('/movelocation')(ss_warehouse_receiving.movelocation_page)
+    ss_runtime.app.route('/fba-prep')(ss_warehouse_receiving.fba_prep_page)
+    ss_runtime.app.route('/fba-labels')(ss_warehouse_receiving.fba_labels_page)
     ss_runtime.app.route('/position/diagnostic', methods=['POST'])(ss_warehouse_receiving.position_diagnostic)
     ss_runtime.app.route('/submitposition', methods=['POST'])(ss_warehouse_receiving.process_position)
     ss_runtime.app.route('/submitbarcode', methods=['POST'])(ss_warehouse_receiving.process_barcode)
@@ -382,7 +421,7 @@ def register_routes():
     ss_runtime.app.route('/undo_match', methods=['POST'])(ss_inventory_history_views.undo_match)
     ss_runtime.app.route('/get_bol_upcs', methods=['GET'])(ss_bol_inventory.get_bol_upcs)
     ss_runtime.app.route('/upload_position_picture', methods=['POST'])(ss_warehouse_maps.upload_position_picture)
-    ss_runtime.app.route("/pictureposition")(ss_warehouse_maps.pictureposition_page)
+    ss_runtime.app.route('/pictureposition')(ss_warehouse_maps.pictureposition_page)
     ss_runtime.app.route('/set_pictureposition_path', methods=['POST'])(ss_warehouse_maps.set_pictureposition_path)
     ss_runtime.app.route('/searchrack')(ss_warehouse_maps.searchrack_page)
     ss_runtime.app.route('/api/inventory-quantity-history', methods=['GET'])(ss_analytics.api_inventory_quantity_history)
@@ -437,6 +476,7 @@ def register_routes():
     ss_runtime.app.route('/api/fba-labels/resolve', methods=['GET'])(ss_fba_scanning.api_fba_labels_resolve)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon/print-item-label', methods=['POST'])(ss_fba_scanning.api_fba_prep_amazon_print_item_label)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon/pack-scan', methods=['POST'])(ss_fba_scanning.api_fba_prep_amazon_pack_scan)
+    ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon/move-box-scan', methods=['POST'])(ss_fba_scanning.api_fba_prep_amazon_move_box_scan)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon/reset-pack-scan', methods=['POST'])(ss_fba_scanning.api_fba_prep_amazon_reset_pack_scan)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/count-scan', methods=['POST'])(ss_fba_scanning.api_fba_prep_count_scan)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/resolve-amazon-skus', methods=['POST'])(ss_fba_readiness.api_fba_prep_resolve_amazon_skus)
@@ -448,6 +488,7 @@ def register_routes():
     ss_runtime.app.route('/api/fba-prep/sessions', methods=['GET', 'POST'])(ss_fba_sessions.api_fba_prep_sessions)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>', methods=['GET', 'DELETE'])(ss_fba_sessions.api_fba_prep_session_detail)
     ss_runtime.app.route('/api/fba-prep/batches', methods=['GET'])(ss_fba_sessions.api_fba_prep_batches)
+    ss_runtime.app.route('/api/fba-prep/items', methods=['GET'])(ss_fba_sessions.api_fba_prep_items)
     ss_runtime.app.route('/api/fba-prep/batches/<int:batch_id>', methods=['GET'])(ss_fba_sessions.api_fba_prep_batch_detail)
     ss_runtime.app.route('/api/fba-prep/reviews', methods=['GET'])(ss_fba_sessions.api_fba_prep_reviews)
     ss_runtime.app.route('/api/fba-prep/reviews/<int:review_id>', methods=['POST'])(ss_fba_sessions.api_fba_prep_review_update)

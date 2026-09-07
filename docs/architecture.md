@@ -80,7 +80,7 @@ The runner copies Python code, the package, test fixtures, templates, and JavaSc
 
 `test_application_architecture.py` checks the captured route/signature contract, hook order, legacy imports, internal symbol ownership, import side effects, idempotent startup, Flask paths, request connection teardown, upload errors, and representative page rendering. Existing feature tests now call imported production functions and patch their owners, rather than extracting function bodies from `app.py`.
 
-`tests/fixtures/application_contract.json` records the pre-migration routes and signatures. Deliberate URL or signature changes should update the corresponding contract entries in the same change, with tests for the new behavior. Function bodies are not frozen by this fixture.
+`tests/fixtures/application_contract.json` records the routes and signatures carried forward from the monolithic application. Following the Desktop merge, it contains 473 routes and 1,153 function signatures, including the two routes and 21 functions added on that branch. All original 471 route records and 1,132 signatures remain unchanged. Deliberate URL or signature changes should update the corresponding contract entries in the same change, with tests for the new behavior. Function bodies are not frozen by this fixture.
 
 ## Deployment
 

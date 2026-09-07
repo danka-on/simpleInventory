@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 from DBmanager import addToSearchRack
 from flask import jsonify, make_response, redirect, render_template, request, session, url_for
 from . import (
@@ -516,44 +517,74 @@ def additemtrue():
         
         labels_to_print = []
         reserved_note_suffixes = {}
-        # Settle any earlier removals before new receipts are added so a
-        # remove-then-add sequence with the same net quantity still ages correctly.
-        with sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0) as age_conn:
-            ss_inventory_age._reconcile_inventory_age_batches(age_conn)
-        rack_conn_for_suffix = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'))
-        rack_cur_for_suffix = rack_conn_for_suffix.cursor()
-        for barcode_item in barcodes:
-            normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_item)
-            base_barcode = normalized_barcode.split('-', 1)[0] if normalized_barcode else ''
-            warehouse_note = (
-                warehouse_notes.get(normalized_barcode)
-                or warehouse_notes.get(base_barcode)
-                or ''
-            )
-            barcode_to_add = barcode_item
-            if warehouse_note and normalized_barcode and '-' not in normalized_barcode:
-                suffix_base_key = ss_normalization._strip_leading_zeros_numeric(base_barcode or normalized_barcode)
-                reserved = reserved_note_suffixes.setdefault(suffix_base_key, set())
-                next_suffix = _next_warehouse_note_suffix(rack_cur_for_suffix, base_barcode or normalized_barcode, reserved)
-                reserved.add(next_suffix)
-                barcode_to_add = f"{normalized_barcode}-{next_suffix}"
-                normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_to_add)
-                labels_to_print.append({
-                    'barcode': barcode_to_add,
-                    'description': title_overrides.get(base_barcode) or title_overrides.get(normalized_barcode) or 'Warehouse item',
-                    'warehouse_note': warehouse_note
-                })
-            title_override = (
-                title_overrides.get(normalized_barcode)
-                or title_overrides.get(base_barcode)
-                or None
-            )
-            metadata = _add_item_screening_lookup(barcode_to_add)
-            addToSearchRack(item_position_to_store, barcode_to_add, None, final_pictureposition, title_override, warehouse_note, metadata)
-            print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_to_add}, pictureposition={final_pictureposition}")
-        rack_conn_for_suffix.close()
-        with sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0) as age_conn:
-            ss_inventory_age._reconcile_inventory_age_batches(age_conn)
+        # Preserve FIFO receiving dates when a removal is immediately followed
+        # by an add, but never wait through the normal 30-second SQLite timeout.
+        # If another worker owns the database, the post-save pass (or the next
+        # inventory maintenance run) can catch the ledger up.
+        try:
+            with ss_database.db_connection('searchRack.db') as age_conn:
+                age_conn.execute('PRAGMA busy_timeout = 2000')
+                ss_inventory_age._reconcile_inventory_age_batches(age_conn)
+        except Exception as age_err:
+            print(f"Warning: deferred pre-add inventory age reconciliation: {age_err}")
+        finally:
+            try:
+                age_conn.execute('PRAGMA busy_timeout = 30000')
+            except Exception:
+                pass
+
+        with closing(sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'))) as rack_conn_for_suffix:
+            rack_cur_for_suffix = rack_conn_for_suffix.cursor()
+            for barcode_item in barcodes:
+                normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_item)
+                base_barcode = normalized_barcode.split('-', 1)[0] if normalized_barcode else ''
+                warehouse_note = (
+                    warehouse_notes.get(normalized_barcode)
+                    or warehouse_notes.get(base_barcode)
+                    or ''
+                )
+                barcode_to_add = barcode_item
+                if warehouse_note and normalized_barcode and '-' not in normalized_barcode:
+                    suffix_base_key = ss_normalization._strip_leading_zeros_numeric(base_barcode or normalized_barcode)
+                    reserved = reserved_note_suffixes.setdefault(suffix_base_key, set())
+                    next_suffix = _next_warehouse_note_suffix(rack_cur_for_suffix, base_barcode or normalized_barcode, reserved)
+                    reserved.add(next_suffix)
+                    barcode_to_add = f"{normalized_barcode}-{next_suffix}"
+                    normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_to_add)
+                    labels_to_print.append({
+                        'barcode': barcode_to_add,
+                        'description': title_overrides.get(base_barcode) or title_overrides.get(normalized_barcode) or 'Warehouse item',
+                        'warehouse_note': warehouse_note
+                    })
+                title_override = (
+                    title_overrides.get(normalized_barcode)
+                    or title_overrides.get(base_barcode)
+                    or None
+                )
+                metadata = _add_item_screening_lookup(barcode_to_add)
+                added = addToSearchRack(
+                    item_position_to_store, barcode_to_add, None,
+                    final_pictureposition, title_override, warehouse_note, metadata,
+                )
+                if added is False:
+                    raise RuntimeError(f'Inventory database was busy while adding {barcode_to_add}')
+                print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_to_add}, pictureposition={final_pictureposition}")
+
+
+        # Inventory is already durable at this point. Age-ledger maintenance is
+        # secondary and must not turn a successful batch into a 500 response;
+        # that made the browser retry the entire list and could duplicate stock.
+        try:
+            with ss_database.db_connection('searchRack.db') as age_conn:
+                age_conn.execute('PRAGMA busy_timeout = 2000')
+                ss_inventory_age._reconcile_inventory_age_batches(age_conn)
+        except Exception as age_err:
+            print(f"Warning: deferred inventory age reconciliation after add: {age_err}")
+        finally:
+            try:
+                age_conn.execute('PRAGMA busy_timeout = 30000')
+            except Exception:
+                pass
 
         # SearchRack writes should be visible immediately in /searchrack.
         ss_caching._invalidate_searchrack_cache()
@@ -1306,3 +1337,6 @@ def finalize_barcodes():
     finally:
         if conn is not None:
             conn.close()
+
+
+

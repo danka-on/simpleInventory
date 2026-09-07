@@ -410,3 +410,58 @@ def api_fba_prep_review_update(review_id):
     finally:
         if conn is not None:
             conn.close()
+
+
+def api_fba_prep_items():
+    """Search the permanent UPC, Seller SKU, and FNSKU ledger for completed FBA items."""
+    conn = None
+    try:
+        query = ss_fba_schema._fba_trim(request.args.get('q'), 160)
+        limit = max(1, min(ss_listing_settings._listingagent_parse_int(request.args.get('limit'), 250) or 250, 500))
+        conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        ss_fba_schema._ensure_fba_prep_tables(cur)
+        conn.commit()
+        where_sql = "WHERE b.status = 'completed'"
+        params = []
+        if query:
+            where_sql += ''' AND (
+                i.barcode LIKE ? OR i.title LIKE ? OR i.asin LIKE ?
+                OR i.seller_sku LIKE ? OR i.fnsku LIKE ?
+                OR b.batch_name LIKE ? OR b.shipment_id LIKE ?
+                OR b.amazon_inbound_plan_id LIKE ?
+            )'''
+            like_query = f'%{query}%'
+            params.extend([like_query] * 8)
+        total = cur.execute(f'''
+            SELECT COUNT(*)
+            FROM fba_prep_items i
+            JOIN fba_prep_batches b ON b.id = i.batch_id
+            {where_sql}
+        ''', params).fetchone()[0]
+        rows = cur.execute(f'''
+            SELECT i.id, i.batch_id, i.barcode, i.title,
+                   i.requested_quantity, i.quantity_removed,
+                   i.asin, i.seller_sku, i.fnsku, i.item_condition,
+                   i.created_at, b.batch_name, b.shipment_id,
+                   b.amazon_inbound_plan_id, b.destination_fc,
+                   b.completed_at
+            FROM fba_prep_items i
+            JOIN fba_prep_batches b ON b.id = i.batch_id
+            {where_sql}
+            ORDER BY COALESCE(b.completed_at, i.created_at) DESC, i.id DESC
+            LIMIT ?
+        ''', [*params, limit]).fetchall()
+        return jsonify({
+            'success': True,
+            'items': [dict(row) for row in rows],
+            'count': int(total or 0),
+            'limit': limit,
+            'query': query,
+        })
+    except Exception as exc:
+        return jsonify({'success': False, 'error': ss_errors._safe_error(exc, 'fba prep item ledger')}), 500
+    finally:
+        if conn is not None:
+            conn.close()
