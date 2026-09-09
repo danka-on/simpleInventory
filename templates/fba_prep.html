@@ -175,6 +175,7 @@
         </div>
         <div class="card-body">
           <div class="amazon-error" id="amazonError"></div>
+          <div class="status" id="amazonStatusBar" role="status"></div>
           <div class="amazon-layout">
             <div>
               <div class="stage-pane" id="amazonStagePane"><div class="loading"><span class="spinner"></span>Loading Amazon setup…</div></div>
@@ -336,7 +337,7 @@
     const prepLabel=v=>({none:'No special prep',poly_bag:'Poly bag',bubble_wrap:'Bubble wrap',taping:'Taping',opaque_bag:'Opaque bag',suffocation_label:'Suffocation label',set_bundle:'Set / bundle',other:'Other'})[v]||v||'No special prep';
     const touch=()=>{state.submissionToken=null;state.dirty=true;state.changeVersion+=1;scheduleSessionSave()};
     const restoreActionScroll=top=>requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo({top:Number(top)||0,left:0,behavior:'auto'})));
-    const setStatus=(type,msg)=>{const el=$('statusBar');el.textContent=msg||'';el.className='status'+(msg?' show '+type:'')};
+    const setStatus=(type,msg)=>{['statusBar','amazonStatusBar'].forEach(id=>{const el=$(id);if(!el)return;el.textContent=msg||'';el.className='status'+(msg?' show '+type:'')})};
     const setSaveStatus=(type,msg)=>{const el=$('saveState');el.textContent=msg||'';el.className='save-state'+(type?' '+type:'')};
     const selectedCapacity=row=>(row.locations||[]).filter(l=>(row.selectedLocations||[]).includes(String(l.location_key||''))).reduce((sum,l)=>sum+Number(l.quantity||0),0);
     const totalUnits=()=>state.queue.reduce((sum,row)=>sum+Number(row.quantity||0),0);

@@ -601,6 +601,63 @@ class FbaCountScanTest(unittest.TestCase):
         self.assertIn("Count step", item["fba_enablement_error"])
         listings.patch_listings_item.assert_not_called()
 
+    def test_enable_fba_switches_to_current_seller_sku_after_relisting(self):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.execute("UPDATE fba_prep_sessions SET items_json=?, item_count=1, total_units=1 WHERE id=1", (
+            '[{"barcode":"194137216844","seller_sku":"K0-MGPQ-SUNX","asin":"B0HDDM9FJW","quantity":1,'
+            '"fba_enablement_status":"failed","fba_enablement_error":"NOT_FOUND"}]',
+        ))
+        db.commit()
+        db.close()
+        listings = Mock()
+
+        def get_item(seller, sku, **kwargs):
+            if sku == "K0-MGPQ-SUNX":
+                raise Exception("[{'code': 'NOT_FOUND', 'message': \"SKU 'K0-MGPQ-SUNX' not found\"}]")
+            return Mock(errors=None, payload={
+                "summaries": [{"productType": "DRINKING_CUP", "asin": "B0HDDM9FJW", "status": ["BUYABLE", "DISCOVERABLE"]}],
+                "issues": [], "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT", "quantity": 4}],
+                "attributes": {},
+            })
+        listings.get_listings_item.side_effect = get_item
+        listings.search_listings_items.return_value = Mock(errors=None, payload={"items": [{
+            "sku": "GA-JHZ9-YNS2",
+            "summaries": [{"asin": "B0HDDM9FJW", "status": ["BUYABLE", "DISCOVERABLE"]}],
+            "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT"}],
+        }]})
+        listings.patch_listings_item.return_value = Mock(errors=None, payload={"status": "ACCEPTED", "issues": []})
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER")),
+              patch.object(ss_fba_readiness, "_fba_inventory_fnsku", return_value=""),
+              patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value={}),
+              patch.object(ss_fba_inventory, "_fba_remember_replacement_listing", return_value=True) as remember):
+            response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={"confirm": True})
+        self.assertEqual(response.status_code, 200)
+        item = response.get_json()["session"]["items"][0]
+        self.assertEqual(item["seller_sku"], "GA-JHZ9-YNS2")
+        self.assertEqual(item["fba_enablement_status"], "enabling")
+        self.assertEqual(item["fba_enablement_error"], "")
+        self.assertIn("switched to your current listing GA-JHZ9-YNS2", item["fba_listing_notes"])
+        self.assertEqual(listings.patch_listings_item.call_args.args[1], "GA-JHZ9-YNS2")
+        remember.assert_called_once()
+        self.assertEqual(remember.call_args.args, ("194137216844", "B0HDDM9FJW", "K0-MGPQ-SUNX", "GA-JHZ9-YNS2"))
+
+    def test_remember_replacement_listing_updates_local_cache(self):
+        db = sqlite3.connect(self.base_dir / "amazonStore.db")
+        db.execute("""CREATE TABLE ITEMS (ID INTEGER PRIMARY KEY, ASIN TEXT, SKU TEXT, TITLE TEXT, PRICE REAL,
+                    QUANTITY INTEGER, STATUS TEXT, IMAGE TEXT, UPC TEXT, CONDITION TEXT, CONDITION_NOTE TEXT,
+                    FULFILLMENT_CHANNEL TEXT, LAST_UPDATED TEXT)""")
+        db.execute("INSERT INTO ITEMS (ASIN, SKU, UPC, STATUS, FULFILLMENT_CHANNEL) VALUES "
+                   "('B0HDDM9FJW', 'K0-MGPQ-SUNX', '194137216844', 'Inactive', 'AMAZON_NA')")
+        db.commit()
+        db.close()
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
+            self.assertTrue(ss_fba_inventory._fba_remember_replacement_listing(
+                "194137216844", "B0HDDM9FJW", "K0-MGPQ-SUNX", "GA-JHZ9-YNS2", fulfillment_channel="DEFAULT"))
+            cached = ss_fba_inventory._fba_local_amazon_listing("194137216844")
+        self.assertEqual(cached["seller_sku"], "GA-JHZ9-YNS2")
+        self.assertEqual(cached["status"], "Active")
+
     def test_accepted_combined_fba_patch_does_not_loop_on_stale_prerequisite_issue(self):
         listings = Mock()
         stale_issue = {

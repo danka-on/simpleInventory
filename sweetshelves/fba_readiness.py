@@ -207,12 +207,66 @@ def _fba_friendly_enablement_error(msku, text):
     sku = ss_fba_schema._fba_trim(msku, 255)
     if 'not_found' in lowered or 'not found' in lowered:
         return (
-            f'Amazon has no listing for Seller SKU {sku} (Amazon: NOT_FOUND). The saved seller SKU is stale: '
-            'open the Count step, correct the Seller SKU (or relist the item on Amazon), then tap Review / retry.'
+            f'Amazon has no listing for Seller SKU {sku} (Amazon: NOT_FOUND) and no other listing of yours was '
+            'found for this product. Relist the item on Amazon (or type its current Seller SKU in the Count step), '
+            'then tap Review / retry.'
         )
     if 'quotaexceeded' in lowered or 'throttl' in lowered:
         return f'Amazon rate limit (QuotaExceeded) reached while checking {sku}. Wait a minute and tap Review / retry.'
     return raw
+
+
+def _fba_error_is_not_found(text):
+    lowered = ss_fba_schema._fba_trim(text, 700).lower()
+    return 'not_found' in lowered or 'not found' in lowered
+
+
+def _fba_replacement_seller_sku(asin, barcode, *, exclude='', client=None):
+    """Find the seller's current SKU for a product whose saved SKU Amazon no longer knows."""
+    asin = ss_fba_schema._fba_trim(asin, 30).upper()
+    barcode = ss_fba_schema._fba_trim(barcode, 40)
+    excluded = ss_fba_schema._fba_trim(exclude, 255).casefold()
+    lookups = [('ASIN', asin)] if asin else []
+    if barcode:
+        lookups.append(('UPC', barcode))
+    try:
+        listings, seller_id, marketplace_id = client or _fba_listings_client()
+        for identifiers_type, identifier in lookups:
+            payload = ss_fba_shipments._fba_amazon_payload(listings.search_listings_items(
+                seller_id, marketplaceIds=[marketplace_id], identifiers=[identifier],
+                identifiersType=identifiers_type, includedData=['summaries', 'fulfillmentAvailability'],
+                pageSize=20,
+            ))
+            found = []
+            for row in payload.get('items') if isinstance(payload.get('items'), list) else []:
+                if not isinstance(row, dict):
+                    continue
+                sku = ss_fba_schema._fba_trim(row.get('sku'), 255)
+                if not sku or sku.casefold() == excluded:
+                    continue
+                summary = next((entry for entry in row.get('summaries') or [] if isinstance(entry, dict)), {})
+                row_asin = ss_fba_schema._fba_trim(summary.get('asin'), 30).upper()
+                if asin and row_asin and row_asin != asin:
+                    continue
+                raw_status = summary.get('status')
+                statuses = [ss_fba_schema._fba_trim(value, 50).upper() for value in raw_status] if isinstance(raw_status, list) else []
+                channels = [
+                    ss_fba_schema._fba_trim(entry.get('fulfillmentChannelCode'), 40).upper()
+                    for entry in row.get('fulfillmentAvailability') or [] if isinstance(entry, dict)
+                ]
+                found.append({
+                    'seller_sku': sku, 'asin': row_asin or asin, 'statuses': statuses,
+                    'fulfillment_channels': [channel for channel in channels if channel],
+                })
+            if not found:
+                continue
+            live = [row for row in found if 'BUYABLE' in row['statuses'] or 'DISCOVERABLE' in row['statuses']] or found
+            if len(live) == 1:
+                return live[0]
+            return {'ambiguous': [row['seller_sku'] for row in live]}
+    except Exception as exc:
+        ss_config.logger.warning('Replacement seller SKU lookup failed for %s / %s: %s', asin, barcode, exc)
+    return {}
 
 
 def _fba_prep_error_is_inbound_pending(value):
@@ -1163,6 +1217,8 @@ def api_fba_prep_enable_fba(session_id):
                 'source_sku': source_sku,
                 'target_sku': target_sku,
                 'strategy': strategy,
+                'asin': ss_fba_schema._fba_trim(item.get('asin'), 30),
+                'barcode': ss_fba_schema._fba_trim(item.get('barcode'), 40),
                 'local_inventory_before_fba': int(item.get('local_inventory_before_fba') or 0),
                 'planned_fba_quantity': int(item.get('planned_fba_quantity') or item.get('quantity') or 0),
                 'local_inventory_remaining_after_fba': int(item.get('local_inventory_remaining_after_fba') or 0),
@@ -1186,9 +1242,50 @@ def api_fba_prep_enable_fba(session_id):
             source_sku = candidate['source_sku']
             target_sku = candidate['target_sku']
             try:
-                readiness = _fba_listing_readiness(
-                    current_sku, force_refresh=True, client=listings_client
-                )
+                try:
+                    readiness = _fba_listing_readiness(
+                        current_sku, force_refresh=True, client=listings_client
+                    )
+                except Exception as exc:
+                    # A relisted product keeps its old SKU in the local cache, so
+                    # every rescan resolves to a SKU Amazon no longer knows. Switch
+                    # to the seller's current listing for the same product instead.
+                    if not _fba_error_is_not_found(ss_amazon_listing._amazon_format_spapi_error(exc)):
+                        raise
+                    replacement = _fba_replacement_seller_sku(
+                        candidate.get('asin'), candidate.get('barcode'),
+                        exclude=current_sku, client=listings_client,
+                    )
+                    if replacement.get('ambiguous'):
+                        raise RuntimeError(
+                            f'Seller SKU {current_sku} no longer exists on Amazon and this product has several '
+                            f"of your listings ({', '.join(replacement['ambiguous'])}). Type the right Seller SKU "
+                            'in the Count step, then tap Review / retry.'
+                        ) from exc
+                    if not replacement.get('seller_sku'):
+                        raise
+                    candidate['replacement_sku'] = replacement['seller_sku']
+                    candidate['replacement_note'] = (
+                        f'Seller SKU {current_sku} no longer exists on Amazon; switched to your current '
+                        f"listing {replacement['seller_sku']} for the same product."
+                    )
+                    ss_fba_inventory._fba_remember_replacement_listing(
+                        candidate.get('barcode'), replacement.get('asin') or candidate.get('asin'),
+                        current_sku, replacement['seller_sku'],
+                        fulfillment_channel=(replacement.get('fulfillment_channels') or [''])[0],
+                    )
+                    if source_sku.casefold() == current_sku.casefold():
+                        source_sku = replacement['seller_sku']
+                    current_sku = replacement['seller_sku']
+                    target_sku = (
+                        ss_fba_inventory._fba_proposed_seller_sku(source_sku)
+                        if candidate['strategy'] == 'separate_fba_sku' else current_sku
+                    )
+                    candidate.update({'source_sku': source_sku, 'target_sku': target_sku})
+                    time.sleep(0.22)
+                    readiness = _fba_listing_readiness(
+                        current_sku, force_refresh=True, client=listings_client
+                    )
                 if candidate['strategy'] == 'separate_fba_sku':
                     if len(candidate_rows) > 1:
                         time.sleep(0.22)
@@ -1201,10 +1298,10 @@ def api_fba_prep_enable_fba(session_id):
                     readiness.update(_fba_patch_listing_to_fba(
                         current_sku, readiness, client=listings_client
                     ))
-                actions[current_sku.casefold()] = {**candidate, 'result': readiness}
+                actions[candidate['current_sku'].casefold()] = {**candidate, 'result': readiness}
             except Exception as exc:
                 ss_config.logger.warning('FBA enablement failed for %s: %s', current_sku, exc)
-                actions[current_sku.casefold()] = {
+                actions[candidate['current_sku'].casefold()] = {
                     **candidate,
                     'result': {
                         'status': 'failed', 'seller_sku': current_sku,
@@ -1232,6 +1329,15 @@ def api_fba_prep_enable_fba(session_id):
                 continue
             result = action['result']
             strategy = action['strategy']
+            if action.get('replacement_sku'):
+                item['seller_sku'] = action['replacement_sku']
+                item.setdefault('fba', {}).setdefault('amazon_listing', {})['seller_sku'] = action['replacement_sku']
+                if ss_fba_schema._fba_trim(item.get('fbm_seller_sku'), 255).casefold() == current_key:
+                    item['fbm_seller_sku'] = action['source_sku']
+                result = dict(result)
+                result['listing_notes'] = ' '.join(filter(None, (
+                    action.get('replacement_note'), ss_fba_schema._fba_trim(result.get('listing_notes'), 700),
+                )))
             item['fba_offer_strategy'] = strategy
             item['local_inventory_before_fba'] = action['local_inventory_before_fba']
             item['planned_fba_quantity'] = action['planned_fba_quantity']

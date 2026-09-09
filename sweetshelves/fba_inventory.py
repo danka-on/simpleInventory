@@ -2,6 +2,7 @@
 
 import re as _re
 import sqlite3
+import datetime
 from . import fba_shipments as ss_fba_shipments
 from . import config as ss_config, database as ss_database, fba_readiness as ss_fba_readiness, fba_schema as ss_fba_schema, listing_lifecycle as ss_listing_lifecycle, listing_settings as ss_listing_settings, normalization as ss_normalization, warehouse_locations as ss_warehouse_locations
 
@@ -407,6 +408,39 @@ def _fba_marketplace_status_for_barcodes(barcodes):
             'links': links,
         }
     return result
+
+
+def _fba_remember_replacement_listing(barcode, asin, old_sku, new_sku, *, fulfillment_channel='', status='Active'):
+    """Point the local Amazon listing cache at the seller's current SKU after a relisting."""
+    old = ss_fba_schema._fba_trim(old_sku, 255)
+    new = ss_fba_schema._fba_trim(new_sku, 255)
+    asin = ss_fba_schema._fba_trim(asin, 30).upper()
+    if not new:
+        return False
+    conn = None
+    try:
+        conn = sqlite3.connect(str(ss_config.BASE_DIR / 'amazonStore.db'), timeout=10.0)
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+        cur = conn.execute(
+            """UPDATE ITEMS SET SKU = ?, STATUS = ?, FULFILLMENT_CHANNEL = ?, LAST_UPDATED = ?
+               WHERE TRIM(COALESCE(SKU, '')) = ? COLLATE NOCASE""",
+            (new, status, fulfillment_channel, now, old),
+        )
+        if not cur.rowcount:
+            conn.execute(
+                """INSERT INTO ITEMS (ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, IMAGE, UPC, CONDITION,
+                                      CONDITION_NOTE, FULFILLMENT_CHANNEL, LAST_UPDATED)
+                   VALUES (?, ?, '', 0, 0, ?, '', ?, '', '', ?, ?)""",
+                (asin, new, status, ss_fba_schema._fba_trim(barcode, 40), fulfillment_channel, now),
+            )
+        conn.commit()
+        return True
+    except Exception as exc:
+        ss_config.logger.warning('Could not update the local Amazon listing cache for %s -> %s: %s', old, new, exc)
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _fba_local_amazon_listing(barcode, *, strict=False):
