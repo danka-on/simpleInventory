@@ -52,6 +52,7 @@ def _ensure_fba_prep_tables(cur):
         "ALTER TABLE fba_prep_sessions ADD COLUMN working_locations_json TEXT NOT NULL DEFAULT '[]'",
     )
     session_additions = {
+        'rejected_items_json': "ALTER TABLE fba_prep_sessions ADD COLUMN rejected_items_json TEXT NOT NULL DEFAULT '[]'",
         'amazon_inbound_plan_id': "ALTER TABLE fba_prep_sessions ADD COLUMN amazon_inbound_plan_id TEXT",
         'amazon_stage': "ALTER TABLE fba_prep_sessions ADD COLUMN amazon_stage TEXT NOT NULL DEFAULT 'draft'",
         'amazon_state_json': "ALTER TABLE fba_prep_sessions ADD COLUMN amazon_state_json TEXT NOT NULL DEFAULT '{}'",

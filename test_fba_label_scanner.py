@@ -62,6 +62,25 @@ class FbaLabelScannerTest(unittest.TestCase):
         self.assertTrue(match["printable"])
         self.assertEqual(match["session_id"], 7)
 
+    def test_failed_item_overrides_an_older_printable_match(self):
+        row = session_row(session_id=9)
+        items = json.loads(row["items_json"])
+        items[0].update(fba_enablement_status="failed", fba_enablement_error="Brand approval required")
+        row["items_json"] = json.dumps(items)
+        match = ss_fba_scanning._fba_planned_label_match("025398232475", [row, session_row(session_id=7)])
+        self.assertFalse(match["printable"])
+        self.assertTrue(match["rejected"])
+        self.assertEqual(match["session_id"], 9)
+
+    def test_internal_failure_is_a_check_needed_not_a_reject(self):
+        result = ss_fba_scanning._fba_scan_rejection({"items": [{
+            "barcode": "025398232475", "fba_enablement_status": "failed",
+            "fba_enablement_error": "Amazon request timed out",
+        }]}, barcode="25398232475")
+        self.assertFalse(result["rejected"])
+        self.assertIn("CHECK NEEDED", result["sort_result"]["headline"])
+        self.assertNotIn("Rejected", result["voice_message"])
+
     def test_label_scanner_page_renders(self):
         response = self.client.get("/fba-labels")
         self.assertEqual(response.status_code, 200)

@@ -70,6 +70,9 @@ from . import web_hooks as ss_web_hooks
 
 
 def register_routes():
+    from amazon_resolution_routes import register as register_amazon_resolution
+    from .config import BASE_DIR
+    register_amazon_resolution(ss_runtime.app, BASE_DIR, ss_amazon_catalog._amazon_spapi_context)
     ss_runtime.app.teardown_appcontext(ss_database.close_db_connections)
     ss_runtime.app.route('/api/data_version')(ss_caching.api_data_version)
     ss_runtime.app.context_processor(ss_web_hooks.inject_server_info)
@@ -552,3 +555,10 @@ def register_routes():
     ss_runtime.app.route('/api/admin/cache/clear', methods=['POST'])(ss_cache_admin.api_admin_clear_cache)
     ss_runtime.app.route('/api/enrich-sold-db', methods=['POST'])(ss_cache_admin.api_enrich_sold_db)
     ss_runtime.app.route('/api/admin/cache/settings', methods=['GET', 'POST'])(ss_cache_admin.api_cache_settings)
+
+    from fba_attention_routes import register as register_fba_attention
+    from . import fba_schema as ss_fba_schema, fba_inventory as ss_fba_inventory
+    register_fba_attention(ss_runtime.app, BASE_DIR, ss_fba_schema._ensure_fba_prep_tables,
+                           ss_fba_inventory._fba_session_item_payload,
+                           ss_fba_shipments._fba_plan_approval_issues,
+                           ss_amazon_catalog._amazon_spapi_context)

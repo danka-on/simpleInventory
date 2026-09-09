@@ -83,12 +83,18 @@
       state.lastMatch=match;renderItem(match,data);showResult('success','Label printed',`${data.fnsku||match.fnsku} printed on ${data.printer||'Item Prep printer'}. Shipment: ${match.shipment_name||match.session_name||'FBA prep session'}. Box: ${boxAssignmentText(match)}.`);recordHistory(match,true,data.fnsku);return data;
     }
 
+    function announceScanBlock(data){
+      if(!data?.sort_result)return false;
+      showResult('error',data.sort_result.headline,data.sort_result.instruction);
+      try{window.speechSynthesis.cancel();window.speechSynthesis.speak(new SpeechSynthesisUtterance(data.voice_message||'Check needed. Set this item aside.'))}catch(_){}
+      return true;
+    }
     async function scanAndPrint(){
       const input=$('barcodeInput'),barcode=input.value.trim();if(!barcode||state.busy)return;setBusy(true);state.lastMatch=null;showResult('loading','Finding Amazon label…',barcode);
-      try{const resolveResponse=await fetch('/api/fba-labels/resolve?barcode='+encodeURIComponent(barcode),{headers:{'Accept':'application/json'}});const resolved=await responseJson(resolveResponse);if(!resolveResponse.ok||!resolved.success)throw Object.assign(new Error(resolved.error||'No printable label found'),{match:resolved.match});await printMatch(resolved.match);input.value=''}catch(error){const match=error.match||{barcode,title:barcode};showResult('error','Label not printed',error.message||'No printable label found');recordHistory(match,false,match.fnsku)}finally{setBusy(false);input.focus();input.select()}
+      try{const resolveResponse=await fetch('/api/fba-labels/resolve?barcode='+encodeURIComponent(barcode),{headers:{'Accept':'application/json'}});const resolved=await responseJson(resolveResponse);if(!resolveResponse.ok||!resolved.success)throw Object.assign(new Error(resolved.error||'No printable label found'),{match:resolved.match,data:resolved});await printMatch(resolved.match);input.value=''}catch(error){const match=error.match||{barcode,title:barcode};if(!announceScanBlock(error.data))showResult('error','Label not printed',error.message||'No printable label found');recordHistory(match,false,match.fnsku)}finally{setBusy(false);input.focus();input.select()}
     }
 
-    async function reprint(){if(!state.lastMatch||state.busy)return;setBusy(true);try{await printMatch(state.lastMatch,{reprint:true})}catch(error){showResult('error','Reprint failed',error.message||'Label did not print');recordHistory(state.lastMatch,false,state.lastMatch.fnsku)}finally{setBusy(false);$('barcodeInput').focus()}}
+    async function reprint(){if(!state.lastMatch||state.busy)return;setBusy(true);try{await printMatch(state.lastMatch,{reprint:true})}catch(error){if(!announceScanBlock(error.data))showResult('error','Reprint failed',error.message||'Label did not print');recordHistory(state.lastMatch,false,state.lastMatch.fnsku)}finally{setBusy(false);$('barcodeInput').focus()}}
     async function loadPrinterStatus(){const pill=$('printerStatus');try{const response=await fetch('/api/printer/status');const data=await responseJson(response);if(!response.ok||!data.success)throw new Error(data.error||'Printer unavailable');const ready=Boolean(data.status?.can_print);pill.textContent=`${ready?'Ready':'Not ready'} · ${data.status?.display_name||data.config?.printer_name||'Item Prep printer'}`;pill.className='printer '+(ready?'ready':'error');pill.title=data.status?.detail||''}catch(error){pill.textContent='Printer unavailable';pill.className='printer error';pill.title=error.message||''}}
 
     $('barcodeInput').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();scanAndPrint()}});$('scanBtn').onclick=scanAndPrint;$('reprintBtn').onclick=reprint;loadPrinterStatus();fetch('/api/printer/wake',{method:'POST'}).catch(()=>{});$('barcodeInput').focus();

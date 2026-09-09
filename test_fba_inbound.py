@@ -1,12 +1,15 @@
 import datetime
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
+from sweetshelves import fba_shipments as ss_fba_shipments
 
 from sweetshelves.fba_inventory import (
     _fba_session_item_payload,
 )
 from sweetshelves.fba_readiness import (
     _fba_catalog_measurement_reference_from_payload,
+    _fba_listing_measurement_status,
     _fba_existing_prep_conflict,
     _fba_inbound_activation_message,
     _fba_inbound_unavailable_skus,
@@ -50,7 +53,126 @@ ADDRESS = {
 }
 
 
+def ready_plan_session(count):
+    return {'items': [{
+        'barcode': str(100000000000 + index), 'seller_sku': f'SKU-{index:03}',
+        'quantity': 2, 'fba_enablement_status': 'ready', 'prep_type': 'none',
+    } for index in range(count)]}
+
+
+class PrepBatchApi:
+    def __init__(self, failure=''):
+        self.failure = failure
+        self.read_batches, self.write_batches, self.polled, self.created, self.events = [], [], [], [], []
+
+    @staticmethod
+    def response(**payload):
+        return SimpleNamespace(payload=payload, errors=None)
+
+    def list_prep_details(self, **kwargs):
+        batch = kwargs['mskus']
+        if len(batch) > 100:
+            raise FbaInboundValidationError('Amazon allows at most 100 prep SKUs')
+        self.read_batches.append(list(batch))
+        if self.failure == 'read' and len(self.read_batches) == 2:
+            raise FbaInboundValidationError('second batch failed')
+        return self.response(mskuPrepDetails=[])
+
+    def set_prep_details(self, **kwargs):
+        batch = [row['msku'] for row in kwargs['mskuPrepDetails']]
+        if len(batch) > 100:
+            raise FbaInboundValidationError('Amazon allows at most 100 prep SKUs')
+        self.write_batches.append(batch)
+        self.events.append('write')
+        if self.failure == 'write' and len(self.write_batches) == 2:
+            raise FbaInboundValidationError('second batch failed')
+        return self.response(operationId=str(len(self.write_batches)))
+
+    def get_inbound_operation_status(self, operation_id):
+        self.polled.append(int(operation_id))
+        self.events.append('poll')
+        if self.failure == 'operation' and operation_id == '2':
+            return self.response(operationStatus='FAILED', operationProblems=[{'message': 'second batch failed'}])
+        return self.response(operationStatus='SUCCESS')
+
+    def create_inbound_plan(self, **kwargs):
+        self.created.append(kwargs)
+        self.events.append('create')
+        return self.response(inboundPlanId='plan-1', operationId='plan-op')
+
+
 class FbaInboundHelpersTest(unittest.TestCase):
+    def test_plan_prep_batches_preserve_all_skus_and_quantities(self):
+        for count in (100, 101, 130, 201):
+            with self.subTest(count=count):
+                api = PrepBatchApi()
+                session = ready_plan_session(count)
+                with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+                    state, _ = ss_fba_shipments._fba_prepare_and_create_plan(
+                        api, US_MARKETPLACE_ID, session, {})
+                expected = [row['seller_sku'] for row in session['items']]
+                self.assertEqual([sku for batch in api.read_batches for sku in batch], expected)
+                self.assertEqual([sku for batch in api.write_batches for sku in batch], expected)
+                self.assertTrue(all(1 <= len(batch) <= 100 for batch in api.read_batches + api.write_batches))
+                self.assertEqual(len(api.created), 1)
+                self.assertEqual([row['msku'] for row in api.created[0]['items']], expected)
+                self.assertEqual(sum(row['quantity'] for row in api.created[0]['items']), count * 2)
+                self.assertEqual(len(state['create_request_summary']['prep_corrections']), count)
+                self.assertEqual(api.events[-1], 'create')
+                self.assertEqual(api.polled, list(range(1, len(api.write_batches) + 1)))
+
+    def test_plan_is_not_created_if_later_prep_batch_fails(self):
+        for failure in ('read', 'write', 'operation'):
+            with self.subTest(failure=failure):
+                api = PrepBatchApi(failure=failure)
+                state = {}
+                with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+                    with self.assertRaisesRegex(FbaInboundValidationError, 'second batch failed'):
+                        ss_fba_shipments._fba_prepare_and_create_plan(
+                            api, US_MARKETPLACE_ID, ready_plan_session(130), state)
+                self.assertEqual(api.created, [])
+                self.assertNotIn('inbound_plan_id', state)
+
+    def test_plan_merges_existing_prep_from_every_read_batch(self):
+        class ExistingPrepApi(PrepBatchApi):
+            def list_prep_details(self, **kwargs):
+                super().list_prep_details(**kwargs)
+                return self.response(mskuPrepDetails=[{
+                    'msku': sku, 'prepCategory': 'FC_PROVIDED',
+                    'prepTypes': ['ITEM_BUBBLEWRAP'],
+                } for sku in kwargs['mskus']])
+
+        api = ExistingPrepApi()
+        with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+            ss_fba_shipments._fba_prepare_and_create_plan(
+                api, US_MARKETPLACE_ID, ready_plan_session(130), {})
+        self.assertEqual([len(batch) for batch in api.read_batches], [100, 30])
+        self.assertEqual(api.write_batches, [])
+        self.assertEqual(len(api.created[0]['items']), 130)
+
+    def test_prep_conflict_in_second_batch_preserves_prior_success(self):
+        class ConflictApi(PrepBatchApi):
+            def get_inbound_operation_status(self, operation_id):
+                response = super().get_inbound_operation_status(operation_id)
+                if operation_id == '2':
+                    return self.response(operationStatus='FAILED', operationProblems=[{
+                        'message': 'prep category and types cannot be updated for msku '
+                                   'SKU-105 with existing prep category of FC_PROVIDED',
+                    }])
+                return response
+
+        api = ConflictApi()
+        with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+            state, _ = ss_fba_shipments._fba_prepare_and_create_plan(
+                api, US_MARKETPLACE_ID, ready_plan_session(130), {})
+        self.assertEqual([len(batch) for batch in api.write_batches], [100, 30, 29])
+        self.assertNotIn('SKU-105', api.write_batches[-1])
+        self.assertTrue(set(api.write_batches[0]).isdisjoint(api.write_batches[-1]))
+        self.assertEqual(len(api.created[0]['items']), 130)
+        corrections = state['create_request_summary']['prep_corrections']
+        self.assertEqual(len({row['msku'] for row in corrections}), 130)
+        self.assertIn({'msku': 'SKU-105', 'prepCategory': 'FC_PROVIDED', 'preserved': True}, corrections)
+
     def test_amazon_warning_does_not_reject_small_parcel_transport_request(self):
         response = SimpleNamespace(
             payload={'operationId': 'operation-1'},
@@ -86,6 +208,39 @@ class FbaInboundHelpersTest(unittest.TestCase):
         detail = _fba_amazon_exception_detail(exc)
         self.assertIn('DateTime value cannot be in the past', detail)
         self.assertNotIn('Pallet info', detail)
+
+    def test_final_labels_keep_original_box_numbers_despite_amazon_order(self):
+        local = [dict(local_id='BOX-01', packing_group_id='G1', contents=[dict(msku='A', quantity=2)],
+                      length_in=10, width_in=8, height_in=6, weight_lb=4),
+                 dict(local_id='BOX-08', packing_group_id='G2', contents=[dict(msku='B', quantity=3)],
+                      length_in=12, width_in=9, height_in=7, weight_lb=5)]
+        def remote(box, box_id):
+            return dict(boxId=box_id, items=box['contents'], quantity=1,
+                        dimensions=dict(unitOfMeasurement='IN', length=box['length_in'], width=box['width_in'], height=box['height_in']),
+                        weight=dict(unit='LB', value=box['weight_lb']))
+        amazon = [remote(local[1], 'AMAZON-FIRST'), remote(local[0], 'AMAZON-SECOND')]
+        mapped = ss_fba_shipments._fba_match_label_boxes(amazon, local)
+        self.assertEqual([r['local_box_id'] for r in mapped], ['BOX-08', 'BOX-01'])
+        self.assertEqual(mapped[0]['packing_group_id'], 'G2')
+        class Api:
+            def list_shipment_boxes(self, *args, **kwargs):
+                return SimpleNamespace(payload={'boxes': amazon})
+        class Labels:
+            def get_labels(self, *args, **kwargs):
+                self.request = kwargs
+                return SimpleNamespace(payload={'DownloadURL': 'https://labels.example/one.pdf'})
+        labels = Labels()
+        _, ids = _fba_amazon_box_label_document(Api(), labels, 'P', 'S', 'FBA', local_boxes=local, local_box_id='BOX-08')
+        self.assertEqual(ids, ['AMAZON-FIRST'])
+        self.assertEqual(labels.request['PackageLabelsToPrint'], 'AMAZON-FIRST')
+        with self.assertRaises(FbaInboundValidationError):
+            _fba_amazon_box_label_document(Api(), labels, 'P', 'S', 'FBA', local_boxes=local, local_box_id='BOX-99')
+        duplicate = dict(local[1], local_id='BOX-09')
+        mapped = ss_fba_shipments._fba_match_label_boxes(amazon, local + [duplicate])
+        self.assertEqual(mapped[0]['local_box_id'], '')
+        self.assertTrue(mapped[0]['match_error'])
+        amazon[0]['weight']['value'] = 99
+        self.assertTrue(ss_fba_shipments._fba_match_label_boxes(amazon, local)[0]['match_error'])
 
     def test_box_label_document_uses_amazon_shipment_box_ids(self):
         class FakeInboundApi:
@@ -332,6 +487,54 @@ class FbaInboundHelpersTest(unittest.TestCase):
         })
         self.assertEqual(body['patches'][1]['value'][0]['unit'], 'pounds')
         self.assertEqual(saved['amazon_status'], 'ACCEPTED')
+
+    def test_collect_reads_sdk_pagination_beyond_first_hundred_items(self):
+        calls = []
+        def api(**kwargs):
+            calls.append(kwargs)
+            if kwargs.get('paginationToken') == 'page2':
+                return SimpleNamespace(payload={'items': list(range(100, 127))}, pagination={}, next_token=None)
+            return SimpleNamespace(payload={'items': list(range(100))}, pagination={'nextToken': 'page2'})
+        self.assertEqual(ss_fba_shipments._fba_amazon_collect(api, 'items'), list(range(127)))
+        self.assertEqual(calls[1]['paginationToken'], 'page2')
+
+    def test_collect_supports_payload_and_sdk_next_token_with_empty_page(self):
+        for style in ('payload', 'sdk'):
+            calls = []
+            def api(**kwargs):
+                calls.append(kwargs)
+                if kwargs.get('paginationToken'):
+                    return SimpleNamespace(payload={'items': ['last']})
+                if style == 'payload':
+                    return SimpleNamespace(payload={'items': [], 'pagination': {'nextToken': 'next'}})
+                return SimpleNamespace(payload={'items': []}, next_token='next')
+            self.assertEqual(ss_fba_shipments._fba_amazon_collect(api, 'items'), ['last'])
+            self.assertEqual(len(calls), 2)
+
+    def test_collect_refuses_repeated_tokens_and_partial_results(self):
+        api = lambda **kwargs: SimpleNamespace(payload={'items': ['item']}, pagination={'nextToken': 'same'})
+        with self.assertRaises(FbaInboundValidationError):
+            ss_fba_shipments._fba_amazon_collect(api, 'items')
+        with self.assertRaises(FbaInboundValidationError):
+            ss_fba_shipments._fba_amazon_collect(api, 'items', limit=1)
+
+    def test_listing_measurements_allow_retry_without_catalog_dimensions(self):
+        saved = dict(length_in=5, width_in=4, height_in=1, weight_lb=.5)
+        payload = {'attributes': {
+            'item_package_dimensions': [{'marketplace_id': 'US',
+                'length': {'value': 12.7, 'unit': 'centimeters'},
+                'width': {'value': 4, 'unit': 'inches'},
+                'height': {'value': 1, 'unit': 'inches'}}],
+            'item_package_weight': [{'marketplace_id': 'US', 'value': 8, 'unit': 'ounces'}],
+        }, 'issues': [{'severity': 'WARNING', 'message': 'Optional description'}]}
+        self.assertTrue(_fba_listing_measurement_status(payload, saved, 'US')['listing_ready'])
+        self.assertFalse(_fba_listing_measurement_status(payload, saved, 'CA')['listing_ready'])
+        self.assertFalse(_fba_listing_measurement_status(payload, dict(saved, length_in=6), 'US')['listing_ready'])
+        payload['issues'] = [{'severity': 'ERROR', 'message': 'Approval required'}]
+        self.assertFalse(_fba_listing_measurement_status(payload, saved, 'US')['listing_ready'])
+        payload['issues'] = []
+        del payload['attributes']['item_package_weight']
+        self.assertFalse(_fba_listing_measurement_status(payload, saved, 'US')['listing_ready'])
 
     def test_catalog_measurement_reference_separates_item_and_package_sizes(self):
         reference = _fba_catalog_measurement_reference_from_payload({

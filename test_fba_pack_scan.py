@@ -89,6 +89,64 @@ class FbaPackScanTest(unittest.TestCase):
             },
         )
 
+    def test_failed_plan_approval_overrides_ready_and_can_be_set_aside(self):
+        workflow = {'stage': 'plan_failed', 'inbound_plan_id': 'wf-failed', 'boxes': [],
+                    'operation': {'kind': 'create_plan', 'status': 'FAILED', 'problems': [
+                        {'code': 'FBA_INB_0021', 'details': "There's an input error with the resource 'SKU-1'.",
+                         'message': 'Approval is required before this item can be sent to Amazon.'}]}}
+        items = [{'barcode': '025398232475', 'seller_sku': 'SKU-1', 'quantity': 2,
+                  'fba_enablement_status': 'ready', 'amazon_fnsku': 'X000000001'},
+                 {'barcode': '222222222222', 'seller_sku': 'SKU-2', 'quantity': 1,
+                  'fba_enablement_status': 'ready'}]
+        with sqlite3.connect(self.base_dir / 'searchRack.db') as db:
+            db.execute('UPDATE fba_prep_sessions SET items_json=?, amazon_state_json=?, rejected_items_json=? WHERE id=1',
+                       (json.dumps(items), json.dumps(workflow), json.dumps([{'seller_sku': 'OLD', 'fba_set_aside': True}])))
+        db.close()
+        with patch.object(ss_config, 'BASE_DIR', self.base_dir), patch.object(ss_fba_shipments, '_fba_amazon_client') as amazon:
+            response = self.post_scan()
+            self.assertEqual(response.status_code, 422)
+            self.assertIn('Approval', response.get_json()['error'])
+            url = '/api/fba-prep/sessions/1/amazon/set-aside-approval-items'
+            self.assertEqual(self.client.post(url, json={}).status_code, 400)
+            result = self.client.post(url, json={'confirm': True})
+            self.assertEqual(result.status_code, 200, result.get_json())
+            self.assertEqual(result.get_json()['removed_count'], 1)
+            self.assertEqual([i['seller_sku'] for i in result.get_json()['items']], ['SKU-2'])
+            self.assertEqual(self.client.post(url, json={'confirm': True}).status_code, 400)
+            amazon.assert_not_called()
+        with sqlite3.connect(self.base_dir / 'searchRack.db') as db:
+            db.row_factory = sqlite3.Row
+            row = db.execute('SELECT * FROM fba_prep_sessions WHERE id=1').fetchone()
+            self.assertEqual(row['item_count'], 1)
+            self.assertEqual(row['total_units'], 1)
+            self.assertEqual(row['amazon_stage'], 'draft')
+            self.assertFalse(row['amazon_inbound_plan_id'])
+            history = json.loads(row['rejected_items_json'])
+            self.assertEqual({i['seller_sku'] for i in history}, {'OLD', 'SKU-1'})
+            self.assertIn('Approval', history[-1]['fba_enablement_error'])
+            self.assertEqual(db.execute('SELECT QUANTITY FROM SEARCHRACK WHERE ID=1').fetchone()[0], 2)
+        db.close()
+
+    def test_rejected_scan_cannot_pack_or_print(self):
+        with sqlite3.connect(self.base_dir / "searchRack.db") as db:
+            db.execute("UPDATE fba_prep_sessions SET items_json=? WHERE id=1", (json.dumps([
+                {"barcode": "025398232475", "seller_sku": "SKU-1", "quantity": 2,
+                 "fba_enablement_status": "failed", "fba_enablement_error": "You need approval to list in this brand."}
+            ]),))
+        db.close()
+        with patch.object(ss_config, "BASE_DIR", self.base_dir), patch.object(printer_manager, "get_config_snapshot") as printer:
+            response = self.post_scan()
+            self.assertEqual(response.status_code, 422)
+            self.assertTrue(response.get_json()["rejected"])
+            self.assertIn("Rejected", response.get_json()["voice_message"])
+            response = self.client.post("/api/fba-prep/sessions/1/amazon/print-item-label", json={"msku": "SKU-1"})
+            self.assertEqual(response.status_code, 422)
+            printer.assert_not_called()
+        with sqlite3.connect(self.base_dir / "searchRack.db") as db:
+            self.assertEqual(db.execute("SELECT QUANTITY FROM SEARCHRACK WHERE ID=1").fetchone()[0], 2)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM fba_pack_scans").fetchone()[0], 0)
+        db.close()
+
     def create_box(self, packing_group_id="pg-1"):
         return self.client.post(
             "/api/fba-prep/sessions/1/amazon/create-box",

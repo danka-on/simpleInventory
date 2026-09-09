@@ -111,6 +111,7 @@ def api_fba_prep_session_live(session_id):
             'scan_count': int(scan_summary['scan_count'] or 0),
             'latest_scan_id': int(scan_summary['latest_scan_id'] or 0),
             'count_revision': int(row['count_revision'] or 0),
+            'rejected_items': ss_fba_schema._fba_json_list(row['rejected_items_json']),
             'items': ss_fba_schema._fba_json_list(row['items_json']),
         })
     except FbaInboundValidationError as exc:
@@ -172,7 +173,7 @@ def api_fba_prep_sessions():
             conn.commit()
             cur.execute('BEGIN IMMEDIATE')
             existing_session = cur.execute('''
-                SELECT items_json, amazon_inbound_plan_id, count_revision
+                SELECT items_json, amazon_inbound_plan_id, count_revision, rejected_items_json
                 FROM fba_prep_sessions
                 WHERE id = ? AND status = 'open'
             ''', (session_id,)).fetchone()
@@ -190,6 +191,25 @@ def api_fba_prep_sessions():
                     'success': False,
                     'error': 'Amazon plan quantities are locked. Start a new session to change SKUs or quantities.',
                 }), 409
+        # Keep removed rejects recognizable when the physical item is scanned
+        # during packing. A current repaired row supersedes its saved rejection.
+        rejected_items = []
+        if session_id and existing_session:
+            def reject_key(item):
+                return ss_warehouse_locations._movelocation_barcode_key(item.get('barcode')) or str(item.get('seller_sku') or '').casefold()
+            history = {reject_key(item): item for item in ss_fba_schema._fba_json_list(existing_session['rejected_items_json']) if isinstance(item, dict)}
+            incoming_keys = {reject_key(item) for item in items}
+            for item in ss_fba_schema._fba_json_list(existing_session['items_json']) + items:
+                if not isinstance(item, dict):
+                    continue
+                key = reject_key(item)
+                if key not in incoming_keys and (item.get('fba_enablement_status') != 'ready' or data.get('preserve_excluded_items') is True):
+                    history[key] = {**item, 'fba_set_aside': True}
+                elif item.get('fba_enablement_status') == 'failed':
+                    history[key] = item
+                else:
+                    history.pop(key, None)
+            rejected_items = list(history.values())
         batch_name = ss_fba_schema._fba_trim(data.get('batch_name'), 120)
         session_name = ss_fba_schema._fba_trim(data.get('session_name') or batch_name, 120)
         if not session_name:
@@ -258,6 +278,8 @@ def api_fba_prep_sessions():
             ))
             session_id = cur.lastrowid
 
+        cur.execute('UPDATE fba_prep_sessions SET rejected_items_json = ? WHERE id = ?',
+                    (json.dumps(rejected_items, ensure_ascii=False), session_id))
         conn.commit()
         row = cur.execute('SELECT * FROM fba_prep_sessions WHERE id = ?', (session_id,)).fetchone()
         return jsonify({'success': True, 'session': ss_fba_inventory._fba_session_row_payload(row, include_items=True)})

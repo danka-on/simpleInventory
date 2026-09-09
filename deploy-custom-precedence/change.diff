@@ -1,0 +1,96 @@
+--- deployed/app.py
++++ custom-precedence/app.py
+@@ -27572,6 +27572,10 @@
+             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+         )
+     ''')
++    columns = {row[1] for row in cur.execute('PRAGMA table_info(custom_item_registry)')}
++    for column in ('title_override', 'image_override'):
++        if column not in columns:
++            cur.execute(f'ALTER TABLE custom_item_registry ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0')
+     cur.execute('CREATE INDEX IF NOT EXISTS idx_custom_item_registry_updated ON custom_item_registry(updated_at)')
+     cur.execute('''
+         CREATE TABLE IF NOT EXISTS custom_item_registry_meta (
+@@ -27794,6 +27798,11 @@
+         # Normalize UPC for consistent storage and caching
+         upc_norm = _normalize_upc(upc)
+         
++        current = _add_item_screening_lookup(upc_norm)
++        title_override = int(bool(current.get('title')) and item_description != current['title'])
++        # A user-supplied photo is intentional, including when adding a missing image.
++        image_override = 1
++
+         # Save image to file
+         import base64
+         import uuid
+@@ -27829,13 +27838,15 @@
+ 
+         cur.execute('''
+             INSERT INTO custom_item_registry (
+-                upc, item_description, image_url, reserved_at, updated_at
+-            ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
++                upc, item_description, image_url, title_override, image_override, reserved_at, updated_at
++            ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             ON CONFLICT(upc) DO UPDATE SET
+                 item_description = excluded.item_description,
+                 image_url = excluded.image_url,
++                title_override = MAX(custom_item_registry.title_override, excluded.title_override),
++                image_override = excluded.image_override,
+                 updated_at = CURRENT_TIMESTAMP
+-        ''', (upc_norm, item_description, web_image_path))
++        ''', (upc_norm, item_description, web_image_path, title_override, image_override))
+         
+         if exists:
+             # Update existing item
+@@ -27881,17 +27892,21 @@
+         if not upc or not title:
+             return jsonify({'success': False, 'error': 'Barcode and title are required'}), 400
+ 
++        current = _add_item_screening_lookup(upc)
++        # A deliberate edit of an existing name stays authoritative on later scans.
++        title_override = int(bool(current.get('title')) and title != current['title'])
+         with db_connection('bol.db') as conn:
+             cur = conn.cursor()
+             _ensure_custom_item_registry(cur)
+             cur.execute('''
+                 INSERT INTO custom_item_registry (
+-                    upc, item_description, reserved_at, updated_at
+-                ) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
++                    upc, item_description, title_override, reserved_at, updated_at
++                ) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                 ON CONFLICT(upc) DO UPDATE SET
+                     item_description = excluded.item_description,
++                    title_override = MAX(custom_item_registry.title_override, excluded.title_override),
+                     updated_at = CURRENT_TIMESTAMP
+-            ''', (upc, title))
++            ''', (upc, title, title_override))
+             conn.commit()
+         cache.delete_memoized(api_bol_lookup)
+         return jsonify({'success': True, 'upc': upc, 'item_description': title})
+@@ -41712,6 +41727,26 @@
+                                 image_source = 'searchrack'
+         except Exception:
+             pass
++
++    # Explicit field overrides win over catalog enrichment. Resolve each field
++    # independently and prefer the exact warehouse suffix before its base UPC.
++    try:
++        with db_connection('bol.db') as conn:
++            cur = conn.cursor()
++            locked_title = locked_image = False
++            for candidate in variants:
++                row = cur.execute('''
++                    SELECT item_description, image_url, title_override, image_override
++                    FROM custom_item_registry WHERE LOWER(TRIM(upc)) = ?
++                ''', (candidate,)).fetchone()
++                if not row:
++                    continue
++                if not locked_title and row[2] and str(row[0] or '').strip():
++                    title, title_source, locked_title = str(row[0]).strip(), 'custom_registry', True
++                if not locked_image and row[3] and str(row[1] or '').strip():
++                    image_url, image_source, locked_image = str(row[1]).strip(), 'custom_registry', True
++    except sqlite3.OperationalError:
++        pass
+ 
+     return {
+         'barcode': actual,

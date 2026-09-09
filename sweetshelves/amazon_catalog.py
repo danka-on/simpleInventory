@@ -125,42 +125,59 @@ def _amazon_get_catalog_product_type(credentials, marketplace, marketplace_id, a
         return None
 
 
-def _amazon_resolve_asin_from_upc(credentials, marketplace, marketplace_id, upc):
-    """Best-effort Catalog lookup: resolve first ASIN for a UPC/EAN/GTIN."""
-    upc = (upc or '').strip()
-    if not upc:
-        return None
+def _amazon_resolve_asin_from_upc(credentials, marketplace, marketplace_id, upc, *, strict=False):
+    """Resolve the first catalog ASIN, preserving best-effort behavior for callers."""
+    product = _amazon_catalog_product_from_barcode(
+        credentials, marketplace, marketplace_id, upc, strict=strict)
+    return product.get('asin') or None
+
+
+def _amazon_catalog_product_from_barcode(credentials, marketplace, marketplace_id, barcode, *, strict=False):
+    """Find a product in Amazon's catalog independently of the seller's offers."""
+    barcode = str(barcode or '').strip()
+    if not barcode:
+        return {}
     try:
         from sp_api.api import CatalogItems
         ci = CatalogItems(credentials=credentials, marketplace=marketplace, version='2022-04-01')
-        id_type = 'UPC'
-        if upc.isdigit():
-            if len(upc) == 13:
-                id_type = 'EAN'
-            elif len(upc) == 14:
-                id_type = 'GTIN'
-        resp = ci.search_catalog_items(
-            identifiers=[upc],
-            identifiersType=id_type,
-            marketplaceIds=[marketplace_id],
-            includedData=['summaries'],
-            pageSize=8
-        )
+        if len(barcode) == 10 and barcode.upper().startswith('B') and barcode.isalnum():
+            resp = ci.get_catalog_item(
+                barcode.upper(), marketplaceIds=[marketplace_id], includedData=['summaries'])
+            direct = True
+        else:
+            # Scanners may omit leading zeros from a UPC-A barcode.
+            if barcode.isdigit() and len(barcode) < 12:
+                barcode = barcode.zfill(12)
+            id_type = 'EAN' if len(barcode) == 13 else ('GTIN' if len(barcode) == 14 else 'UPC')
+            resp = ci.search_catalog_items(
+                identifiers=[barcode], identifiersType=id_type,
+                marketplaceIds=[marketplace_id], includedData=['summaries'], pageSize=8)
+            direct = False
         if getattr(resp, 'errors', None):
-            return None
-        payload = resp.payload or {}
-        items = payload.get('items') or []
+            raise RuntimeError('Amazon catalog lookup returned errors')
+        payload = resp.payload
+        if not isinstance(payload, dict):
+            raise RuntimeError('Amazon catalog lookup returned an invalid result')
+        items = [payload] if direct else payload.get('items')
         if not isinstance(items, list):
-            return None
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            asin = (it.get('asin') or '').strip()
-            if asin:
-                return asin
-        return None
+            raise RuntimeError('Amazon catalog lookup returned an invalid result')
+        for item in items:
+            if not isinstance(item, dict):
+                raise RuntimeError('Amazon catalog lookup returned an invalid product')
+            asin = str(item.get('asin') or '').strip()
+            if not asin:
+                raise RuntimeError('Amazon catalog lookup returned a product without an ASIN')
+            summaries = item.get('summaries') or []
+            summary = next((row for row in summaries if isinstance(row, dict)
+                            and row.get('marketplaceId') == marketplace_id), {})
+            if not summary:
+                summary = next((row for row in summaries if isinstance(row, dict)), {})
+            return {'asin': asin, 'title': str(summary.get('itemName') or '').strip()}
+        return {}
     except Exception:
-        return None
+        if strict:
+            raise
+        return {}
 
 
 def _amazon_find_local_sku_by_asin(asin):

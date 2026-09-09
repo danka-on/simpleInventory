@@ -16,6 +16,43 @@ from . import (
 )
 
 
+def _fba_scan_rejection(session, *, barcode='', msku=''):
+    """Return a packing stop for a current or removed setup rejection."""
+    key = lambda value: ss_warehouse_locations._movelocation_barcode_key(value) or str(value or '').strip().casefold()
+    current = session.get('items') or []
+    current_keys = {key(item.get('barcode') or item.get('seller_sku')) for item in current if isinstance(item, dict)}
+    archived = [item for item in session.get('rejected_items') or [] if isinstance(item, dict)
+                and key(item.get('barcode') or item.get('seller_sku')) not in current_keys]
+    for item in current + archived:
+        if not isinstance(item, dict) or (item.get('fba_enablement_status') != 'failed' and not item.get('fba_set_aside')):
+            continue
+        error = ss_fba_schema._fba_trim(item.get('fba_enablement_error'), 700)
+        safety_pending = ss_fba_readiness._fba_error_is_missing_safety_info(error)
+        if safety_pending and not item.get('fba_set_aside'):
+            continue
+        if not error and item.get('fba_set_aside'):
+            error = 'This item was set aside from this shipment and is not included in the Amazon plan.'
+        listing = (item.get('fba') or {}).get('amazon_listing') or {}
+        values = [item.get(field) for field in ('barcode', 'barcode_key', 'barcode_display', 'asin', 'seller_sku', 'fnsku', 'amazon_fnsku')]
+        values += [listing.get('seller_sku'), listing.get('fnsku')]
+        if not any(value and ((barcode and key(value) == key(barcode)) or (msku and key(value) == key(msku))) for value in values):
+            continue
+        retryable = item.get('fba_enablement_status') != 'failed' or safety_pending or any(token in error.lower() for token in (
+            'internal error', 'has no attribute', 'traceback', 'database is locked',
+            'timed out', 'timeout', 'quotaexceeded', 'throttl', 'connection error',
+        ))
+        headline = 'CHECK NEEDED — DO NOT PACK' if retryable else 'REJECTED — DO NOT PACK'
+        voice = 'Check needed. Set this item aside.' if retryable else 'Rejected. Do not pack. Set this item aside.'
+        return {
+            'success': False, 'rejected': not retryable,
+            'error': error or 'This item failed Amazon FBA setup.',
+            'voice_message': voice,
+            'sort_result': {'kind': 'error' if retryable else 'rejected', 'headline': headline,
+                            'instruction': (error + ' ' if error else '') + 'Set this item aside. Do not label or pack it.'},
+        }
+    return None
+
+
 def _fba_planned_label_match(barcode, session_rows):
     """Resolve a warehouse barcode to the newest printable item in an open FBA plan."""
     target_variants = {
@@ -29,6 +66,9 @@ def _fba_planned_label_match(barcode, session_rows):
     waiting_match = None
     for raw_row in session_rows or []:
         session = ss_fba_inventory._fba_session_row_payload(raw_row, include_items=True)
+        rejection = _fba_scan_rejection(session, barcode=barcode)
+        if rejection:
+            return {**rejection, 'printable': False, 'session_id': session.get('id'), 'barcode': barcode}
         state = ss_fba_shipments._fba_amazon_state(raw_row)
         plan_items = state.get('plan_items') if isinstance(state.get('plan_items'), list) else []
         if not state.get('inbound_plan_id') or not plan_items:
@@ -127,7 +167,6 @@ def api_fba_labels_resolve():
             FROM fba_prep_sessions
             WHERE status = 'open'
               AND deleted_at IS NULL
-              AND COALESCE(TRIM(amazon_inbound_plan_id), '') != ''
             ORDER BY updated_at DESC, id DESC
             LIMIT 250
         ''').fetchall()
@@ -138,6 +177,8 @@ def api_fba_labels_resolve():
                 'success': False,
                 'error': 'This barcode is not in an open Amazon FBA plan. Create or open its plan first.',
             }), 404
+        if match.get('sort_result'):
+            return jsonify({**match, 'match': match}), 422
         if not match.get('printable'):
             return jsonify({
                 'success': False,
@@ -169,6 +210,9 @@ def api_fba_prep_amazon_print_item_label(session_id):
         conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
         conn.row_factory = sqlite3.Row
         _row, session_data, state = ss_fba_shipments._fba_amazon_session(conn, session_id)
+        rejection = _fba_scan_rejection(session_data, msku=msku)
+        if rejection:
+            return jsonify(rejection), 422
         if not state.get('inbound_plan_id'):
             raise FbaInboundValidationError('Create and sync the Amazon inbound plan first')
         if scan_token:
@@ -382,6 +426,9 @@ def api_fba_prep_amazon_pack_scan(session_id):
             })
 
         _row, session_data, state = ss_fba_shipments._fba_amazon_session(conn, session_id)
+        rejection = _fba_scan_rejection(session_data, msku=msku, barcode=barcode)
+        if rejection:
+            return jsonify(rejection), 422
         ss_fba_schema._fba_touch_session_worker(cur, session_id, client_id, operator_name, active_box_id)
         if not state.get('packing_confirmed'):
             raise FbaInboundValidationError('Confirm an Amazon packing option before scanning physical units')
@@ -782,7 +829,7 @@ def api_fba_prep_amazon_reset_pack_scan(session_id):
 
 
 def api_fba_prep_count_scan(session_id):
-    """Atomically count one barcode and attach its local Amazon SKU without inventory/Macy lookup."""
+    """Count products found in Amazon's catalog; a seller offer is optional here."""
     conn = None
     try:
         data = request.get_json(silent=True) or {}
@@ -794,57 +841,46 @@ def api_fba_prep_count_scan(session_id):
             return jsonify({'success': False, 'error': 'Scan a barcode first'}), 400
         if not scan_token:
             return jsonify({'success': False, 'error': 'Missing scan token'}), 400
-        amazon_listing = ss_fba_inventory._fba_local_amazon_listing(barcode)
-        if not ss_fba_schema._fba_trim(amazon_listing.get('seller_sku'), 120):
-            try:
-                credentials, _seller_id, marketplace_id, marketplace = ss_amazon_catalog._amazon_spapi_context()
-                asin = ss_amazon_catalog._amazon_resolve_asin_from_upc(credentials, marketplace, marketplace_id, barcode)
-                amazon_listing = ss_fba_inventory._fba_local_amazon_listing_by_asin(asin)
-            except Exception as exc:
-                ss_config.logger.warning('FBA scan Amazon catalog-to-SKU match failed for %s: %s', barcode, exc)
-        if not ss_fba_schema._fba_trim(amazon_listing.get('seller_sku'), 120):
-            return jsonify({
-                'success': False,
-                'not_added': True,
-                'barcode': barcode,
-                'voice_message': 'Rejected.',
-                'sort_result': {
-                    'kind': 'rejected',
-                    'headline': 'REJECTED — DO NOT INCLUDE',
-                    'instruction': 'No Amazon store listing was found. Put this item in the rejected pile.',
-                },
-                'error': 'Item not added: no Amazon store listing was found for this barcode.',
-            }), 422
-        seller_sku = ss_fba_schema._fba_trim(amazon_listing.get('seller_sku'), 120)
         try:
-            readiness = ss_fba_readiness._fba_listing_readiness(seller_sku)
+            amazon_listing = ss_fba_inventory._fba_local_amazon_listing(barcode, strict=True)
+            if not ss_fba_schema._fba_trim(amazon_listing.get('asin'), 30):
+                credentials, _seller_id, marketplace_id, marketplace = ss_amazon_catalog._amazon_spapi_context()
+                catalog_product = ss_amazon_catalog._amazon_catalog_product_from_barcode(
+                    credentials, marketplace, marketplace_id, barcode, strict=True)
+                amazon_listing = dict(catalog_product)
+                # An existing offer can enrich the result, but is never required
+                # once the product has been found in Amazon's catalog.
+                if catalog_product.get('asin'):
+                    local_offer = ss_fba_inventory._fba_local_amazon_listing_by_asin(catalog_product['asin'])
+                    if local_offer:
+                        amazon_listing.update(local_offer)
         except Exception as exc:
-            # A temporary Listings API problem must not make a physically scanned,
-            # valid store listing disappear from the count.
-            ss_config.logger.warning('FBA listing readiness check failed for %s: %s', seller_sku, exc)
-            readiness = {
-                'status': 'needs_enablement', 'seller_sku': seller_sku,
-                'fnsku': '', 'product_type': '', 'fulfillment_channels': [], 'error': '',
-            }
-        if (ss_fba_schema._fba_trim(readiness.get('status'), 40).lower() == 'failed'
-                and ss_fba_readiness._fba_error_is_missing_safety_info(readiness.get('error'))):
-            readiness = dict(readiness)
-            readiness['status'] = 'needs_safety_info'
-        if ss_fba_schema._fba_trim(readiness.get('status'), 40).lower() == 'failed':
-            rejection_reason = ss_fba_schema._fba_trim(readiness.get('error'), 700) or 'Amazon reports a blocking listing error.'
+            ss_config.logger.warning('FBA count lookup unavailable for %s: %s', barcode, exc)
+            return jsonify({
+                'success': False,
+                'barcode': barcode,
+                'sort_result': {
+                    'kind': 'error', 'headline': 'LOOKUP UNAVAILABLE — SCAN AGAIN',
+                    'instruction': 'Listing could not be checked. Set this item aside and retry.',
+                },
+                'error': 'Amazon listing lookup is unavailable. This item was not counted; scan it again.',
+            }), 503
+        if not ss_fba_schema._fba_trim(amazon_listing.get('asin'), 30):
+            ss_config.logger.warning('FBA count rejected: no catalog product for barcode %s', barcode)
             return jsonify({
                 'success': False,
                 'not_added': True,
                 'barcode': barcode,
-                'seller_sku': seller_sku,
                 'voice_message': 'Rejected.',
                 'sort_result': {
                     'kind': 'rejected',
                     'headline': 'REJECTED — DO NOT INCLUDE',
-                    'instruction': rejection_reason + ' Put this item in the rejected pile.',
+                    'instruction': 'No product was found in Amazon’s catalog for this barcode. Set this item aside.',
                 },
-                'error': f'Item not added: {rejection_reason}',
+                'error': 'Item not added: no product was found in Amazon’s catalog for this barcode.',
             }), 422
+        # Step one verifies catalog existence only. FBA eligibility, safety
+        # requirements and labels are checked in the later enablement step.
         conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
@@ -862,7 +898,6 @@ def api_fba_prep_count_scan(session_id):
             match = next((item for item in items if ss_fba_schema._fba_trim(item.get('barcode_key') or ss_warehouse_locations._movelocation_barcode_key(item.get('barcode')), 160).casefold() == barcode_key.casefold()), None)
             if match:
                 match['quantity'] = min(10000, max(0, int(match.get('quantity') or 0)) + 1)
-                ss_fba_readiness._fba_apply_listing_readiness(match, readiness)
                 if amazon_listing and not ss_fba_schema._fba_trim(match.get('seller_sku'), 120):
                     match['seller_sku'] = ss_fba_schema._fba_trim(amazon_listing.get('seller_sku'), 120)
                     match['asin'] = ss_fba_schema._fba_trim(amazon_listing.get('asin'), 30)
@@ -880,7 +915,6 @@ def api_fba_prep_count_scan(session_id):
                     'seller_sku': amazon_listing.get('seller_sku'), 'asin': amazon_listing.get('asin'),
                     'fba': {'amazon_listing': amazon_listing},
                 })
-                ss_fba_readiness._fba_apply_listing_readiness(new_item, readiness)
                 items.append(new_item)
             now = ss_listing_checks._listagent_now_iso()
             cur.execute('''UPDATE fba_prep_sessions SET items_json = ?, item_count = ?, total_units = ?,
@@ -893,20 +927,13 @@ def api_fba_prep_count_scan(session_id):
             ss_fba_schema._fba_touch_session_worker(cur, session_id, client_id, operator_name, '')
         conn.commit()
         row = cur.execute('SELECT * FROM fba_prep_sessions WHERE id = ?', (session_id,)).fetchone()
-        feedback_status = ss_fba_schema._fba_trim(readiness.get('status'), 40).lower()
         sort_result = {
             'kind': 'ready', 'headline': 'COUNTED',
             'instruction': 'Unit added to this FBA count.',
         }
         feedback = {
-            'kind': feedback_status,
-            'message': 'FBA ready' if feedback_status == 'ready' else (
-                'Amazon is enabling FBA' if feedback_status == 'enabling' else (
-                    'Amazon listing setup is needed' if feedback_status == 'needs_safety_info' else (
-                    'Amazon listing needs FBA enablement' if feedback_status == 'needs_enablement'
-                    else readiness.get('error') or 'Amazon listing needs attention'
-                ))
-            ),
+            'kind': 'needs_enablement',
+            'message': 'Amazon catalog product found. Seller listing and FBA setup are checked later.',
             'voice_message': '',
         }
         return jsonify({

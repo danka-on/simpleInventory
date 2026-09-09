@@ -13,6 +13,41 @@
       "subdomain": ""
     },
     {
+      "rule": "/fba-prep/sessions/<int:session_id>/resolve",
+      "endpoint": "amazon_resolution_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/resolution",
+      "endpoint": "amazon_resolution_read",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/resolution",
+      "endpoint": "amazon_resolution_submit",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/data_version",
       "endpoint": "api_data_version",
       "methods": [
@@ -5445,6 +5480,29 @@
       "methods": [
         "GET",
         "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/attention",
+      "endpoint": "fba_attention_list",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fba-prep/attention/<int:item_id>/<action>",
+      "endpoint": "fba_attention_action",
+      "methods": [
         "OPTIONS",
         "POST"
       ],

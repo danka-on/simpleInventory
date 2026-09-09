@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const source=fs.readFileSync('templates/fba_prep.html','utf8');
+const state={sessionId:4,amazon:{packing_groups:[{packing_group_id:'G1',label:'Group 1'},{packing_group_id:'G2',label:'Group 2'}],shipments:[{shipmentId:'shipment-2',shipmentConfirmationId:'FBA123',destination:{warehouseId:'TEST'},label_boxes:[{local_box_id:'BOX-08',packing_group_id:'G2',amazon_box_id:'FBA123U000001',units:6},{local_box_id:'BOX-01',packing_group_id:'G1',amazon_box_id:'FBA123U000002',units:18}]}]}};
+const ctx=vm.createContext({state,esc:v=>String(v||'')});
+vm.runInContext(source.slice(source.indexOf('    function finishedAmazonHtml(){'),source.indexOf('    function lockedStepHtml')),ctx);
+let html=ctx.finishedAmazonHtml();
+assert.ok(html.includes('Print BOX-08 labels'));
+assert.ok(html.includes('box_id=BOX-08'));
+assert.ok(html.includes('FBA123U000001'));
+assert.ok(html.includes('Group 2'));
+assert.ok(html.indexOf('Print BOX-01 labels')<html.indexOf('Print BOX-08 labels'));
+state.amazon.shipments[0].label_boxes[0].match_error='Ambiguous';
+html=ctx.finishedAmazonHtml();assert.ok(!html.includes('Print BOX-08 labels'));assert.ok(html.includes('Ambiguous'));
+console.log('Final carton printing preserves original box numbers and blocks ambiguous per-box links.');
