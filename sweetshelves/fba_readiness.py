@@ -200,6 +200,36 @@ def _fba_listing_issue_notes(issues):
     return '; '.join(filter(None, (_fba_listing_issue_message(issue) for issue in issues[:3])))
 
 
+def _fba_prep_error_is_inbound_pending(value):
+    """Amazon's prep lookup rejects SKUs whose new FBA offer is still propagating."""
+    return 'not available for inbound' in ss_fba_schema._fba_trim(value, 1000).lower()
+
+
+def _fba_inventory_fnsku(msku):
+    """Read the FNSKU from FBA inventory, which often leads the Listings Items summary."""
+    seller_sku = ss_fba_schema._fba_trim(msku, 255)
+    if not seller_sku:
+        return ''
+    try:
+        credentials, _seller_id, marketplace_id, marketplace = ss_amazon_catalog._amazon_spapi_context()
+        if marketplace is None:
+            return ''
+        from sp_api.api import Inventories
+        payload = ss_fba_shipments._fba_amazon_payload(
+            Inventories(credentials=credentials, marketplace=marketplace).get_inventory_summary_marketplace(
+                details=False, marketplaceIds=[marketplace_id], sellerSkus=[seller_sku],
+            )
+        )
+        rows = payload.get('inventorySummaries') if isinstance(payload.get('inventorySummaries'), list) else []
+        for row in rows:
+            if (isinstance(row, dict)
+                    and ss_fba_schema._fba_trim(row.get('sellerSku'), 255).casefold() == seller_sku.casefold()):
+                return ss_fba_schema._fba_trim(row.get('fnSku') or row.get('fnsku'), 80)
+    except Exception as exc:
+        ss_config.logger.warning('FBA inventory FNSKU lookup failed for %s: %s', seller_sku, exc)
+    return ''
+
+
 def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
     """Inspect one exact Seller SKU without confusing missing FNSKU with ineligibility."""
     seller_sku = ss_fba_schema._fba_trim(msku, 255)
@@ -221,7 +251,7 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         seller_id,
         seller_sku,
         marketplaceIds=[marketplace_id],
-        includedData=['summaries', 'issues', 'fulfillmentAvailability'],
+        includedData=['summaries', 'issues', 'fulfillmentAvailability', 'attributes'],
     )
     payload = ss_fba_shipments._fba_amazon_payload(response)
     summaries = payload.get('summaries') if isinstance(payload.get('summaries'), list) else []
@@ -231,6 +261,10 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         availability = payload.get('fulfillment_availability')
     if not isinstance(availability, list):
         availability = []
+    attributes = payload.get('attributes') if isinstance(payload.get('attributes'), dict) else {}
+    submitted = attributes.get('fulfillment_availability')
+    if not isinstance(submitted, list):
+        submitted = []
 
     fnsku = ''
     product_type = ss_fba_schema._fba_trim(payload.get('productType') or payload.get('product_type'), 120)
@@ -255,6 +289,17 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         ).upper()
         if channel and channel not in fulfillment_channels:
             fulfillment_channels.append(channel)
+    # The attribute is what the seller submitted; the live channel above lags
+    # it while Amazon processes an accepted FBA switch.
+    submitted_channels = []
+    for row in submitted:
+        if not isinstance(row, dict):
+            continue
+        channel = ss_fba_schema._fba_trim(
+            row.get('fulfillment_channel_code') or row.get('fulfillmentChannelCode'), 40
+        ).upper()
+        if channel and channel not in submitted_channels:
+            submitted_channels.append(channel)
 
     error_issues = [
         issue for issue in issues
@@ -264,7 +309,14 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
     # Advisory issues are kept as notes: the actual FBA patch decides whether
     # Amazon accepts the offer change, and polling verifies the FNSKU.
     listing_notes = _fba_listing_issue_notes(advisory_issues)
-    if fnsku:
+    # Listings Items can report the FNSKU long after FBA inventory already has
+    # it, so consult the inventory record before deciding the SKU is not set up.
+    if not fnsku:
+        fnsku = _fba_inventory_fnsku(seller_sku)
+    prep_details = _fba_item_prep_details(seller_sku)
+    inbound_pending = _fba_prep_error_is_inbound_pending((prep_details or {}).get('error'))
+    activation_note = ''
+    if fnsku and not inbound_pending:
         status = 'ready'
         error = ''
     elif blocking_issues:
@@ -273,9 +325,17 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
     elif safety_issues:
         status = 'needs_safety_info'
         error = _fba_listing_issue_notes(safety_issues)
-    elif 'AMAZON_NA' in fulfillment_channels:
+    elif fnsku:
         status = 'enabling'
         error = ''
+        activation_note = (
+            f'Amazon assigned FNSKU {fnsku} and is still making this SKU available '
+            'for inbound shipments (Amazon: try again later).'
+        )
+    elif 'AMAZON_NA' in fulfillment_channels or 'AMAZON_NA' in submitted_channels:
+        status = 'enabling'
+        error = ''
+        activation_note = 'Amazon accepted the switch to FBA and is still activating the offer.'
     else:
         status = 'needs_enablement'
         error = ''
@@ -286,11 +346,14 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         'fnsku': fnsku,
         'product_type': product_type or 'PRODUCT',
         'fulfillment_channels': fulfillment_channels,
+        'submitted_channels': submitted_channels,
         'listing_statuses': list(dict.fromkeys(listing_statuses)),
         'error': error,
         'listing_notes': listing_notes,
+        'activation_note': activation_note,
+        'inbound_pending': inbound_pending,
     }
-    result['prep_details'] = _fba_item_prep_details(seller_sku)
+    result['prep_details'] = prep_details
     with _FBA_LISTING_READINESS_CACHE_LOCK:
         _FBA_LISTING_READINESS_CACHE[cache_key] = {'ts': now, 'data': dict(result)}
     return result
@@ -306,6 +369,7 @@ def _fba_apply_listing_readiness(item, readiness, *, checked_at=None):
     item['fba_enablement_status'] = status
     item['fba_enablement_error'] = error
     item['fba_listing_notes'] = ss_fba_schema._fba_trim((readiness or {}).get('listing_notes'), 700)
+    item['fba_activation_note'] = ss_fba_schema._fba_trim((readiness or {}).get('activation_note'), 500)
     item['fba_enablement_checked_at'] = checked_at or ss_listing_checks._listagent_now_iso()
     item['amazon_product_type'] = ss_fba_schema._fba_trim((readiness or {}).get('product_type'), 120)
     if isinstance((readiness or {}).get('prep_details'), dict):
@@ -395,6 +459,7 @@ def _fba_patch_listing_to_fba(msku, readiness, *, client=None):
     return {
         'status': 'enabling', 'error': '', 'issues': issues,
         'listing_notes': _fba_listing_issue_notes(advisory_issues),
+        'activation_note': 'Amazon accepted the switch to FBA and is still activating the offer.',
     }
 
 
@@ -1333,10 +1398,10 @@ def api_fba_prep_enable_fba_status(session_id):
                             saved_item.get('fba_activation_retry_count'), 0
                         ) or 0)
                         started = ss_normalization._parse_iso_utc_naive(saved_item.get('fba_activation_started_at'))
-                        elapsed = (
-                            (datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - started).total_seconds()
-                            if started else 0
-                        )
+                        # fba_activation_started_at comes from _listagent_now_iso (local
+                        # time). Comparing it with UTC made every wait look hours long
+                        # and gave up after a single retry.
+                        elapsed = (datetime.datetime.now() - started).total_seconds() if started else 0
                         if retry_count < 1:
                             # A newly created offer can become DISCOVERABLE before
                             # Amazon applies its fulfillment channel. Reapply the

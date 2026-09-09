@@ -175,6 +175,7 @@ def _fba_session_item_payload(raw_item):
         'fba_enablement_status': raw_enablement_status,
         'fba_enablement_error': raw_enablement_error,
         'fba_listing_notes': ss_fba_schema._fba_trim(raw.get('fba_listing_notes'), 700),
+        'fba_activation_note': ss_fba_schema._fba_trim(raw.get('fba_activation_note'), 500),
         'fba_enablement_checked_at': ss_fba_schema._fba_trim(raw.get('fba_enablement_checked_at'), 40),
         'amazon_fnsku': ss_fba_schema._fba_trim(raw.get('amazon_fnsku') or raw.get('fnsku'), 80),
         'amazon_product_type': ss_fba_schema._fba_trim(raw.get('amazon_product_type'), 120),

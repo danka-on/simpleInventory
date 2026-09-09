@@ -476,6 +476,110 @@ class FbaCountScanTest(unittest.TestCase):
                  listings.patch_listings_item.call_args.kwargs["body"]["patches"]]
         self.assertIn("/attributes/fulfillment_availability", paths)
 
+    INBOUND_PENDING_PREP = {"checked": False, "error": "[{'code': 'BadRequest', 'message': 'ERROR: The following "
+                            "MSKUs are not available for inbound. If these were recently added, please try again later.'}]"}
+
+    def test_listing_readiness_uses_fba_inventory_fnsku_while_inbound_propagates(self):
+        # Listings Items still shows the merchant channel and no FNSKU minutes
+        # after an accepted FBA switch, while FBA inventory already has the FNSKU.
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            "summaries": [{"productType": "DRINKING_CUP", "status": ["BUYABLE", "DISCOVERABLE"]}],
+            "issues": [],
+            "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT", "quantity": 7}],
+            "attributes": {"fulfillment_availability": [{"fulfillment_channel_code": "AMAZON_NA"}]},
+        })
+        client = (listings, "SELLER", "ATVPDKIKX0DER")
+        with (patch.object(ss_fba_readiness, "_fba_inventory_fnsku", return_value="X005ASUE9F"),
+              patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value=self.INBOUND_PENDING_PREP)):
+            result = ss_fba_readiness._fba_listing_readiness("OW-BUK2-TVB7", force_refresh=True, client=client)
+        self.assertEqual(result["status"], "enabling")
+        self.assertEqual(result["fnsku"], "X005ASUE9F")
+        self.assertEqual(result["submitted_channels"], ["AMAZON_NA"])
+        self.assertIn("X005ASUE9F", result["activation_note"])
+        self.assertEqual(result["error"], "")
+        with (patch.object(ss_fba_readiness, "_fba_inventory_fnsku", return_value="X005ASUE9F"),
+              patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value={"checked": True, "error": ""})):
+            result = ss_fba_readiness._fba_listing_readiness("OW-BUK2-TVB7", force_refresh=True, client=client)
+        self.assertEqual(result["status"], "ready")
+        self.assertEqual(result["fnsku"], "X005ASUE9F")
+
+    def test_listing_readiness_treats_submitted_fba_channel_as_activating(self):
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            "summaries": [{"productType": "PITCHER", "status": ["BUYABLE"]}],
+            "issues": [],
+            "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT", "quantity": 13}],
+            "attributes": {"fulfillment_availability": [{"fulfillment_channel_code": "AMAZON_NA"}]},
+        })
+        with (patch.object(ss_fba_readiness, "_fba_inventory_fnsku", return_value=""),
+              patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value={"checked": False, "error": ""})):
+            result = ss_fba_readiness._fba_listing_readiness(
+                "XK-PQ59-TA3O", force_refresh=True, client=(listings, "SELLER", "ATVPDKIKX0DER"))
+        self.assertEqual(result["status"], "enabling")
+        self.assertIn("still activating", result["activation_note"])
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            "summaries": [{"productType": "PITCHER", "status": ["BUYABLE"]}], "issues": [],
+            "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT", "quantity": 13}],
+            "attributes": {"fulfillment_availability": [{"fulfillment_channel_code": "DEFAULT", "quantity": 13}]},
+        })
+        with (patch.object(ss_fba_readiness, "_fba_inventory_fnsku", return_value=""),
+              patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value={"checked": False, "error": ""})):
+            result = ss_fba_readiness._fba_listing_readiness(
+                "XK-PQ59-TA3O", force_refresh=True, client=(listings, "SELLER", "ATVPDKIKX0DER"))
+        self.assertEqual(result["status"], "needs_enablement")
+        self.assertEqual(result["activation_note"], "")
+
+    def test_enablement_status_waits_in_local_time_before_giving_up(self):
+        import datetime as _dt
+        started = (_dt.datetime.now() - _dt.timedelta(seconds=60)).isoformat()
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.execute("UPDATE fba_prep_sessions SET items_json=?, item_count=1, total_units=1 WHERE id=1", (
+            json.dumps([{
+                "barcode": "026865983135", "seller_sku": "OW-BUK2-TVB7", "quantity": 1,
+                "fba_enablement_status": "enabling", "fba_activation_started_at": started,
+                "fba_activation_retry_count": 1,
+            }]),
+        ))
+        db.commit()
+        db.close()
+        listings_client = (Mock(), "SELLER", "ATVPDKIKX0DER")
+        readiness = {"status": "needs_enablement", "product_type": "DRINKING_CUP",
+                     "fulfillment_channels": ["DEFAULT"], "error": ""}
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=listings_client),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value=readiness),
+              patch.object(ss_fba_readiness, "_fba_patch_listing_to_fba") as retry_patch):
+            response = self.client.post("/api/fba-prep/sessions/1/enable-fba-status")
+        self.assertEqual(response.status_code, 200)
+        item = response.get_json()["session"]["items"][0]
+        self.assertEqual(item["fba_enablement_status"], "enabling")
+        self.assertEqual(item["fba_enablement_error"], "")
+        retry_patch.assert_not_called()
+
+    def test_enablement_status_saves_activation_note_and_early_fnsku(self):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.execute("UPDATE fba_prep_sessions SET items_json=?, item_count=1, total_units=1 WHERE id=1", (
+            '[{"barcode":"026865983135","seller_sku":"OW-BUK2-TVB7","quantity":1,'
+            '"fba_enablement_status":"enabling","fba_activation_started_at":"2026-09-09T13:23:56"}]',
+        ))
+        db.commit()
+        db.close()
+        readiness = {"status": "enabling", "product_type": "DRINKING_CUP", "fnsku": "X005ASUE9F",
+                     "fulfillment_channels": ["DEFAULT"], "submitted_channels": ["AMAZON_NA"], "error": "",
+                     "activation_note": "Amazon assigned FNSKU X005ASUE9F and is still making this SKU available for inbound shipments."}
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(Mock(), "SELLER", "ATVPDKIKX0DER")),
+              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value=readiness)):
+            response = self.client.post("/api/fba-prep/sessions/1/enable-fba-status")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        item = payload["session"]["items"][0]
+        self.assertEqual(item["fba_enablement_status"], "enabling")
+        self.assertEqual(item["amazon_fnsku"], "X005ASUE9F")
+        self.assertIn("X005ASUE9F", item["fba_activation_note"])
+        self.assertEqual(payload["enablement"]["enabling"], 1)
+
     def test_accepted_combined_fba_patch_does_not_loop_on_stale_prerequisite_issue(self):
         listings = Mock()
         stale_issue = {
