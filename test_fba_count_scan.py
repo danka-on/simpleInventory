@@ -45,7 +45,8 @@ class FbaCountScanTest(unittest.TestCase):
     def test_unmatched_item_is_rejected_and_not_counted(self):
         with (patch.object(ss_config, "BASE_DIR", self.base_dir),
               patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value={}),
-              patch.object(ss_amazon_catalog, "_amazon_spapi_context", side_effect=RuntimeError("offline"))):
+              patch.object(ss_amazon_catalog, "_amazon_spapi_context", return_value=(None, "seller", "market", None)),
+              patch.object(ss_amazon_catalog, "_amazon_catalog_product_from_barcode", return_value={})):
             response = self.scan()
         self.assertEqual(response.status_code, 422)
         payload = response.get_json()
@@ -61,7 +62,7 @@ class FbaCountScanTest(unittest.TestCase):
         with (patch.object(ss_config, "BASE_DIR", self.base_dir),
               patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value={}),
               patch.object(ss_amazon_catalog, "_amazon_spapi_context", return_value=(object(), "seller", "market", object())),
-              patch.object(ss_amazon_catalog, "_amazon_resolve_asin_from_upc", return_value="B000U67JMQ"),
+              patch.object(ss_amazon_catalog, "_amazon_catalog_product_from_barcode", return_value={"asin": "B000U67JMQ", "title": "Tablecloth"}),
               patch.object(ss_fba_inventory, "_fba_local_amazon_listing_by_asin", return_value=listing),
               patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value={
                   "status": "ready", "fnsku": "X001234567", "product_type": "HOME"
@@ -71,9 +72,42 @@ class FbaCountScanTest(unittest.TestCase):
         item = response.get_json()["session"]["items"][0]
         self.assertEqual(item["seller_sku"], "PL-8ALB-G8IZ")
         self.assertEqual(item["quantity"], 1)
-        self.assertEqual(item["fba_enablement_status"], "ready")
-        self.assertEqual(item["amazon_fnsku"], "X001234567")
+        self.assertEqual(item["fba_enablement_status"], "needs_enablement")
         self.assertEqual(response.get_json()["sort_result"]["kind"], "ready")
+
+    def test_catalog_product_without_seller_offer_counts_and_survives_reload(self):
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value={}),
+              patch.object(ss_fba_inventory, "_fba_local_amazon_listing_by_asin", return_value={}),
+              patch.object(ss_amazon_catalog, "_amazon_spapi_context", return_value=(None, "seller", "market", None)),
+              patch("sp_api.api.CatalogItems") as catalog,
+              patch.object(ss_fba_readiness, "_fba_listing_readiness") as readiness):
+            catalog.return_value.search_catalog_items.return_value = Mock(errors=None, payload={
+                "items": [{"asin": "B000U67JMQ", "summaries": [
+                    {"marketplaceId": "market", "itemName": "Catalog-only tablecloth"}]}]})
+            response = self.scan("047596190524")
+            self.assertEqual(response.status_code, 200)
+            item = response.get_json()["session"]["items"][0]
+            self.assertEqual(item["seller_sku"], "")
+            self.assertEqual(item["asin"], "B000U67JMQ")
+            self.assertEqual(item["title"], "Catalog-only tablecloth")
+            self.assertEqual(item["quantity"], 1)
+            self.assertEqual(response.get_json()["sort_result"]["headline"], "COUNTED")
+            readiness.assert_not_called()
+            # Retrying the same scan token must not count the unit twice.
+            duplicate = self.scan("047596190524")
+            self.assertTrue(duplicate.get_json()["duplicate"])
+            self.assertEqual(duplicate.get_json()["session"]["total_units"], 1)
+            reloaded = self.client.get("/api/fba-prep/sessions/1")
+            self.assertEqual(reloaded.status_code, 200)
+            self.assertEqual(reloaded.get_json()["session"]["items"][0]["asin"], "B000U67JMQ")
+
+    def test_catalog_lookup_restores_omitted_upc_zero(self):
+        with patch("sp_api.api.CatalogItems") as catalog:
+            catalog.return_value.search_catalog_items.return_value = Mock(errors=None, payload={"items": []})
+            result = ss_amazon_catalog._amazon_catalog_product_from_barcode(None, None, "market", "47596190524", strict=True)
+            self.assertEqual(result, {})
+            self.assertEqual(catalog.return_value.search_catalog_items.call_args.kwargs["identifiers"], ["047596190524"])
 
     def test_listing_without_fnsku_is_counted_for_enablement(self):
         listing = {"asin": "B07XV1JMRF", "seller_sku": "W2-NGC9-BAZS", "title": "Tablecloth"}
@@ -95,22 +129,51 @@ class FbaCountScanTest(unittest.TestCase):
         self.assertEqual(db.execute("SELECT total_units FROM fba_prep_sessions WHERE id=1").fetchone()[0], 1)
         db.close()
 
-    def test_blocking_amazon_listing_error_is_rejected_and_not_counted(self):
-        listing = {"asin": "B07XV1JMRF", "seller_sku": "SKU-BLOCKED", "title": "Blocked item"}
+    def test_listing_is_counted_without_calling_readiness(self):
+        listing = {"asin": "B07XV1JMRF", "seller_sku": "SKU-BLOCKED", "title": "Item"}
         with (patch.object(ss_config, "BASE_DIR", self.base_dir),
               patch.object(ss_fba_inventory, "_fba_local_amazon_listing", return_value=listing),
-              patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value={
-                  "status": "failed", "error": "Missing required product attribute",
-              })):
-            response = self.scan("026865983135")
-        self.assertEqual(response.status_code, 422)
-        payload = response.get_json()
-        self.assertTrue(payload["not_added"])
-        self.assertEqual(payload["sort_result"]["kind"], "rejected")
-        self.assertIn("Missing required product attribute", payload["sort_result"]["instruction"])
-        db = sqlite3.connect(self.base_dir / "searchRack.db")
-        self.assertEqual(db.execute("SELECT total_units FROM fba_prep_sessions WHERE id=1").fetchone()[0], 0)
-        db.close()
+              patch.object(ss_fba_readiness, "_fba_listing_readiness",
+                           side_effect=AssertionError("Step one must not check readiness")) as readiness):
+            response = self.scan()
+        self.assertEqual(response.status_code, 200)
+        readiness.assert_not_called()
+        self.assertEqual(response.get_json()["session"]["total_units"], 1)
+
+    def test_lookup_outage_is_retryable_and_not_counted(self):
+        for failure in ("database", "catalog"):
+            with self.subTest(failure=failure):
+                with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+                      patch.object(ss_fba_inventory, "_fba_local_amazon_listing",
+                                   side_effect=RuntimeError("offline") if failure == "database" else None,
+                                   return_value={}),
+                      patch.object(ss_amazon_catalog, "_amazon_spapi_context",
+                                   return_value=(None, "seller", "market", None)),
+                      patch.object(ss_amazon_catalog, "_amazon_catalog_product_from_barcode",
+                                   side_effect=RuntimeError("offline"))):
+                    response = self.scan()
+                self.assertEqual(response.status_code, 503)
+                payload = response.get_json()
+                self.assertFalse(payload.get("not_added", False))
+                self.assertEqual(payload["sort_result"]["kind"], "error")
+                with sqlite3.connect(self.base_dir / "searchRack.db") as db:
+                    self.assertEqual(db.execute("SELECT total_units FROM fba_prep_sessions WHERE id=1").fetchone()[0], 0)
+                    self.assertEqual(db.execute("SELECT COUNT(*) FROM fba_count_scans").fetchone()[0], 0)
+                db.close()
+
+    def test_strict_local_lookup_propagates_database_errors(self):
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
+            with self.assertRaises(sqlite3.OperationalError):
+                ss_fba_inventory._fba_local_amazon_listing("123456789012", strict=True)
+            with self.assertRaises(sqlite3.OperationalError):
+                ss_fba_inventory._fba_local_amazon_listing_by_asin("B012345678", strict=True)
+
+    def test_strict_catalog_lookup_propagates_api_errors(self):
+        with patch("sp_api.api.CatalogItems") as catalog:
+            catalog.return_value.search_catalog_items.return_value = Mock(errors=[{"code": "QuotaExceeded"}])
+            with self.assertRaises(RuntimeError):
+                ss_amazon_catalog._amazon_resolve_asin_from_upc(None, None, "market", "123456789012", strict=True)
+            self.assertIsNone(ss_amazon_catalog._amazon_resolve_asin_from_upc(None, None, "market", "123456789012"))
 
     def test_missing_battery_and_dangerous_goods_answers_are_amber_and_counted(self):
         listing = {"asin": "B07XV1JMRF", "seller_sku": "SKU-SAFETY", "title": "Household item"}
@@ -128,7 +191,7 @@ class FbaCountScanTest(unittest.TestCase):
         self.assertEqual(payload["sort_result"]["kind"], "ready")
         self.assertEqual(payload["sort_result"]["headline"], "COUNTED")
         item = payload["session"]["items"][0]
-        self.assertEqual(item["fba_enablement_status"], "needs_safety_info")
+        self.assertEqual(item["fba_enablement_status"], "needs_enablement")
         self.assertFalse(item["batteries_required"])
 
     def test_flat_safety_error_reported_as_failed_is_still_amber_and_counted(self):
@@ -146,8 +209,91 @@ class FbaCountScanTest(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["sort_result"]["kind"], "ready")
         self.assertEqual(payload["sort_result"]["headline"], "COUNTED")
-        self.assertEqual(payload["session"]["items"][0]["fba_enablement_status"], "needs_safety_info")
+        self.assertEqual(payload["session"]["items"][0]["fba_enablement_status"], "needs_enablement")
         self.assertFalse(payload["session"]["items"][0]["batteries_required"])
+
+    def test_removed_reject_remains_recognizable_for_label_sorting(self):
+        item = {"barcode": "025398232475", "seller_sku": "SKU-REJECTED", "quantity": 1,
+                "fba_enablement_status": "failed", "fba_enablement_error": "You need approval to list in this brand."}
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
+            saved = self.client.post("/api/fba-prep/sessions", json={"id": 1, "items": [item]})
+            self.assertEqual(saved.status_code, 200)
+            removed = self.client.post("/api/fba-prep/sessions", json={"id": 1, "items": []})
+            self.assertEqual(removed.status_code, 200)
+            self.assertEqual(removed.get_json()["session"]["total_units"], 0)
+            self.assertEqual(len(removed.get_json()["session"]["rejected_items"]), 1)
+            rejected = self.client.get("/api/fba-labels/resolve?barcode=25398232475")
+            self.assertEqual(rejected.status_code, 422)
+            self.assertTrue(rejected.get_json()["rejected"])
+            # Once repaired and explicitly saved, the old rejection is cleared.
+            item["fba_enablement_status"] = "ready"
+            item["fba_enablement_error"] = ""
+            repaired = self.client.post("/api/fba-prep/sessions", json={"id": 1, "items": [item]})
+            self.assertEqual(repaired.get_json()["session"]["rejected_items"], [])
+
+    def test_continue_ready_preserves_all_excluded_rows_and_plan_quantities(self):
+        from fba_inbound import build_create_plan_request, US_MARKETPLACE_ID
+        rows = [
+            {"barcode": "111111111111", "seller_sku": "READY", "quantity": 2, "fba_enablement_status": "ready"},
+            {"barcode": "222222222222", "seller_sku": "REJECT", "quantity": 1, "fba_enablement_status": "failed", "fba_enablement_error": "Brand approval required"},
+            {"barcode": "333333333333", "seller_sku": "PENDING", "quantity": 1, "fba_enablement_status": "needs_enablement"},
+            {"barcode": "444444444444", "asin": "B000U67JMQ", "seller_sku": "", "quantity": 1},
+            {"barcode": "555555555555", "seller_sku": "REJECT", "quantity": 1, "fba_enablement_status": "ready"},
+        ]
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
+            self.assertEqual(self.client.post("/api/fba-prep/sessions", json={"id": 1, "items": rows}).status_code, 200)
+            response = self.client.post("/api/fba-prep/sessions", json={"id": 1, "items": rows[:1], "preserve_excluded_items": True})
+            self.assertEqual(response.status_code, 200)
+            session = response.get_json()["session"]
+            self.assertEqual(session["total_units"], 2)
+            self.assertEqual(len(session["rejected_items"]), 4)
+            self.assertTrue(ss_fba_readiness._fba_enablement_progress(session["items"])["all_ready"])
+            for barcode, rejected in [("222222222222", True), ("333333333333", False), ("444444444444", False), ("555555555555", False)]:
+                result = self.client.get("/api/fba-labels/resolve?barcode=" + barcode)
+                self.assertEqual(result.status_code, 422)
+                self.assertEqual(result.get_json()["rejected"], rejected)
+            reloaded = self.client.get("/api/fba-prep/sessions/1").get_json()["session"]
+            self.assertEqual(len(reloaded["rejected_items"]), 4)
+        source = {"name": "Warehouse", "addressLine1": "1 Main St", "city": "Miami", "stateOrProvinceCode": "FL", "postalCode": "33101", "countryCode": "US", "phoneNumber": "3055550100", "email": "shipping@example.com"}
+        body = build_create_plan_request(session, source, US_MARKETPLACE_ID)
+        self.assertEqual([(item["msku"], item["quantity"]) for item in body["items"]], [("READY", 2)])
+
+    def test_save_catalog_count_with_empty_prep_data(self):
+        payload = {"id": 1, "session_name": "Catalog count", "items": [
+            {"barcode": "047596190524", "asin": "B000U67JMQ", "quantity": 2,
+             "seller_sku": "", "amazon_prep": {}},
+            {"barcode": "026865983135", "asin": "B07XV1JMRF", "quantity": 1,
+             "seller_sku": "SKU-EXISTING", "amazon_prep": {"prepTypes": ["polybagging"]}},
+        ]}
+        with patch.object(ss_config, "BASE_DIR", self.base_dir):
+            response = self.client.post("/api/fba-prep/sessions", json=payload)
+            self.assertEqual(response.status_code, 200, response.get_json())
+            saved = self.client.get("/api/fba-prep/sessions/1").get_json()["session"]
+        self.assertEqual(saved["total_units"], 3)
+        self.assertEqual(saved["items"][0]["asin"], "B000U67JMQ")
+        self.assertEqual(saved["items"][0]["seller_sku"], "")
+        self.assertEqual(saved["items"][1]["amazon_prep"]["prep_types"], ["POLYBAGGING"])
+
+    def test_save_then_enable_fba_with_empty_prep_data(self):
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            "summaries": [{"productType": "HOME", "status": ["BUYABLE", "DISCOVERABLE"]}],
+            "issues": [], "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT"}],
+        })
+        listings.patch_listings_item.return_value = Mock(errors=None, payload={"status": "ACCEPTED", "issues": []})
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(listings, "SELLER", "market"))):
+            saved = self.client.post("/api/fba-prep/sessions", json={
+                "id": 1, "session_name": "FBA setup", "items": [
+                    {"barcode": "026865983135", "asin": "B07XV1JMRF", "quantity": 1,
+                     "seller_sku": "SKU-SAVE-SETUP", "amazon_prep": {}},
+                ],
+            })
+            self.assertEqual(saved.status_code, 200, saved.get_json())
+            response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={"confirm": True})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()["enablement"]["enabling"], 1)
+        listings.patch_listings_item.assert_called_once()
 
     def test_saved_safety_rejection_and_string_false_are_migrated_to_amber(self):
         message = ("'Dangerous Goods Regulations' is required but missing. "
@@ -228,6 +374,107 @@ class FbaCountScanTest(unittest.TestCase):
             {"op": "delete", "path": "/attributes/fulfillment_availability",
              "value": [{"fulfillment_channel_code": "DEFAULT"}]},
         ])
+
+    BRAND_FAMILY_ISSUE = {
+        "code": "100898", "severity": "ERROR", "categories": ["INVALID_ATTRIBUTE"],
+        "attributeNames": ["brand", "global_catalog_owner"],
+        "message": "Your variation child ASIN B0CB9BQF6P can't be added to parent ASIN B0CBM8W1RZ "
+                   "because the brand value was not consistent across the family.",
+    }
+    APPROVAL_ISSUE = {
+        "code": "18299", "severity": "ERROR", "categories": ["QUALIFICATION_REQUIRED"],
+        "message": "You need approval to list in this brand.",
+    }
+
+    def test_listing_readiness_keeps_catalog_quality_errors_as_notes(self):
+        # Seller Central still converts a BUYABLE offer to FBA when the listing
+        # only carries catalog-quality errors, so the read-only check must not
+        # fail the row before Amazon has been asked.
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            "summaries": [{"productType": "TABLECLOTH", "status": ["BUYABLE", "DISCOVERABLE"]}],
+            "issues": [self.BRAND_FAMILY_ISSUE],
+            "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT"}],
+        })
+        with patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value={}):
+            result = ss_fba_readiness._fba_listing_readiness(
+                "UV-SO4Z-K3CC", force_refresh=True, client=(listings, "SELLER", "ATVPDKIKX0DER"))
+        self.assertEqual(result["status"], "needs_enablement")
+        self.assertEqual(result["error"], "")
+        self.assertIn("brand value was not consistent", result["listing_notes"])
+        self.assertIn("(brand, global_catalog_owner)", result["listing_notes"])
+
+    def test_listing_readiness_keeps_approval_errors_blocking(self):
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            "summaries": [{"productType": "PILLOW_SHAM", "status": ["DISCOVERABLE"]}],
+            "issues": [self.APPROVAL_ISSUE],
+            "fulfillmentAvailability": [{"fulfillmentChannelCode": "AMAZON_NA"}],
+        })
+        with patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value={}):
+            result = ss_fba_readiness._fba_listing_readiness(
+                "A1-GX7S-49LJ", force_refresh=True, client=(listings, "SELLER", "ATVPDKIKX0DER"))
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("approval", result["error"])
+        self.assertEqual(result["listing_notes"], "")
+
+    def test_fba_patch_follows_amazon_acceptance_not_echoed_catalog_errors(self):
+        description_issue = {
+            "code": "90220", "severity": "ERROR", "attributeNames": ["product_description"],
+            "message": "'Product Description' is required but missing.",
+        }
+        readiness = {"status": "needs_enablement", "product_type": "DISHWARE_PLATE",
+                     "fulfillment_channels": ["DEFAULT"]}
+        client = (Mock(), "SELLER", "ATVPDKIKX0DER")
+        client[0].patch_listings_item.return_value = Mock(errors=None, payload={
+            "status": "ACCEPTED", "issues": [description_issue]})
+        result = ss_fba_readiness._fba_patch_listing_to_fba("2M-RBXO-SHCC", readiness, client=client)
+        self.assertEqual(result["status"], "enabling")
+        self.assertEqual(result["error"], "")
+        self.assertIn("Product Description", result["listing_notes"])
+        client[0].patch_listings_item.return_value = Mock(errors=None, payload={
+            "status": "INVALID", "issues": [description_issue]})
+        result = ss_fba_readiness._fba_patch_listing_to_fba("2M-RBXO-SHCC", readiness, client=client)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("Product Description", result["error"])
+        client[0].patch_listings_item.return_value = Mock(errors=None, payload={
+            "status": "ACCEPTED", "issues": [self.APPROVAL_ISSUE]})
+        result = ss_fba_readiness._fba_patch_listing_to_fba("2M-RBXO-SHCC", readiness, client=client)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("approval", result["error"])
+
+    def test_enable_fba_retries_rows_that_failed_on_catalog_quality_errors(self):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.execute("UPDATE fba_prep_sessions SET items_json=?, item_count=1, total_units=1 WHERE id=1", (
+            '[{"barcode":"194590090586","seller_sku":"UV-SO4Z-K3CC","quantity":1,'
+            '"fba_enablement_status":"failed","fba_enablement_error":"brand value was not consistent"}]',
+        ))
+        db.commit()
+        db.close()
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            "summaries": [{"productType": "TABLECLOTH", "status": ["BUYABLE", "DISCOVERABLE"]}],
+            "issues": [self.BRAND_FAMILY_ISSUE],
+            "fulfillmentAvailability": [{"fulfillmentChannelCode": "DEFAULT", "quantity": 1}],
+        })
+        listings.patch_listings_item.return_value = Mock(errors=None, payload={
+            "status": "ACCEPTED", "issues": [self.BRAND_FAMILY_ISSUE]})
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_item_prep_details", return_value={}),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
+            response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={
+                "confirm": True, "seller_skus": ["UV-SO4Z-K3CC"]})
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["enablement"]["enabling"], 1)
+        self.assertEqual(payload["enablement"]["failed"], 0)
+        item = payload["session"]["items"][0]
+        self.assertEqual(item["fba_enablement_status"], "enabling")
+        self.assertEqual(item["fba_enablement_error"], "")
+        self.assertIn("brand value was not consistent", item["fba_listing_notes"])
+        paths = [patch_row["path"] for patch_row in
+                 listings.patch_listings_item.call_args.kwargs["body"]["patches"]]
+        self.assertIn("/attributes/fulfillment_availability", paths)
 
     def test_accepted_combined_fba_patch_does_not_loop_on_stale_prerequisite_issue(self):
         listings = Mock()

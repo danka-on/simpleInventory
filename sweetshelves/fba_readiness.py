@@ -163,6 +163,43 @@ def _fba_error_is_missing_safety_info(value):
     return bool(parts) and all(any(alias in part for alias in aliases) for part in parts)
 
 
+_FBA_OFFER_BLOCKING_TOKENS = ('qualification_required', 'approval', 'restricted', 'fba_inb_0021')
+
+
+def _fba_issue_blocks_fba_offer(issue):
+    """Only approval/qualification errors keep Amazon from switching an offer to FBA.
+
+    Other ERROR-severity listing issues (variation brand conflicts, missing
+    description, invalid color, suppressed main image) describe catalog
+    quality. Seller Central still lets those offers change to Fulfilled by
+    Amazon, so they must not fail setup before Amazon has been asked.
+    """
+    if not isinstance(issue, dict):
+        return False
+    try:
+        serialized = json.dumps(issue, ensure_ascii=False).lower()
+    except Exception:
+        serialized = ss_fba_schema._fba_trim(issue.get('message'), 1000).lower()
+    return any(token in serialized for token in _FBA_OFFER_BLOCKING_TOKENS)
+
+
+def _fba_split_listing_issues(issues):
+    """Separate FBA-offer blockers, answerable safety questions, and advisory catalog issues."""
+    blocking, safety, advisory = [], [], []
+    for issue in issues:
+        if _fba_issue_blocks_fba_offer(issue):
+            blocking.append(issue)
+        elif _fba_issue_is_missing_safety_info(issue):
+            safety.append(issue)
+        else:
+            advisory.append(issue)
+    return blocking, safety, advisory
+
+
+def _fba_listing_issue_notes(issues):
+    return '; '.join(filter(None, (_fba_listing_issue_message(issue) for issue in issues[:3])))
+
+
 def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
     """Inspect one exact Seller SKU without confusing missing FNSKU with ineligibility."""
     seller_sku = ss_fba_schema._fba_trim(msku, 255)
@@ -219,24 +256,23 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         if channel and channel not in fulfillment_channels:
             fulfillment_channels.append(channel)
 
-    blocking_issues = [
+    error_issues = [
         issue for issue in issues
         if isinstance(issue, dict) and ss_fba_schema._fba_trim(issue.get('severity'), 20).upper() == 'ERROR'
     ]
-    safety_info_only = bool(blocking_issues) and all(
-        _fba_issue_is_missing_safety_info(issue) for issue in blocking_issues
-    )
+    blocking_issues, safety_issues, advisory_issues = _fba_split_listing_issues(error_issues)
+    # Advisory issues are kept as notes: the actual FBA patch decides whether
+    # Amazon accepts the offer change, and polling verifies the FNSKU.
+    listing_notes = _fba_listing_issue_notes(advisory_issues)
     if fnsku:
         status = 'ready'
         error = ''
-    elif safety_info_only:
-        status = 'needs_safety_info'
-        messages = [_fba_listing_issue_message(issue) for issue in blocking_issues[:3]]
-        error = '; '.join(message for message in messages if message)
     elif blocking_issues:
         status = 'failed'
-        messages = [_fba_listing_issue_message(issue) for issue in blocking_issues[:3]]
-        error = '; '.join(message for message in messages if message) or 'Amazon reports a blocking listing error.'
+        error = _fba_listing_issue_notes(blocking_issues) or 'Amazon reports a blocking listing error.'
+    elif safety_issues:
+        status = 'needs_safety_info'
+        error = _fba_listing_issue_notes(safety_issues)
     elif 'AMAZON_NA' in fulfillment_channels:
         status = 'enabling'
         error = ''
@@ -252,6 +288,7 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         'fulfillment_channels': fulfillment_channels,
         'listing_statuses': list(dict.fromkeys(listing_statuses)),
         'error': error,
+        'listing_notes': listing_notes,
     }
     result['prep_details'] = _fba_item_prep_details(seller_sku)
     with _FBA_LISTING_READINESS_CACHE_LOCK:
@@ -268,6 +305,7 @@ def _fba_apply_listing_readiness(item, readiness, *, checked_at=None):
         status = 'needs_enablement'
     item['fba_enablement_status'] = status
     item['fba_enablement_error'] = error
+    item['fba_listing_notes'] = ss_fba_schema._fba_trim((readiness or {}).get('listing_notes'), 700)
     item['fba_enablement_checked_at'] = checked_at or ss_listing_checks._listagent_now_iso()
     item['amazon_product_type'] = ss_fba_schema._fba_trim((readiness or {}).get('product_type'), 120)
     if isinstance((readiness or {}).get('prep_details'), dict):
@@ -335,24 +373,29 @@ def _fba_patch_listing_to_fba(msku, readiness, *, client=None):
         issue for issue in issues
         if isinstance(issue, dict) and ss_fba_schema._fba_trim(issue.get('severity'), 20).upper() == 'ERROR'
     ]
-    if blocking:
-        safety_only = all(_fba_issue_is_missing_safety_info(issue) for issue in blocking)
-        # Listings Items commonly echoes the issue set from immediately before
-        # an accepted asynchronous patch. This request contains every required
-        # non-battery prerequisite together with the FBA channel, so ACCEPTED
-        # means Amazon queued the complete transition and polling must verify it.
-        if safety_only and response_status == 'ACCEPTED':
-            with _FBA_LISTING_READINESS_CACHE_LOCK:
-                _FBA_LISTING_READINESS_CACHE.pop(ss_fba_schema._fba_trim(msku, 255).casefold(), None)
-            return {'status': 'enabling', 'error': '', 'issues': issues}
+    offer_blockers, safety_issues, advisory_issues = _fba_split_listing_issues(blocking)
+    if offer_blockers:
+        return {'status': 'failed', 'error': _fba_listing_issue_notes(offer_blockers), 'issues': issues}
+    rejected = response_status in ('INVALID', 'ERROR', 'REJECTED', 'FAILURE')
+    if rejected or (blocking and response_status != 'ACCEPTED'):
+        safety_only = bool(safety_issues) and not advisory_issues
         return {
             'status': 'needs_safety_info' if safety_only else 'failed',
-            'error': '; '.join(filter(None, (_fba_listing_issue_message(issue) for issue in blocking[:3]))),
+            'error': _fba_listing_issue_notes(blocking)
+                     or f'Amazon returned {response_status or "an invalid response"} for the FBA offer change.',
             'issues': issues,
         }
+    # Listings Items commonly echoes the issue set from immediately before an
+    # accepted asynchronous patch: stale prerequisite questions as well as
+    # catalog-quality errors (missing description, variation brand conflicts)
+    # that never stop an offer from switching to FBA. ACCEPTED means Amazon
+    # queued the complete transition and polling must verify the FNSKU.
     with _FBA_LISTING_READINESS_CACHE_LOCK:
         _FBA_LISTING_READINESS_CACHE.pop(ss_fba_schema._fba_trim(msku, 255).casefold(), None)
-    return {'status': 'enabling', 'issues': issues}
+    return {
+        'status': 'enabling', 'error': '', 'issues': issues,
+        'listing_notes': _fba_listing_issue_notes(advisory_issues),
+    }
 
 
 def _fba_patch_listing_no_battery_safety(msku, readiness, *, client=None):
@@ -384,29 +427,32 @@ def _fba_patch_listing_no_battery_safety(msku, readiness, *, client=None):
         issue for issue in issues
         if isinstance(issue, dict) and ss_fba_schema._fba_trim(issue.get('severity'), 20).upper() == 'ERROR'
     ]
-    if blocking:
-        safety_only = all(_fba_issue_is_missing_safety_info(issue) for issue in blocking)
-        # Listings Items can echo the old issue set while returning ACCEPTED
-        # for this patch. ACCEPTED means Amazon queued the new answers; the
-        # subsequent FBA-enablement read verifies that they cleared.
-        if safety_only and response_status == 'ACCEPTED':
-            with _FBA_LISTING_READINESS_CACHE_LOCK:
-                _FBA_LISTING_READINESS_CACHE.pop(ss_fba_schema._fba_trim(msku, 255).casefold(), None)
-            return {
-                'status': 'needs_enablement', 'error': '', 'issues': issues,
-                'product_type': ss_fba_schema._fba_trim((readiness or {}).get('product_type'), 120),
-            }
+    product_type = ss_fba_schema._fba_trim((readiness or {}).get('product_type'), 120)
+    offer_blockers, safety_issues, advisory_issues = _fba_split_listing_issues(blocking)
+    if offer_blockers:
+        return {
+            'status': 'failed', 'error': _fba_listing_issue_notes(offer_blockers),
+            'issues': issues, 'product_type': product_type,
+        }
+    rejected = response_status in ('INVALID', 'ERROR', 'REJECTED', 'FAILURE')
+    if rejected or (blocking and response_status != 'ACCEPTED'):
+        safety_only = bool(safety_issues) and not advisory_issues
         return {
             'status': 'needs_safety_info' if safety_only else 'failed',
-            'error': '; '.join(filter(None, (_fba_listing_issue_message(issue) for issue in blocking[:3]))),
+            'error': _fba_listing_issue_notes(blocking)
+                     or f'Amazon returned {response_status or "an invalid response"} for the listing update.',
             'issues': issues,
-            'product_type': ss_fba_schema._fba_trim((readiness or {}).get('product_type'), 120),
+            'product_type': product_type,
         }
+    # Listings Items can echo the old issue set while returning ACCEPTED for
+    # this patch. ACCEPTED means Amazon queued the new answers; the subsequent
+    # FBA-enablement read verifies that they cleared.
     with _FBA_LISTING_READINESS_CACHE_LOCK:
         _FBA_LISTING_READINESS_CACHE.pop(ss_fba_schema._fba_trim(msku, 255).casefold(), None)
     return {
         'status': 'needs_enablement', 'error': '', 'issues': issues,
-        'product_type': ss_fba_schema._fba_trim((readiness or {}).get('product_type'), 120),
+        'product_type': product_type,
+        'listing_notes': _fba_listing_issue_notes(advisory_issues),
     }
 
 
@@ -505,11 +551,13 @@ def _fba_create_separate_fba_offer(source_sku, target_sku, readiness, *, client=
         if isinstance(issue, dict) and ss_fba_schema._fba_trim(issue.get('severity'), 20).upper() == 'ERROR'
     ]
     response_status = ss_fba_schema._fba_trim(payload.get('status'), 40).upper()
-    if blocking or response_status in ('INVALID', 'ERROR', 'REJECTED', 'FAILURE'):
+    offer_blockers, _safety_issues, advisory_issues = _fba_split_listing_issues(blocking)
+    rejected = response_status in ('INVALID', 'ERROR', 'REJECTED', 'FAILURE')
+    if offer_blockers or rejected or (blocking and response_status != 'ACCEPTED'):
         return {
             'status': 'failed', 'target_sku': target, 'source_sku': source,
             'strategy': 'separate_fba_sku',
-            'error': '; '.join(filter(None, (_fba_listing_issue_message(issue) for issue in blocking[:3])))
+            'error': _fba_listing_issue_notes(offer_blockers or blocking)
                      or f'Amazon returned {response_status or "an invalid response"} for the separate FBA SKU.',
             'issues': issues,
         }
@@ -519,6 +567,7 @@ def _fba_create_separate_fba_offer(source_sku, target_sku, readiness, *, client=
         'status': 'enabling', 'error': '', 'issues': issues,
         'target_sku': target, 'source_sku': source, 'strategy': 'separate_fba_sku',
         'asin': asin, 'product_type': product_type,
+        'listing_notes': _fba_listing_issue_notes(advisory_issues),
     }
 
 
@@ -1537,6 +1586,35 @@ def _fba_patch_listing_package_measurements(msku, item, measurements, *, client=
         'weight_lb': weight_lb, 'updated_at': ss_listing_checks._listagent_now_iso(),
         'source': 'operator', 'amazon_status': status or 'ACCEPTED',
     }
+
+
+def _fba_listing_measurement_status(payload, saved, marketplace_id):
+    """Confirm saved seller contributions without claiming inbound acceptance."""
+    attributes = {
+        key: [row for row in rows if isinstance(row, dict)
+              and row.get('marketplace_id') == marketplace_id]
+        for key, rows in (payload.get('attributes') or {}).items()
+        if isinstance(rows, list)
+    }
+    package = _fba_catalog_measurement_reference_from_payload({'attributes': attributes})['package']
+    errors = [_fba_listing_issue_message(issue) for issue in payload.get('issues', [])
+              if isinstance(issue, dict) and str(issue.get('severity', '')).upper() == 'ERROR']
+    factors = {'inches': 1, 'centimeters': 1 / 2.54, 'millimeters': 1 / 25.4,
+               'pounds': 1, 'ounces': 1 / 16, 'kilograms': 2.20462262185, 'grams': .00220462262185}
+    matches = []
+    for name, field in [('length', 'length_in'), ('width', 'width_in'),
+                        ('height', 'height_in'), ('weight', 'weight_lb')]:
+        measurement = package.get(name, {})
+        unit = measurement.get('unit')
+        allowed = ('pounds', 'ounces', 'kilograms', 'grams') if name == 'weight' else ('inches', 'centimeters', 'millimeters')
+        try:
+            expected = float(saved.get(field) or 0)
+            actual = float(measurement.get('value') or 0) * factors.get(unit, 0)
+            matches.append(unit in allowed and expected > 0 and math.isclose(actual, expected, rel_tol=.001, abs_tol=.00001))
+        except (TypeError, ValueError, OverflowError):
+            matches.append(False)
+    return {'listing_ready': all(matches) and not errors, 'listing_errors': errors,
+            'listing_package': package}
 
 
 def _fba_catalog_measurement_reference_from_payload(payload, marketplace_id=''):

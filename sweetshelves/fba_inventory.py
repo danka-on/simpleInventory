@@ -2,6 +2,7 @@
 
 import re as _re
 import sqlite3
+from . import fba_shipments as ss_fba_shipments
 from . import config as ss_config, database as ss_database, fba_readiness as ss_fba_readiness, fba_schema as ss_fba_schema, listing_lifecycle as ss_listing_lifecycle, listing_settings as ss_listing_settings, normalization as ss_normalization, warehouse_locations as ss_warehouse_locations
 
 
@@ -173,6 +174,7 @@ def _fba_session_item_payload(raw_item):
         'inbound_checked_at': ss_fba_schema._fba_trim(raw.get('inbound_checked_at'), 40),
         'fba_enablement_status': raw_enablement_status,
         'fba_enablement_error': raw_enablement_error,
+        'fba_listing_notes': ss_fba_schema._fba_trim(raw.get('fba_listing_notes'), 700),
         'fba_enablement_checked_at': ss_fba_schema._fba_trim(raw.get('fba_enablement_checked_at'), 40),
         'amazon_fnsku': ss_fba_schema._fba_trim(raw.get('amazon_fnsku') or raw.get('fnsku'), 80),
         'amazon_product_type': ss_fba_schema._fba_trim(raw.get('amazon_product_type'), 120),
@@ -223,8 +225,16 @@ def _fba_session_row_payload(row, *, include_items=False):
     amazon_workflow.setdefault('stage', str(data.get('amazon_stage') or 'draft'))
     amazon_workflow.setdefault('inbound_plan_id', str(data.get('amazon_inbound_plan_id') or ''))
     data['working_location_count'] = len(working_locations)
+    rejected_items = ss_fba_schema._fba_json_list(data.pop('rejected_items_json', '[]'))
     if include_items:
+        data['rejected_items'] = rejected_items
         data['items'] = ss_fba_schema._fba_json_list(data.pop('items_json', '[]'))
+        approval_issues = ss_fba_shipments._fba_plan_approval_issues(amazon_workflow)
+        for item in data['items']:
+            error = approval_issues.get(str(item.get('seller_sku') or '').casefold())
+            if error:
+                item.update(fba_enablement_status='failed', fba_enablement_error=error,
+                            inbound_eligible=False, inbound_error=error)
         data['working_locations'] = working_locations
         data['amazon_workflow'] = amazon_workflow
     else:
@@ -398,7 +408,7 @@ def _fba_marketplace_status_for_barcodes(barcodes):
     return result
 
 
-def _fba_local_amazon_listing(barcode):
+def _fba_local_amazon_listing(barcode, *, strict=False):
     variants = ss_listing_lifecycle._marketplace_upc_lookup_variants(barcode)
     if not variants:
         return {}
@@ -411,6 +421,7 @@ def _fba_local_amazon_listing(barcode):
             SELECT ASIN, SKU, TITLE, CONDITION, FULFILLMENT_CHANNEL, STATUS, QUANTITY, LAST_UPDATED
             FROM ITEMS
             WHERE LOWER(TRIM(COALESCE(UPC, ''))) IN ({placeholders})
+              AND TRIM(COALESCE(SKU, '')) != ''
             ORDER BY
                 CASE WHEN LOWER(TRIM(COALESCE(STATUS, ''))) IN ('active', 'live', 'listed') THEN 0 ELSE 1 END,
                 COALESCE(LAST_UPDATED, '') DESC,
@@ -430,13 +441,15 @@ def _fba_local_amazon_listing(barcode):
         }
     except Exception as exc:
         ss_config.logger.warning('FBA local Amazon lookup failed for %s: %s', barcode, exc)
+        if strict:
+            raise
         return {}
     finally:
         if conn is not None:
             conn.close()
 
 
-def _fba_local_amazon_listing_by_asin(asin):
+def _fba_local_amazon_listing_by_asin(asin, *, strict=False):
     asin = ss_fba_schema._fba_trim(asin, 30).upper()
     if not asin:
         return {}
@@ -467,6 +480,8 @@ def _fba_local_amazon_listing_by_asin(asin):
         }
     except Exception as exc:
         ss_config.logger.warning('FBA local Amazon ASIN lookup failed for %s: %s', asin, exc)
+        if strict:
+            raise
         return {}
     finally:
         if conn is not None:
