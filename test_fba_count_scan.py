@@ -580,6 +580,27 @@ class FbaCountScanTest(unittest.TestCase):
         self.assertIn("X005ASUE9F", item["fba_activation_note"])
         self.assertEqual(payload["enablement"]["enabling"], 1)
 
+    def test_enable_fba_explains_stale_seller_sku_not_found(self):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.execute("UPDATE fba_prep_sessions SET items_json=?, item_count=1, total_units=1 WHERE id=1", (
+            '[{"barcode":"026865983135","seller_sku":"K0-MGPQ-SUNX","quantity":1,'
+            '"fba_enablement_status":"needs_enablement"}]',
+        ))
+        db.commit()
+        db.close()
+        listings = Mock()
+        listings.get_listings_item.side_effect = Exception(
+            "[{'code': 'NOT_FOUND', 'message': \"SKU 'K0-MGPQ-SUNX' not found\"}]")
+        with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+              patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(listings, "SELLER", "ATVPDKIKX0DER"))):
+            response = self.client.post("/api/fba-prep/sessions/1/enable-fba", json={"confirm": True})
+        self.assertEqual(response.status_code, 200)
+        item = response.get_json()["session"]["items"][0]
+        self.assertEqual(item["fba_enablement_status"], "failed")
+        self.assertIn("Amazon has no listing for Seller SKU K0-MGPQ-SUNX", item["fba_enablement_error"])
+        self.assertIn("Count step", item["fba_enablement_error"])
+        listings.patch_listings_item.assert_not_called()
+
     def test_accepted_combined_fba_patch_does_not_loop_on_stale_prerequisite_issue(self):
         listings = Mock()
         stale_issue = {

@@ -200,6 +200,21 @@ def _fba_listing_issue_notes(issues):
     return '; '.join(filter(None, (_fba_listing_issue_message(issue) for issue in issues[:3])))
 
 
+def _fba_friendly_enablement_error(msku, text):
+    """Translate raw SP-API failures into the action the worker can take."""
+    raw = ss_fba_schema._fba_trim(text, 700)
+    lowered = raw.lower()
+    sku = ss_fba_schema._fba_trim(msku, 255)
+    if 'not_found' in lowered or 'not found' in lowered:
+        return (
+            f'Amazon has no listing for Seller SKU {sku} (Amazon: NOT_FOUND). The saved seller SKU is stale: '
+            'open the Count step, correct the Seller SKU (or relist the item on Amazon), then tap Review / retry.'
+        )
+    if 'quotaexceeded' in lowered or 'throttl' in lowered:
+        return f'Amazon rate limit (QuotaExceeded) reached while checking {sku}. Wait a minute and tap Review / retry.'
+    return raw
+
+
 def _fba_prep_error_is_inbound_pending(value):
     """Amazon's prep lookup rejects SKUs whose new FBA offer is still propagating."""
     return 'not available for inbound' in ss_fba_schema._fba_trim(value, 1000).lower()
@@ -1193,7 +1208,9 @@ def api_fba_prep_enable_fba(session_id):
                     **candidate,
                     'result': {
                         'status': 'failed', 'seller_sku': current_sku,
-                        'error': ss_fba_schema._fba_trim(ss_amazon_listing._amazon_format_spapi_error(exc), 700),
+                        'error': _fba_friendly_enablement_error(
+                            current_sku, ss_amazon_listing._amazon_format_spapi_error(exc)
+                        ),
                     },
                 }
             if len(candidate_rows) > 1 and index < len(candidate_rows) - 1:
