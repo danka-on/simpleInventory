@@ -108,7 +108,7 @@ class FbaInboundHelpersTest(unittest.TestCase):
             with self.subTest(count=count):
                 api = PrepBatchApi()
                 session = ready_plan_session(count)
-                with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+                with patch.object(ss_fba_readiness, '_fba_session_listing_health', return_value={'findings': []}), patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
                     state, _ = ss_fba_shipments._fba_prepare_and_create_plan(
                         api, US_MARKETPLACE_ID, session, {})
                 expected = [row['seller_sku'] for row in session['items']]
@@ -127,7 +127,7 @@ class FbaInboundHelpersTest(unittest.TestCase):
             with self.subTest(failure=failure):
                 api = PrepBatchApi(failure=failure)
                 state = {}
-                with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+                with patch.object(ss_fba_readiness, '_fba_session_listing_health', return_value={'findings': []}), patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
                     with self.assertRaisesRegex(FbaInboundValidationError, 'second batch failed'):
                         ss_fba_shipments._fba_prepare_and_create_plan(
                             api, US_MARKETPLACE_ID, ready_plan_session(130), state)
@@ -144,7 +144,7 @@ class FbaInboundHelpersTest(unittest.TestCase):
                 } for sku in kwargs['mskus']])
 
         api = ExistingPrepApi()
-        with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+        with patch.object(ss_fba_readiness, '_fba_session_listing_health', return_value={'findings': []}), patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
             ss_fba_shipments._fba_prepare_and_create_plan(
                 api, US_MARKETPLACE_ID, ready_plan_session(130), {})
         self.assertEqual([len(batch) for batch in api.read_batches], [100, 30])
@@ -163,7 +163,7 @@ class FbaInboundHelpersTest(unittest.TestCase):
                 return response
 
         api = ConflictApi()
-        with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+        with patch.object(ss_fba_readiness, '_fba_session_listing_health', return_value={'findings': []}), patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
             state, _ = ss_fba_shipments._fba_prepare_and_create_plan(
                 api, US_MARKETPLACE_ID, ready_plan_session(130), {})
         self.assertEqual([len(batch) for batch in api.write_batches], [100, 30, 29])
@@ -1016,7 +1016,7 @@ class PlanHealthTest(unittest.TestCase):
                 raise Exception(message)
 
         api = InvalidApi()
-        with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+        with patch.object(ss_fba_readiness, '_fba_session_listing_health', return_value={'findings': []}), patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
             with self.assertRaisesRegex(FbaInboundValidationError, 'no longer recognizes.*SKU-001'):
                 ss_fba_shipments._fba_prepare_and_create_plan(api, US_MARKETPLACE_ID, ready_plan_session(3), {})
         self.assertEqual(api.created, [])
@@ -1071,6 +1071,72 @@ class PlanHealthTest(unittest.TestCase):
               patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value={'checked': True, 'error': ''})):
             result = ss_fba_readiness._fba_listing_readiness('DS-IOM1-7N19', force_refresh=True, client=client)
         self.assertEqual(result['status'], 'ready')
+
+    NOT_FOUND = "[{'code': 'NOT_FOUND', 'message': \"SKU 'GONE-1' not found\"}]"
+
+    def test_readiness_lets_a_missing_listing_propagate_for_relisting(self):
+        listings = Mock()
+        listings.get_listings_item.side_effect = Exception(self.NOT_FOUND)
+        with (patch.object(ss_fba_readiness, '_fba_inventory_fnsku', return_value='X00GONE'),
+              patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value={'checked': True, 'error': ''})):
+            with self.assertRaisesRegex(Exception, 'NOT_FOUND'):
+                ss_fba_readiness._fba_listing_readiness('GONE-1', force_refresh=True, client=(listings, 'SELLER', US_MARKETPLACE_ID))
+
+    def test_readiness_fails_when_inbound_service_rejects_the_sku(self):
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            'summaries': [{'productType': 'PITCHER', 'status': ['BUYABLE'], 'fnSku': 'X00STALE'}],
+            'issues': [], 'fulfillmentAvailability': [{'fulfillmentChannelCode': 'AMAZON_NA'}], 'attributes': {},
+        })
+        rejected = {'checked': False, 'error': "ERROR: The following MSKUs are not valid: [SKU-DEAD]."}
+        with (patch.object(ss_fba_readiness, '_fba_inventory_fnsku', return_value='X00STALE'),
+              patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value=rejected)):
+            result = ss_fba_readiness._fba_listing_readiness('SKU-DEAD', force_refresh=True, client=(listings, 'SELLER', US_MARKETPLACE_ID))
+        self.assertEqual(result['status'], 'failed')
+        self.assertTrue(result['listing_missing'])
+        self.assertIn('SKU-DEAD', result['error'])
+
+    def test_session_listing_health_flags_counted_items_and_clears_them_again(self):
+        items = [
+            {'seller_sku': 'SKU-OK', 'title': 'Fine', 'fba_enablement_status': 'ready', 'amazon_fnsku': 'X001'},
+            {'seller_sku': 'SKU-BAD', 'title': 'Gone', 'fba_enablement_status': 'ready', 'amazon_fnsku': 'X002'},
+            {'seller_sku': 'SKU-FBM', 'title': 'Merchant', 'fba_enablement_status': 'ready', 'amazon_fnsku': 'X003'},
+        ]
+        health = ss_fba_shipments._fba_plan_health(
+            self._fake_api(), US_MARKETPLACE_ID, items, session_items=items, listings=self._fake_listings(),
+        )
+        changed = ss_fba_readiness._fba_apply_session_listing_health(items, health)
+        self.assertEqual(changed, ['SKU-BAD', 'SKU-FBM'])
+        self.assertEqual(items[0]['fba_enablement_status'], 'ready')
+        self.assertEqual(items[1]['fba_enablement_status'], 'failed')
+        self.assertEqual(items[1]['fba_listing_check'], 'listing_missing')
+        self.assertIn('Gone', items[1]['fba_enablement_error'])
+        self.assertEqual(items[1]['inbound_error'], items[1]['fba_enablement_error'])
+        self.assertEqual(items[2]['fba_enablement_status'], 'needs_enablement')
+        self.assertIn('merchant-fulfilled', items[2]['fba_activation_note'])
+        self.assertEqual(ss_fba_readiness._fba_apply_session_listing_health(items, health), [])
+        self.assertEqual(ss_fba_readiness._fba_apply_session_listing_health(items, {'findings': []}), ['SKU-BAD', 'SKU-FBM'])
+        self.assertEqual(items[1]['fba_enablement_status'], 'ready')
+        self.assertEqual(items[1]['fba_listing_check'], '')
+        self.assertEqual(items[2]['fba_enablement_status'], 'ready')
+
+    def test_plan_creation_is_refused_when_amazon_rejects_a_counted_item(self):
+        api = PrepBatchApi()
+        health = {'findings': [
+            {'msku': 'SKU-001', 'code': 'listing_missing', 'severity': 'blocking', 'title': 'Gone glass', 'message': 'gone'},
+            {'msku': 'SKU-002', 'code': 'merchant_fulfilled', 'severity': 'warning', 'title': 'FBM glass', 'message': 'fbm'},
+        ], 'blocking_count': 1}
+        with (patch.object(ss_fba_readiness, '_fba_session_listing_health', return_value=health),
+              patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS)):
+            with self.assertRaises(ss_fba_shipments.FbaPlanItemsUnavailable) as caught:
+                ss_fba_shipments._fba_prepare_and_create_plan(api, US_MARKETPLACE_ID, ready_plan_session(3), {})
+        message = str(caught.exception)
+        self.assertIn('SKU-001 (Gone glass)', message)
+        self.assertIn('merchant-fulfilled', message)
+        self.assertIn('SKU-002 (FBM glass)', message)
+        self.assertIs(caught.exception.health, health)
+        self.assertEqual(api.created, [])
+        self.assertEqual(api.read_batches, [])
 
 
 if __name__ == '__main__':

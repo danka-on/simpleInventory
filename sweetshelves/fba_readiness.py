@@ -6,6 +6,7 @@ import math
 
 import datetime
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -67,6 +68,152 @@ def _fba_prep_error_mskus(exc):
 def _fba_inbound_unavailable_skus(exc):
     kind, mskus = _fba_prep_error_mskus(exc)
     return mskus if kind == 'unavailable' else []
+
+
+def _fba_listing_gone_message(seller_sku):
+    return (
+        f'Amazon no longer has a listing with Seller SKU {seller_sku}: it was removed, or a new listing '
+        'was later rejected by Amazon. Create it again in Seller Central with exactly this Seller SKU, '
+        'or remove the item from this session.'
+    )
+
+
+_FBA_SESSION_LISTING_CHECK_INTERVAL = 600
+_FBA_SESSION_LISTING_CHECK_AT = {}
+_FBA_SESSION_LISTING_CHECK_LOCK = threading.Lock()
+
+
+def _fba_session_listing_health(items, *, api=None, marketplace_id='', listings=None):
+    """Ask Amazon about every counted SKU: does the listing exist and is it FBA?"""
+    if api is None or not marketplace_id:
+        api, marketplace_id = ss_fba_shipments._fba_amazon_client()
+    rows = [item for item in items if isinstance(item, dict)]
+    return ss_fba_shipments._fba_plan_health(
+        api, marketplace_id, rows, session_items=rows, listings=listings
+    )
+
+
+def _fba_apply_session_listing_health(items, health):
+    """Flag counted items from a session check; return the seller SKUs that changed.
+
+    A missing or inbound-rejected listing becomes ``failed`` with the exact
+    reason; a merchant-fulfilled one drops back to ``needs_enablement``. An
+    item flagged by an earlier check that now passes is cleared again.
+    """
+    findings = {
+        ss_fba_schema._fba_trim(row.get('msku'), 255).casefold(): row
+        for row in (health or {}).get('findings') or [] if isinstance(row, dict)
+        and ss_fba_schema._fba_trim(row.get('msku'), 255)
+    }
+    now = ss_listing_checks._listagent_now_iso()
+    changed = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        seller_sku = ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255)
+        if not seller_sku:
+            continue
+        finding = findings.get(seller_sku.casefold())
+        previous = ss_fba_schema._fba_trim(item.get('fba_enablement_status'), 40).lower()
+        if finding:
+            code = ss_fba_schema._fba_trim(finding.get('code'), 40)
+            if code in ('listing_missing', 'inbound_unavailable'):
+                status, error, note = 'failed', ss_fba_schema._fba_trim(finding.get('message'), 700), ''
+            elif previous in ('failed', 'needs_safety_info'):
+                continue
+            else:
+                status, error = 'needs_enablement', ''
+                note = ss_fba_schema._fba_trim(finding.get('message'), 500)
+            if previous == status and item.get('fba_listing_check') == code:
+                continue
+            item.update({
+                'fba_enablement_status': status, 'fba_enablement_error': error,
+                'fba_activation_note': note, 'fba_enablement_checked_at': now,
+                'fba_listing_check': code, 'fba_listing_check_at': now,
+                'inbound_eligible': None if status == 'failed' else item.get('inbound_eligible'),
+                'inbound_error': error if status == 'failed' else '',
+            })
+            changed.append(seller_sku)
+        elif item.get('fba_listing_check'):
+            fnsku = ss_fba_schema._fba_trim(item.get('amazon_fnsku') or item.get('fnsku'), 80)
+            item.update({
+                'fba_enablement_status': 'ready' if fnsku else 'needs_enablement',
+                'fba_enablement_error': '', 'fba_activation_note': '',
+                'fba_enablement_checked_at': now, 'fba_listing_check': '', 'fba_listing_check_at': now,
+                'inbound_error': '',
+            })
+            if fnsku:
+                item['inbound_eligible'] = True
+            changed.append(seller_sku)
+    return changed
+
+
+def _fba_run_session_listing_check(session_id):
+    """Background pass for one open, un-planned session (see the live poll)."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT items_json, amazon_inbound_plan_id FROM fba_prep_sessions WHERE id = ? AND status = 'open'",
+            (session_id,),
+        ).fetchone()
+        if not row or ss_fba_schema._fba_trim(row['amazon_inbound_plan_id'], 80):
+            return
+        items = ss_fba_schema._fba_json_list(row['items_json'])
+        if not any(isinstance(item, dict) and ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255) for item in items):
+            return
+        health = _fba_session_listing_health(items)
+        conn.execute('BEGIN IMMEDIATE')
+        current = conn.execute(
+            "SELECT items_json, amazon_inbound_plan_id FROM fba_prep_sessions WHERE id = ? AND status = 'open'",
+            (session_id,),
+        ).fetchone()
+        if not current or ss_fba_schema._fba_trim(current['amazon_inbound_plan_id'], 80):
+            conn.rollback()
+            return
+        items = ss_fba_schema._fba_json_list(current['items_json'])
+        changed = _fba_apply_session_listing_health(items, health)
+        if changed:
+            conn.execute('''UPDATE fba_prep_sessions SET items_json = ?, count_revision = COALESCE(count_revision, 0) + 1,
+                            updated_at = ? WHERE id = ?''',
+                         (json.dumps(items, ensure_ascii=False), ss_listing_checks._listagent_now_iso(), session_id))
+            ss_config.logger.warning('fba session %s listing check flagged %s', session_id, ', '.join(changed))
+        conn.commit()
+    except Exception:
+        if conn is not None:
+            conn.rollback()
+        ss_config.logger.warning('fba session %s listing check failed', session_id, exc_info=True)
+    finally:
+        if conn is not None:
+            conn.close()
+        with _FBA_SESSION_LISTING_CHECK_LOCK:
+            _FBA_SESSION_LISTING_CHECK_AT[session_id] = time.time()
+            _FBA_SESSION_LISTING_CHECK_AT.pop(('running', session_id), None)
+
+
+def _fba_schedule_session_listing_check(session_id, row):
+    """Every ten minutes while a session is being counted, re-ask Amazon about its SKUs.
+
+    Triggered from the live poll so a listing that dies after it was scanned
+    is flagged on the count list, long before packing or plan creation.
+    """
+    if os.environ.get('DISABLE_BACKGROUND_SERVICES'):
+        return False
+    if not row or str(row['status'] or '') != 'open' or ss_fba_schema._fba_trim(row['amazon_inbound_plan_id'], 80):
+        return False
+    now = time.time()
+    with _FBA_SESSION_LISTING_CHECK_LOCK:
+        if ('running', session_id) in _FBA_SESSION_LISTING_CHECK_AT:
+            return False
+        if now - _FBA_SESSION_LISTING_CHECK_AT.get(session_id, 0) < _FBA_SESSION_LISTING_CHECK_INTERVAL:
+            return False
+        _FBA_SESSION_LISTING_CHECK_AT[('running', session_id)] = now
+    threading.Thread(
+        target=_fba_run_session_listing_check, args=(session_id,),
+        name=f'fba-listing-check-{session_id}', daemon=True,
+    ).start()
+    return True
 
 
 def _fba_invalid_msku_message(invalid_mskus, items):
@@ -358,6 +505,8 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
                 return dict(cached.get('data') or {})
 
     listings, seller_id, marketplace_id = client or _fba_listings_client()
+    # A NOT_FOUND here propagates on purpose: the enablement flow explains it
+    # and looks for a relisted SKU with the same barcode.
     response = listings.get_listings_item(
         seller_id,
         seller_sku,
@@ -426,13 +575,22 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         fnsku = _fba_inventory_fnsku(seller_sku)
     prep_details = _fba_item_prep_details(seller_sku)
     inbound_pending = _fba_prep_error_is_inbound_pending((prep_details or {}).get('error'))
+    prep_kind, prep_named = _fba_prep_error_mskus((prep_details or {}).get('error'))
+    listing_invalid = prep_kind == 'invalid' and any(
+        value.casefold() == seller_sku.casefold() for value in prep_named
+    )
     activation_note = ''
     # An FNSKU alone does not make a SKU shippable: a listing switched back to
     # merchant fulfillment keeps its old FNSKU but has no FBA offer to receive.
     merchant_only = bool(fulfillment_channels) and (
         'AMAZON_NA' not in fulfillment_channels and 'AMAZON_NA' not in submitted_channels
     )
-    if fnsku and not inbound_pending and not merchant_only:
+    if listing_invalid:
+        # Amazon's inbound service is the authority on what can be shipped in;
+        # "not valid" means the listing is gone even if inventory still has an FNSKU.
+        status = 'failed'
+        error = _fba_listing_gone_message(seller_sku)
+    elif fnsku and not inbound_pending and not merchant_only:
         status = 'ready'
         error = ''
     elif blocking_issues:
@@ -475,6 +633,7 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         'listing_notes': listing_notes,
         'activation_note': activation_note,
         'inbound_pending': inbound_pending,
+        'listing_missing': listing_invalid,
     }
     result['prep_details'] = prep_details
     with _FBA_LISTING_READINESS_CACHE_LOCK:

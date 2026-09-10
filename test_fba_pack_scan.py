@@ -14,6 +14,7 @@ os.environ.setdefault("DISABLE_BACKGROUND_SERVICES", "1")
 from sweetshelves.bootstrap import app  # Initialize routes for Flask client tests.
 from sweetshelves import caching as ss_caching
 from sweetshelves import config as ss_config
+from sweetshelves import fba_readiness as ss_fba_readiness
 from sweetshelves import fba_schema as ss_fba_schema
 from sweetshelves import fba_shipments as ss_fba_shipments
 from sweetshelves import inventory_age as ss_inventory_age
@@ -590,6 +591,97 @@ class FbaPackScanTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("placement option is already confirmed", response.get_json()["error"])
         amazon.assert_not_called()
+
+    def _reset_to_counting(self):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        items = [
+            {"barcode": "025398232475", "seller_sku": "SKU-1", "quantity": 2, "title": "Test unit",
+             "fba_enablement_status": "ready", "amazon_fnsku": "X000000001"},
+            {"barcode": "222222222222", "seller_sku": "SKU-2", "quantity": 1, "title": "Second unit",
+             "fba_enablement_status": "ready", "amazon_fnsku": "X000000002"},
+        ]
+        db.execute(
+            "UPDATE fba_prep_sessions SET items_json = ?, amazon_inbound_plan_id = '', amazon_stage = 'draft', "
+            "amazon_state_json = ? WHERE id = 1",
+            (json.dumps(items), json.dumps({"stage": "draft", "inbound_plan_id": "", "boxes": []})),
+        )
+        db.commit()
+        db.close()
+
+    def _saved_items(self):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        items = json.loads(db.execute("SELECT items_json FROM fba_prep_sessions WHERE id = 1").fetchone()[0])
+        db.close()
+        return {item["seller_sku"]: item for item in items}
+
+    def test_plan_creation_flags_rejected_items_on_the_count_list(self):
+        self._reset_to_counting()
+        health = {"findings": [{
+            "msku": "SKU-1", "code": "listing_missing", "severity": "blocking", "title": "Test unit",
+            "message": "Amazon no longer has a listing for Seller SKU SKU-1",
+        }], "blocking_count": 1}
+        api = Mock()
+        with (
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_fba_shipments, "_fba_amazon_client", return_value=(api, US_MARKETPLACE_ID)),
+            patch.object(ss_fba_readiness, "_fba_session_listing_health", return_value=health),
+        ):
+            response = self.client.post("/api/fba-prep/sessions/1/amazon/create-plan", json={"confirm": True})
+        self.assertEqual(response.status_code, 400, response.get_json())
+        payload = response.get_json()
+        self.assertIn("SKU-1 (Test unit)", payload["error"])
+        self.assertIn("flagged in the count list", payload["error"])
+        api.create_inbound_plan.assert_not_called()
+        saved = self._saved_items()
+        self.assertEqual(saved["SKU-1"]["fba_enablement_status"], "failed")
+        self.assertEqual(saved["SKU-1"]["fba_listing_check"], "listing_missing")
+        self.assertIn("no longer has a listing", saved["SKU-1"]["fba_enablement_error"])
+        self.assertEqual(saved["SKU-2"]["fba_enablement_status"], "ready")
+        self.assertEqual([row["fba_enablement_status"] for row in payload["items"]], ["failed", "ready"])
+
+    def test_background_listing_check_flags_items_while_counting(self):
+        self._reset_to_counting()
+        health = {"findings": [{
+            "msku": "SKU-2", "code": "merchant_fulfilled", "severity": "warning", "title": "Second unit",
+            "message": "Seller SKU SKU-2 is still merchant-fulfilled",
+        }], "blocking_count": 0}
+        with (
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_fba_readiness, "_fba_session_listing_health", return_value=health) as check,
+        ):
+            ss_fba_readiness._fba_run_session_listing_check(1)
+        check.assert_called_once()
+        saved = self._saved_items()
+        self.assertEqual(saved["SKU-2"]["fba_enablement_status"], "needs_enablement")
+        self.assertEqual(saved["SKU-2"]["fba_listing_check"], "merchant_fulfilled")
+        self.assertEqual(saved["SKU-1"]["fba_enablement_status"], "ready")
+
+    def test_live_poll_schedules_one_listing_check_per_interval(self):
+        self._reset_to_counting()
+        started = []
+
+        class FakeThread:
+            def __init__(self, *args, **kwargs):
+                started.append(kwargs.get("target"))
+
+            def start(self):
+                pass
+
+        ss_fba_readiness._FBA_SESSION_LISTING_CHECK_AT.clear()
+        try:
+            with (
+                patch.object(ss_config, "BASE_DIR", self.base_dir),
+                patch.dict(os.environ, {"DISABLE_BACKGROUND_SERVICES": ""}),
+                patch.object(ss_fba_readiness.threading, "Thread", FakeThread),
+            ):
+                os.environ.pop("DISABLE_BACKGROUND_SERVICES", None)
+                first = self.client.post("/api/fba-prep/sessions/1/live", json={"client_id": "scanner-test-01"})
+                second = self.client.post("/api/fba-prep/sessions/1/live", json={"client_id": "scanner-test-01"})
+        finally:
+            ss_fba_readiness._FBA_SESSION_LISTING_CHECK_AT.clear()
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(started, [ss_fba_readiness._fba_run_session_listing_check])
 
     def test_failed_amazon_cancellation_keeps_original_plan_quantity(self):
         cancel_api = Mock()

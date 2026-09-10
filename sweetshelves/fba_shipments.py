@@ -1379,9 +1379,20 @@ def api_fba_prep_amazon_action(session_id, action):
                 raise FbaInboundValidationError('This session already has an Amazon inbound plan')
             if data.get('confirm') is not True:
                 raise FbaInboundValidationError('Review the item quantities and confirm plan creation')
-            state, response_payload = _fba_prepare_and_create_plan(
-                api, marketplace_id, session_data, state
-            )
+            try:
+                state, response_payload = _fba_prepare_and_create_plan(
+                    api, marketplace_id, session_data, state
+                )
+            except FbaPlanItemsUnavailable as exc:
+                # Persist the flags so the count list shows exactly which items
+                # Amazon rejected, then report the failure.
+                items = session_data.get('items') or []
+                if ss_fba_readiness._fba_apply_session_listing_health(items, exc.health):
+                    conn.execute('''UPDATE fba_prep_sessions SET items_json = ?, count_revision = COALESCE(count_revision, 0) + 1,
+                                    updated_at = ? WHERE id = ?''',
+                                 (json.dumps(items, ensure_ascii=False), ss_listing_checks._listagent_now_iso(), session_id))
+                    conn.commit()
+                return jsonify({'success': False, 'error': str(exc), 'items': items, 'plan_health': exc.health}), 400
             next_stage = 'plan_created'
         else:
             if not plan_id:
@@ -1640,6 +1651,14 @@ def _fba_amazon_exception_detail(exc):
     return ('Amazon rejected the request: ' + message) if message else 'Amazon rejected the request'
 
 
+class FbaPlanItemsUnavailable(FbaInboundValidationError):
+    """Amazon can no longer ship one or more counted items; carries the check."""
+
+    def __init__(self, message, health):
+        super().__init__(message)
+        self.health = health
+
+
 def _fba_prepare_and_create_plan(api, marketplace_id, session_data, state):
     """Create a plan from saved rows without changing any physical pack records."""
     enablement = ss_fba_readiness._fba_enablement_progress(session_data.get('items') or [])
@@ -1661,6 +1680,32 @@ def _fba_prepare_and_create_plan(api, marketplace_id, session_data, state):
             'Amazon plan creation is waiting: ' + (
                 ', '.join(parts) or 'check every Seller SKU for FBA readiness'
             )
+        )
+
+    # Saved readiness can be hours old; ask Amazon again right before the plan
+    # is created so a listing that died since counting is named here, not at
+    # the placement step.
+    health = ss_fba_readiness._fba_session_listing_health(
+        session_data.get('items') or [], api=api, marketplace_id=marketplace_id
+    )
+    if health.get('findings'):
+        blocking = [row for row in health['findings'] if row.get('severity') == 'blocking']
+        warnings = [row for row in health['findings'] if row.get('severity') != 'blocking']
+        parts = []
+        if blocking:
+            parts.append(
+                f'{len(blocking)} listing{"" if len(blocking) == 1 else "s"} Amazon no longer has: '
+                + '; '.join(f"{row.get('msku')} ({row.get('title') or row.get('barcode') or 'no title'})" for row in blocking[:10])
+            )
+        if warnings:
+            parts.append(
+                f'{len(warnings)} still merchant-fulfilled (needs FBA enablement): '
+                + '; '.join(f"{row.get('msku')} ({row.get('title') or row.get('barcode') or 'no title'})" for row in warnings[:10])
+            )
+        raise FbaPlanItemsUnavailable(
+            'Amazon check before plan creation: ' + '. '.join(parts)
+            + '. These items are now flagged in the count list; fix or remove them, then create the plan.',
+            health,
         )
 
     source = _fba_amazon_source_from_settings()

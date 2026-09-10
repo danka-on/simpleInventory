@@ -5,7 +5,7 @@ import sqlite3
 import time
 from fba_inbound import FbaInboundValidationError
 from flask import jsonify, request
-from . import config as ss_config, errors as ss_errors, fba_inventory as ss_fba_inventory, fba_schema as ss_fba_schema, fba_shipments as ss_fba_shipments, listing_checks as ss_listing_checks, listing_settings as ss_listing_settings, normalization as ss_normalization, warehouse_locations as ss_warehouse_locations
+from . import config as ss_config, errors as ss_errors, fba_inventory as ss_fba_inventory, fba_readiness as ss_fba_readiness, fba_schema as ss_fba_schema, fba_shipments as ss_fba_shipments, listing_checks as ss_listing_checks, listing_settings as ss_listing_settings, normalization as ss_normalization, warehouse_locations as ss_warehouse_locations
 
 
 def _fba_review_rows(conn, *, status='open', limit=250):
@@ -79,6 +79,7 @@ def api_fba_prep_session_live(session_id):
         row = cur.execute('SELECT * FROM fba_prep_sessions WHERE id = ?', (session_id,)).fetchone()
         if not row or str(row['status'] or '') == 'deleted':
             return jsonify({'success': False, 'error': 'FBA session not found'}), 404
+        ss_fba_readiness._fba_schedule_session_listing_check(session_id, row)
 
         workers = [dict(worker) for worker in cur.execute('''
             SELECT client_id, operator_name, active_box_id, last_seen_at
