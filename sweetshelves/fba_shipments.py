@@ -246,6 +246,23 @@ def _fba_amazon_transport_summary(option):
     }
 
 
+# Amazon workflow order. A failed operation blocks only the steps that depend on it.
+_FBA_ACTION_ORDER = (
+    'create_plan', 'generate_packing', 'confirm_packing', 'submit_boxes',
+    'generate_placement', 'confirm_placement', 'generate_transportation',
+    'confirm_transportation',
+)
+
+
+def _fba_action_repeats_or_precedes(action_kind, failed_kind):
+    """True when action_kind is the failed step itself or an earlier one."""
+    if action_kind == failed_kind:
+        return True
+    if action_kind not in _FBA_ACTION_ORDER or failed_kind not in _FBA_ACTION_ORDER:
+        return False
+    return _FBA_ACTION_ORDER.index(action_kind) < _FBA_ACTION_ORDER.index(failed_kind)
+
+
 def _fba_amazon_refresh_operation(api, state):
     operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
     operation_id = ss_fba_schema._fba_trim(operation.get('id'), 38)
@@ -259,6 +276,21 @@ def _fba_amazon_refresh_operation(api, state):
         'checked_at': ss_listing_checks._listagent_now_iso(),
     })
     state['operation'] = operation
+    # Amazon reports non-fatal box problems as WARNING; keep the newest set for the
+    # step that raised them so a later operation does not silently discard them.
+    warnings = [
+        problem for problem in (operation.get('problems') or [])
+        if isinstance(problem, dict)
+        and ss_fba_schema._fba_trim(problem.get('severity'), 20).upper() == 'WARNING'
+    ]
+    kind = ss_fba_schema._fba_trim(operation.get('kind'), 80)
+    if warnings:
+        state['operation_warnings'] = {
+            'kind': kind, 'problems': warnings,
+            'checked_at': operation.get('checked_at'),
+        }
+    elif (state.get('operation_warnings') or {}).get('kind') == kind:
+        state.pop('operation_warnings', None)
     if status == 'SUCCESS':
         state['stage'] = operation.get('next_stage') or state.get('stage') or 'plan_created'
         success_flag = ss_fba_schema._fba_trim(operation.get('success_flag'), 80)
@@ -989,12 +1021,12 @@ def api_fba_prep_amazon_action(session_id, action):
             state = _fba_amazon_refresh_operation(api, state)
             pending = state.get('operation') if isinstance(state.get('operation'), dict) else {}
             if str(pending.get('status') or '').upper() == 'FAILED':
-                if ss_fba_schema._fba_trim(pending.get('kind'), 80) != operation_kind:
+                # Redoing the failed step, or any step before it, is how the operator
+                # recovers; only a later step is refused so a failure cannot be skipped.
+                if not _fba_action_repeats_or_precedes(operation_kind, pending.get('kind')):
                     raise FbaInboundValidationError(
                         state.get('last_error') or 'The previous Amazon operation failed; refresh before continuing'
                     )
-                # Retrying the same step is how the operator clears a transient Amazon
-                # failure, so drop the stale result instead of replaying its message.
                 state['operation'] = {}
                 state['last_error'] = ''
                 pending = {}

@@ -826,7 +826,14 @@ class FbaFailedOperationRetryTest(unittest.TestCase):
             "inbound_plan_id": "wf-test-plan",
             "packing_confirmed": True,
             "boxes_submitted": True,
-            "boxes": [{"local_id": "BOX-1", "contents": [{"msku": "SKU-1", "quantity": 2}]}],
+            "plan_items": [{"msku": "SKU-1", "quantity": 2}],
+            "packing_groups": [{"packing_group_id": "pg-1", "label": "Group 1",
+                                "items": [{"msku": "SKU-1", "quantity": 2}]}],
+            "boxes": [{
+                "local_id": "BOX-1", "packing_group_id": "pg-1",
+                "length_in": 13, "width_in": 8, "height_in": 6, "weight_lb": 3.3,
+                "contents": [{"msku": "SKU-1", "quantity": 2}],
+            }],
             "last_error": "ERROR: Something went wrong. Please try again later.",
             "operation": {
                 "id": "op-failed-1",
@@ -887,6 +894,58 @@ class FbaFailedOperationRetryTest(unittest.TestCase):
         self.assertEqual(workflow["operation"]["status"], "IN_PROGRESS")
         self.assertEqual(workflow["stage"], "placement_generating")
         self.assertFalse(workflow["last_error"])
+
+    def test_an_earlier_step_can_be_redone_to_rewrite_what_amazon_holds(self):
+        api = Mock()
+        api.set_packing_information.return_value = SimpleNamespace(
+            payload={"operationId": "op-resend-1"}, errors=None
+        )
+        response = self.call(api, "submit-boxes")
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        api.set_packing_information.assert_called_once()
+        workflow = response.get_json()["amazon_workflow"]
+        self.assertEqual(workflow["operation"]["id"], "op-resend-1")
+        self.assertEqual(workflow["operation"]["kind"], "submit_boxes")
+        self.assertFalse(workflow["last_error"])
+
+    def test_amazon_carton_warnings_survive_the_next_operation(self):
+        api = Mock()
+        api.get_inbound_operation_status.return_value = SimpleNamespace(
+            payload={
+                "operationStatus": "SUCCESS",
+                "operationProblems": [{
+                    "code": "FBA_INB_0165", "severity": "WARNING",
+                    "message": "WARNING: Box weight does not meet the expected minimum 17.37 lb. [boxId: P1 - B6]",
+                }],
+            },
+            errors=None,
+        )
+        state = {"operation": {"id": "op-1", "kind": "submit_boxes", "status": "IN_PROGRESS",
+                               "next_stage": "boxes_submitted", "success_flag": "boxes_submitted"}}
+        state = ss_fba_shipments._fba_amazon_refresh_operation(api, state)
+        self.assertEqual(state["operation_warnings"]["kind"], "submit_boxes")
+        self.assertIn("17.37 lb", state["operation_warnings"]["problems"][0]["message"])
+
+        # A later, unrelated failure must not wipe the carton warnings.
+        state["operation"] = {"id": "op-2", "kind": "generate_placement", "status": "IN_PROGRESS"}
+        api.get_inbound_operation_status.return_value = SimpleNamespace(
+            payload={"operationStatus": "FAILED", "operationProblems": [{
+                "code": "InternalServerError", "severity": "ERROR",
+                "message": "ERROR: Something went wrong. Please try again later.",
+            }]},
+            errors=None,
+        )
+        state = ss_fba_shipments._fba_amazon_refresh_operation(api, state)
+        self.assertEqual(state["operation_warnings"]["kind"], "submit_boxes")
+
+        # Re-running the step cleanly clears them.
+        state["operation"] = {"id": "op-3", "kind": "submit_boxes", "status": "IN_PROGRESS"}
+        api.get_inbound_operation_status.return_value = SimpleNamespace(
+            payload={"operationStatus": "SUCCESS", "operationProblems": []}, errors=None
+        )
+        state = ss_fba_shipments._fba_amazon_refresh_operation(api, state)
+        self.assertNotIn("operation_warnings", state)
 
     def test_a_different_step_still_reports_the_failure_instead_of_skipping_ahead(self):
         api = Mock()
