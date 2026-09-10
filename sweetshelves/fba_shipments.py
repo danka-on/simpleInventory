@@ -460,7 +460,7 @@ def _fba_plan_health(api, marketplace_id, plan_items, *, session_items=None, box
             chunk = list(mskus[offset:offset + 20])
             payload = _fba_amazon_payload(client.search_listings_items(
                 seller_id, marketplaceIds=[listing_marketplace or marketplace_id],
-                identifiers=chunk, identifiersType='SKU',
+                identifiers=','.join(chunk), identifiersType='SKU',
                 includedData=['summaries', 'fulfillmentAvailability'], pageSize=20,
             ))
             found = {}

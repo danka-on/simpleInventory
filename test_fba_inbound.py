@@ -922,9 +922,11 @@ class PlanHealthTest(unittest.TestCase):
         listings = SimpleNamespace(calls=[])
 
         def search_listings_items(seller_id, **kwargs):
-            listings.calls.append(list(kwargs['identifiers']))
+            # Amazon reads this parameter as one comma-delimited string.
+            identifiers = kwargs['identifiers'].split(',')
+            listings.calls.append(identifiers)
             rows = []
-            for sku in kwargs['identifiers']:
+            for sku in identifiers:
                 if sku == 'SKU-BAD':
                     continue
                 channel = 'DEFAULT' if sku == 'SKU-FBM' else 'AMAZON_NA'
