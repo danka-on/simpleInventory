@@ -480,6 +480,16 @@ def _fba_amazon_sync_snapshot(api, state):
             'selectedTransportationOptionId': ss_fba_schema._fba_trim(shipment.get('selectedTransportationOptionId'), 38),
         })
     state['shipments'] = shipments
+    # Amazon is one workflow: when an API operation will not go through, the operator
+    # can finish a step in Seller Central. Adopt whatever Amazon reports as already done.
+    if not state.get('transport_confirmed') and accepted_placement:
+        booked = [
+            row for row in shipments
+            if row.get('placementOptionId') == accepted_placement.get('placementOptionId')
+        ] or shipments
+        if booked and all(row.get('selectedTransportationOptionId') for row in booked):
+            state['transport_confirmed'] = True
+            state['stage'] = 'transport_confirmed'
     if state.get('transport_confirmed'):
         for shipment in shipments:
             amazon_boxes = _fba_amazon_collect(

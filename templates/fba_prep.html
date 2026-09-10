@@ -765,7 +765,7 @@
       const label=text=>String(text).replace(/\[boxId:\s*([^\]]+)\]/g,(match,name)=>{const local=names[String(name).trim()];return local?`[${name.trim()} — your ${local}]`:match});
       const rows=problems.map(problem=>esc(label(problem.message||problem.details||problem.code||''))).filter(Boolean);
       if(!rows.length)return '';
-      return `<div class="stage-note warn"><strong>Amazon accepted ${esc(String(saved.kind||'the last step').replaceAll('_',' '))} but flagged ${rows.length} carton warning${rows.length===1?'':'s'}.</strong><br>${rows.join('<br>')}<br>Amazon compares each carton against the package sizes and weights held on its own listings. Reweigh or remeasure the named carton and resend the box contents; if your measurement is right, the listing data on Amazon is wrong.</div>`;
+      return `<div class="stage-note warn"><strong>Amazon accepted ${esc(String(saved.kind||'the last step').replaceAll('_',' '))} but flagged ${rows.length} carton warning${rows.length===1?'':'s'}.</strong><br>${rows.join('<br>')}<br><em>These are warnings, not errors. Amazon accepted the box contents and nothing here stops you continuing to the destinations step.</em> Amazon compares each carton against the package sizes and weights held on its own listings, so if your measurement is right, the listing data on Amazon is wrong. To correct a measurement anyway, edit the carton on the Pack step and resend.</div>`;
     }
     function amazonOperationFailureHtml(){
       const operation=state.amazon?.operation||{},kind=String(operation.kind||'');

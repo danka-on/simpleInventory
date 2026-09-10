@@ -812,6 +812,54 @@ class FbaPackScanTest(unittest.TestCase):
         self.assertIn("open Amazon FBA plan", response.get_json()["error"])
 
 
+class FbaSellerCentralCatchUpTest(unittest.TestCase):
+    """Work finished in Seller Central must flow back rather than stranding the app."""
+
+    def api(self, shipment):
+        api = Mock()
+        api.get_inbound_plan.return_value = SimpleNamespace(
+            payload={"inboundPlanId": "wf-test-plan", "status": "ACTIVE"}, errors=None
+        )
+        api.list_inbound_plan_items.return_value = SimpleNamespace(payload={"items": []}, errors=None)
+        api.list_packing_options.return_value = SimpleNamespace(payload={"packingOptions": []}, errors=None)
+        api.list_placement_options.return_value = SimpleNamespace(
+            payload={"placementOptions": [{
+                "placementOptionId": "plo-1", "status": "ACCEPTED", "shipmentIds": ["sh-1"],
+            }]},
+            errors=None,
+        )
+        api.get_shipment.return_value = SimpleNamespace(payload=shipment, errors=None)
+        api.list_transportation_options.return_value = SimpleNamespace(
+            payload={"transportationOptions": []}, errors=None
+        )
+        api.list_shipment_boxes.return_value = SimpleNamespace(payload={"boxes": []}, errors=None)
+        return api
+
+    def test_shipping_bought_in_seller_central_advances_the_app(self):
+        api = self.api({
+            "shipmentId": "sh-1", "placementOptionId": "plo-1", "status": "READY_TO_SHIP",
+            "selectedTransportationOptionId": "trn-1", "destination": {"warehouseId": "AVP1"},
+        })
+        state = ss_fba_shipments._fba_amazon_sync_snapshot(api, {"inbound_plan_id": "wf-test-plan"})
+
+        self.assertTrue(state["placement_confirmed"])
+        self.assertTrue(state["transport_confirmed"])
+        self.assertEqual(state["stage"], "transport_confirmed")
+        # Carton labels can only be printed once Amazon's boxes have been read back.
+        api.list_shipment_boxes.assert_called()
+
+    def test_a_shipment_without_carrier_selected_does_not_claim_shipping_is_bought(self):
+        api = self.api({
+            "shipmentId": "sh-1", "placementOptionId": "plo-1", "status": "WORKING",
+            "destination": {"warehouseId": "AVP1"},
+        })
+        state = ss_fba_shipments._fba_amazon_sync_snapshot(api, {"inbound_plan_id": "wf-test-plan"})
+
+        self.assertTrue(state["placement_confirmed"])
+        self.assertFalse(state.get("transport_confirmed"))
+        api.list_shipment_boxes.assert_not_called()
+
+
 class FbaFailedOperationRetryTest(unittest.TestCase):
     """A failed Amazon operation must not permanently block its own step."""
 
