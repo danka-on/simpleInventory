@@ -263,6 +263,88 @@ def _fba_action_repeats_or_precedes(action_kind, failed_kind):
     return _FBA_ACTION_ORDER.index(action_kind) < _FBA_ACTION_ORDER.index(failed_kind)
 
 
+# Amazon states a carton minimum only in the warning it raises about that carton.
+_FBA_BOX_ID_PATTERN = re.compile(r'\[boxId:\s*([^\]]+)\]', re.I)
+_FBA_BOX_MIN_WEIGHT_PATTERN = re.compile(r'expected minimum\s+([0-9]+(?:\.[0-9]+)?)\s*lb', re.I)
+_FBA_BOX_MIN_VOLUME_PATTERN = re.compile(r'expected minimum cubic inch\s+([0-9]+(?:\.[0-9]+)?)', re.I)
+
+
+def _fba_box_minimums_from_warnings(problems, box_names):
+    """Pull the weight and cubic-inch minimums Amazon quotes, keyed by local carton."""
+    minimums = {}
+    for problem in problems or []:
+        if not isinstance(problem, dict):
+            continue
+        message = str(problem.get('message') or problem.get('details') or '')
+        named = _FBA_BOX_ID_PATTERN.search(message)
+        if not named:
+            continue
+        template = named.group(1).strip()
+        entry = minimums.setdefault((box_names or {}).get(template) or template, {})
+        volume = _FBA_BOX_MIN_VOLUME_PATTERN.search(message)
+        if volume:
+            entry['volume_in3'] = float(volume.group(1))
+            continue
+        weight = _FBA_BOX_MIN_WEIGHT_PATTERN.search(message)
+        if weight:
+            entry['weight_lb'] = float(weight.group(1))
+    return minimums
+
+
+def _fba_local_box_signature(box):
+    """Measurements plus unit count, used to line a carton up with Amazon's copy."""
+    try:
+        dims = tuple(round(float(box.get(field) or 0), 2) for field in ('length_in', 'width_in', 'height_in'))
+        weight = round(float(box.get('weight_lb') or 0), 2)
+    except (TypeError, ValueError):
+        return None
+    if not all(dims) or not weight:
+        return None
+    units = sum(int(item.get('quantity') or 0) for item in (box.get('contents') or []) if isinstance(item, dict))
+    return dims + (weight, units)
+
+
+def _fba_amazon_box_signature(box):
+    dimensions = box.get('dimensions') if isinstance(box.get('dimensions'), dict) else {}
+    weight = box.get('weight') if isinstance(box.get('weight'), dict) else {}
+    try:
+        dims = tuple(round(float(dimensions.get(field) or 0), 2) for field in ('length', 'width', 'height'))
+        pounds = round(float(weight.get('value') or 0), 2)
+    except (TypeError, ValueError):
+        return None
+    if not all(dims) or not pounds:
+        return None
+    units = sum(int(item.get('quantity') or 0) for item in (box.get('items') or []) if isinstance(item, dict))
+    return dims + (pounds, units)
+
+
+def _fba_amazon_box_name_map(api, plan_id, local_boxes):
+    """Amazon names cartons 'P1 - B6'; map those onto the operator's own carton ids.
+
+    Matching is by measurements and unit count, so an ambiguous carton is left
+    unmapped rather than guessed at.
+    """
+    amazon_boxes = _fba_amazon_collect(
+        lambda **kwargs: api.list_inbound_plan_boxes(plan_id, **kwargs), 'boxes', page_size=100, limit=2000
+    )
+    local_by_signature = {}
+    for box in local_boxes or []:
+        if not isinstance(box, dict):
+            continue
+        signature = _fba_local_box_signature(box)
+        local_id = ss_fba_schema._fba_trim(box.get('local_id'), 40)
+        if signature and local_id:
+            local_by_signature.setdefault(signature, []).append(local_id)
+    names = {}
+    for box in amazon_boxes:
+        template = ss_fba_schema._fba_trim(box.get('templateName'), 60)
+        signature = _fba_amazon_box_signature(box)
+        matches = local_by_signature.get(signature) or []
+        if template and len(matches) == 1:
+            names[template] = matches[0]
+    return names
+
+
 def _fba_amazon_refresh_operation(api, state):
     operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
     operation_id = ss_fba_schema._fba_trim(operation.get('id'), 38)
@@ -285,8 +367,16 @@ def _fba_amazon_refresh_operation(api, state):
     ]
     kind = ss_fba_schema._fba_trim(operation.get('kind'), 80)
     if warnings:
+        box_names = {}
+        plan_id = ss_fba_schema._fba_trim(state.get('inbound_plan_id'), 38)
+        if kind == 'submit_boxes' and plan_id:
+            try:
+                box_names = _fba_amazon_box_name_map(api, plan_id, state.get('boxes') or [])
+            except Exception:  # A naming aid must never break the sync.
+                ss_config.logger.warning('fba box name map failed', exc_info=True)
         state['operation_warnings'] = {
-            'kind': kind, 'problems': warnings,
+            'kind': kind, 'problems': warnings, 'box_names': box_names,
+            'box_minimums': _fba_box_minimums_from_warnings(warnings, box_names),
             'checked_at': operation.get('checked_at'),
         }
     elif (state.get('operation_warnings') or {}).get('kind') == kind:

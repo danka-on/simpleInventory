@@ -947,6 +947,77 @@ class FbaFailedOperationRetryTest(unittest.TestCase):
         state = ss_fba_shipments._fba_amazon_refresh_operation(api, state)
         self.assertNotIn("operation_warnings", state)
 
+    def test_carton_warnings_name_the_operators_own_box(self):
+        api = Mock()
+        api.get_inbound_operation_status.return_value = SimpleNamespace(
+            payload={"operationStatus": "SUCCESS", "operationProblems": [{
+                "code": "FBA_INB_0165", "severity": "WARNING",
+                "message": "WARNING: Box weight does not meet the expected minimum 17.37 lb. [boxId: P1 - B6]",
+            }]},
+            errors=None,
+        )
+        api.list_inbound_plan_boxes.return_value = SimpleNamespace(
+            payload={"boxes": [
+                {"templateName": "P1 - B6", "dimensions": {"length": 15, "width": 13, "height": 13},
+                 "weight": {"unit": "LB", "value": 13}, "items": [{"msku": "SKU-1", "quantity": 2}]},
+                {"templateName": "P1 - B7", "dimensions": {"length": 20, "width": 16, "height": 10},
+                 "weight": {"unit": "LB", "value": 22}, "items": [{"msku": "SKU-9", "quantity": 4}]},
+            ]},
+            errors=None,
+        )
+        state = {
+            "inbound_plan_id": "wf-test-plan",
+            "boxes": [
+                {"local_id": "BOX-10", "length_in": 15, "width_in": 13, "height_in": 13,
+                 "weight_lb": 13, "contents": [{"msku": "SKU-1", "quantity": 2}]},
+                {"local_id": "BOX-04", "length_in": 20, "width_in": 16, "height_in": 10,
+                 "weight_lb": 22, "contents": [{"msku": "SKU-9", "quantity": 4}]},
+            ],
+            "operation": {"id": "op-1", "kind": "submit_boxes", "status": "IN_PROGRESS"},
+        }
+        state = ss_fba_shipments._fba_amazon_refresh_operation(api, state)
+        self.assertEqual(state["operation_warnings"]["box_names"]["P1 - B6"], "BOX-10")
+
+    def test_ambiguous_cartons_are_left_unnamed_rather_than_guessed(self):
+        api = Mock()
+        api.get_inbound_operation_status.return_value = SimpleNamespace(
+            payload={"operationStatus": "SUCCESS", "operationProblems": [{
+                "code": "FBA_INB_0165", "severity": "WARNING", "message": "WARNING: [boxId: P1 - B1]",
+            }]},
+            errors=None,
+        )
+        twin = {"templateName": "P1 - B1", "dimensions": {"length": 19, "width": 16, "height": 15},
+                "weight": {"unit": "LB", "value": 20}, "items": [{"msku": "SKU-1", "quantity": 1}]}
+        api.list_inbound_plan_boxes.return_value = SimpleNamespace(payload={"boxes": [twin]}, errors=None)
+        state = {
+            "inbound_plan_id": "wf-test-plan",
+            "boxes": [
+                {"local_id": "BOX-01", "length_in": 19, "width_in": 16, "height_in": 15,
+                 "weight_lb": 20, "contents": [{"msku": "SKU-1", "quantity": 1}]},
+                {"local_id": "BOX-06", "length_in": 19, "width_in": 16, "height_in": 15,
+                 "weight_lb": 20, "contents": [{"msku": "SKU-2", "quantity": 1}]},
+            ],
+            "operation": {"id": "op-1", "kind": "submit_boxes", "status": "IN_PROGRESS"},
+        }
+        state = ss_fba_shipments._fba_amazon_refresh_operation(api, state)
+        self.assertEqual(state["operation_warnings"]["box_names"], {})
+
+    def test_amazon_stated_carton_minimums_are_parsed_for_the_operators_box(self):
+        minimums = ss_fba_shipments._fba_box_minimums_from_warnings(
+            [
+                {"message": "WARNING: Box weight does not meet the expected minimum 17.37 lb. [boxId: P1 - B6]"},
+                {"message": "WARNING: Box weight does not meet the expected minimum 26.81 lb. [boxId: P1 - B10]"},
+                {"message": "WARNING: Box minimum cubic volume does not meet the expected"
+                            " minimum cubic inch 5633.25. [boxId: P1 - B10]"},
+                {"message": "WARNING: something else entirely"},
+            ],
+            {"P1 - B6": "BOX-10", "P1 - B10": "BOX-11"},
+        )
+        self.assertEqual(minimums, {
+            "BOX-10": {"weight_lb": 17.37},
+            "BOX-11": {"weight_lb": 26.81, "volume_in3": 5633.25},
+        })
+
     def test_a_different_step_still_reports_the_failure_instead_of_skipping_ahead(self):
         api = Mock()
         response = self.call(api, "generate-transportation")
