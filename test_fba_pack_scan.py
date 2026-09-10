@@ -812,5 +812,90 @@ class FbaPackScanTest(unittest.TestCase):
         self.assertIn("open Amazon FBA plan", response.get_json()["error"])
 
 
+class FbaFailedOperationRetryTest(unittest.TestCase):
+    """A failed Amazon operation must not permanently block its own step."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.base_dir = Path(self.temp.name)
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.row_factory = sqlite3.Row
+        ss_fba_schema._ensure_fba_prep_tables(db.cursor())
+        workflow = {
+            "stage": "placement_generating",
+            "inbound_plan_id": "wf-test-plan",
+            "packing_confirmed": True,
+            "boxes_submitted": True,
+            "boxes": [{"local_id": "BOX-1", "contents": [{"msku": "SKU-1", "quantity": 2}]}],
+            "last_error": "ERROR: Something went wrong. Please try again later.",
+            "operation": {
+                "id": "op-failed-1",
+                "kind": "generate_placement",
+                "status": "FAILED",
+                "next_stage": "placement_options",
+                "success_flag": "",
+                "problems": [{
+                    "code": "InternalServerError", "severity": "ERROR",
+                    "message": "ERROR: Something went wrong. Please try again later.",
+                }],
+            },
+        }
+        now = "2026-09-10T08:50:00"
+        db.execute(
+            """
+            INSERT INTO fba_prep_sessions (
+                id, session_name, items_json, item_count, total_units, status,
+                created_at, updated_at, amazon_inbound_plan_id, amazon_stage,
+                amazon_state_json
+            ) VALUES (1, 'Test plan', ?, 1, 2, 'open', ?, ?, ?, 'placement_generating', ?)
+            """,
+            (
+                json.dumps([{"seller_sku": "SKU-1", "quantity": 2}]),
+                now, now, "wf-test-plan", json.dumps(workflow),
+            ),
+        )
+        db.commit()
+        db.close()
+        ss_runtime.app.testing = True
+        self.client = ss_runtime.app.test_client()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def call(self, api, action):
+        with (
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(
+                ss_fba_shipments, "_fba_amazon_client",
+                return_value=(api, US_MARKETPLACE_ID),
+            ),
+        ):
+            return self.client.post(f"/api/fba-prep/sessions/1/amazon/{action}", json={})
+
+    def test_retrying_the_same_step_calls_amazon_again_and_clears_the_old_failure(self):
+        api = Mock()
+        api.generate_placement_options.return_value = SimpleNamespace(
+            payload={"operationId": "op-retry-1"}, errors=None
+        )
+        response = self.call(api, "generate-placement")
+
+        self.assertEqual(response.status_code, 200)
+        api.generate_placement_options.assert_called_once_with("wf-test-plan")
+        api.get_inbound_operation_status.assert_not_called()
+        workflow = response.get_json()["amazon_workflow"]
+        self.assertEqual(workflow["operation"]["id"], "op-retry-1")
+        self.assertEqual(workflow["operation"]["status"], "IN_PROGRESS")
+        self.assertEqual(workflow["stage"], "placement_generating")
+        self.assertFalse(workflow["last_error"])
+
+    def test_a_different_step_still_reports_the_failure_instead_of_skipping_ahead(self):
+        api = Mock()
+        response = self.call(api, "generate-transportation")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Something went wrong", response.get_json()["error"])
+        api.generate_transportation_options.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

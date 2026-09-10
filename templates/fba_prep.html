@@ -745,6 +745,14 @@
       const recovering=Boolean(state.amazon.recovery?.active);
       return `<h3>Choose a packing option</h3><p>${recovering?'Amazon changed the grouping enough that the saved cartons could not be restored automatically. Choose an option; cartons named below may need physical re-sorting.':'Packing groups cannot share a carton. The chosen option determines how the scanner separates your items.'}</p><div class="option-list">${options.map((option,index)=>`<label class="option-card"><div class="option-top"><div><div class="option-title">Option ${index+1} · ${(option.packingGroups||[]).length} group${(option.packingGroups||[]).length===1?'':'s'}</div><div class="option-meta">${esc(option.status||'AVAILABLE')}${option.expiration?' · expires '+esc(fmtDate(option.expiration)):''}</div></div><div class="money">${feeText(option.fee_totals)}</div></div>${recovering?`<div class="stage-note ${option.recovery_compatible?'ok':'warn'}">${option.recovery_compatible?'All saved cartons remain compatible.':`Re-sort: ${esc((option.recovery_conflict_boxes||[]).join(', ')||'one or more cartons')}.`}</div>`:''}<div class="option-shipments">${(option.packingGroups||[]).map((_,groupIndex)=>`<span class="destination-pill">Packing group ${groupIndex+1}</span>`).join('')}</div><div class="stage-actions" style="margin-top:9px"><button class="btn btn-amazon" data-confirm-packing="${esc(option.packingOptionId)}" type="button">Use this packing</button></div></label>`).join('')}</div>`;
     }
+    function amazonOperationFailureHtml(){
+      const operation=state.amazon?.operation||{},kind=String(operation.kind||'');
+      if(String(operation.status||'').toUpperCase()!=='FAILED')return '';
+      if(kind==='create_plan'||kind.startsWith('recovery'))return '';
+      const problems=(operation.problems||[]).map(problem=>[problem.code,problem.message||problem.details].filter(Boolean).join(' · ')).filter(Boolean);
+      const detail=problems.length?problems.map(esc).join('<br>'):esc(state.amazon?.last_error||'Amazon did not give a reason.');
+      return `<div class="stage-note danger"><strong>Amazon could not complete ${esc(kind.replaceAll('_',' ')||'the request')}.</strong><br>${detail}<br>This message came back from Amazon, not from this app. Nothing was changed — run the same step again, and if Amazon keeps failing, wait a few minutes and retry.</div>`;
+    }
     function placementOptionHtml(){
       const options=state.amazon.placement_options||[];
       if(!options.length)return `<h3>Get Amazon destinations</h3><p>Your complete box contents are saved. Amazon can now calculate fulfillment-center splits and placement fees.</p><div class="stage-actions"><button class="btn btn-amazon" data-amz-action="generate-placement" type="button">Generate destination options</button><button class="btn btn-ghost" data-amz-sync type="button">Refresh Amazon</button></div>`;
@@ -812,6 +820,7 @@
         const readyPanel=!needsAction&&!pendingEnablement&&enablement.all_ready?`<div class="stage-note ok">All ${enablement.ready} Seller SKU${enablement.ready===1?' is':'s are'} FBA ready.</div>`:'';
         pane.innerHTML=`<h3>Create the inbound plan from the counted items</h3><p>This sends each matched Amazon Seller SKU and the quantity counted by physical scans. Use the Count step if an item or quantity needs correction.</p>${missingAddress.length?`<div class="stage-note warn">Ship-from setup needed: ${esc(missingAddress.join(', '))}. Use “Edit ship-from address” below.</div>`:''}${missingSku.length?`<div class="stage-note warn">${missingSku.length} counted item type${missingSku.length===1?' needs':'s need'} an Amazon Seller SKU. Open Count to update it.</div>`:''}${safetyPanel}${enablementPanel}${activatingPanel}${readyPanel}${continuePanel}${!state.queue.length?'<div class="stage-note">Count at least one physical item first.</div>':''}<div class="stage-actions" style="margin-top:12px"><button class="btn btn-amazon" data-create-plan type="button" ${ready&&!state.amazonBusy?'':'disabled'}>Create Amazon plan</button></div><div class="stage-note danger">Creating a plan adds an active inbound plan in Seller Central and locks these quantities.</div>`;
       }
+      if(activeView){const failureHtml=amazonOperationFailureHtml();if(failureHtml)pane.insertAdjacentHTML('afterbegin',failureHtml)}
       pane.insertAdjacentHTML('beforeend',setAsideItemsHtml());
       attachAmazonHandlers();
     }

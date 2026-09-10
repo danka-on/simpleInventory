@@ -989,9 +989,15 @@ def api_fba_prep_amazon_action(session_id, action):
             state = _fba_amazon_refresh_operation(api, state)
             pending = state.get('operation') if isinstance(state.get('operation'), dict) else {}
             if str(pending.get('status') or '').upper() == 'FAILED':
-                raise FbaInboundValidationError(
-                    state.get('last_error') or 'The previous Amazon operation failed; refresh before continuing'
-                )
+                if ss_fba_schema._fba_trim(pending.get('kind'), 80) != operation_kind:
+                    raise FbaInboundValidationError(
+                        state.get('last_error') or 'The previous Amazon operation failed; refresh before continuing'
+                    )
+                # Retrying the same step is how the operator clears a transient Amazon
+                # failure, so drop the stale result instead of replaying its message.
+                state['operation'] = {}
+                state['last_error'] = ''
+                pending = {}
             if str((state.get('plan') or {}).get('status') or '').upper() == 'ERRORED':
                 raise FbaInboundValidationError(
                     state.get('last_error') or 'Amazon marked this inbound plan as errored; it cannot generate packing options'
