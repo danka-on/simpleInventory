@@ -16,9 +16,91 @@ from . import (
 )
 
 
+def _fba_scan_key(value):
+    """Normalize one scanned or stored identifier into a comparison key."""
+    text = str(value or '').strip()
+    if not text:
+        return ''
+    return (ss_warehouse_locations._movelocation_barcode_key(text) or text).casefold()
+
+
+def _fba_scan_keys(value):
+    """Every comparison key one identifier can produce for a scanner."""
+    text = str(value or '').strip()
+    if not text:
+        return set()
+    keys = {
+        str(variant).strip().casefold()
+        for variant in ss_warehouse_locations._movelocation_barcode_variants(text)
+        if str(variant or '').strip()
+    }
+    keys.add(text.casefold())
+    return keys
+
+
+def _fba_item_scan_keys(item, plan_item=None, msku=''):
+    """Identify one planned unit by warehouse barcode, FNSKU, MSKU or ASIN.
+
+    Once a seller FNSKU label covers the manufacturer barcode, the FNSKU is the
+    only code a packer can scan, so it has to identify the unit exactly as the
+    original UPC does.
+    """
+    item = item if isinstance(item, dict) else {}
+    listing = (item.get('fba') or {}).get('amazon_listing') or {}
+    plan_item = plan_item if isinstance(plan_item, dict) else {}
+    values = [item.get(field) for field in (
+        'barcode', 'barcode_key', 'barcode_display', 'upc', 'asin',
+        'seller_sku', 'fnsku', 'amazon_fnsku',
+    )]
+    values += [listing.get(field) for field in ('seller_sku', 'fnsku', 'asin', 'upc', 'barcode')]
+    values += [msku, plan_item.get('fnsku'), plan_item.get('msku'), plan_item.get('seller_sku'), plan_item.get('asin')]
+    keys = set()
+    for value in values:
+        keys |= _fba_scan_keys(value)
+    return keys
+
+
+def _fba_plan_items_by_msku(state):
+    """Index the saved Amazon plan items by their Seller SKU."""
+    plan_items = state.get('plan_items') if isinstance(state.get('plan_items'), list) else []
+    indexed = {}
+    for plan_item in plan_items:
+        if not isinstance(plan_item, dict):
+            continue
+        key = ss_fba_schema._fba_trim(plan_item.get('msku') or plan_item.get('seller_sku'), 255).casefold()
+        if key:
+            indexed[key] = plan_item
+    return indexed
+
+
+def _fba_resolve_scan_item(session, state, *, barcode='', msku=''):
+    """Resolve a scanned FNSKU label or UPC to its planned session item."""
+    scan_keys = _fba_scan_keys(barcode) | _fba_scan_keys(msku)
+    if not scan_keys:
+        return None, ''
+    plan_by_msku = _fba_plan_items_by_msku(state)
+    for item in session.get('items') or []:
+        if not isinstance(item, dict):
+            continue
+        item_msku = ss_fba_schema._fba_trim(
+            item.get('seller_sku') or ((item.get('fba') or {}).get('amazon_listing') or {}).get('seller_sku'),
+            255,
+        )
+        plan_item = plan_by_msku.get(item_msku.casefold()) if item_msku else None
+        if scan_keys.intersection(_fba_item_scan_keys(item, plan_item, item_msku)):
+            return item, item_msku
+    # Amazon can assign an FNSKU the saved session row never stored; the plan
+    # itself is still authoritative for what that label belongs to.
+    for key, plan_item in plan_by_msku.items():
+        if scan_keys.intersection(_fba_scan_keys(plan_item.get('fnsku')) | {key}):
+            return None, ss_fba_schema._fba_trim(plan_item.get('msku') or plan_item.get('seller_sku'), 255)
+    return None, ''
+
+
 def _fba_scan_rejection(session, *, barcode='', msku=''):
     """Return a packing stop for a current or removed setup rejection."""
-    key = lambda value: ss_warehouse_locations._movelocation_barcode_key(value) or str(value or '').strip().casefold()
+    key = _fba_scan_key
+    scan_keys = _fba_scan_keys(barcode) | _fba_scan_keys(msku)
     current = session.get('items') or []
     current_keys = {key(item.get('barcode') or item.get('seller_sku')) for item in current if isinstance(item, dict)}
     archived = [item for item in session.get('rejected_items') or [] if isinstance(item, dict)
@@ -32,10 +114,7 @@ def _fba_scan_rejection(session, *, barcode='', msku=''):
             continue
         if not error and item.get('fba_set_aside'):
             error = 'This item was set aside from this shipment and is not included in the Amazon plan.'
-        listing = (item.get('fba') or {}).get('amazon_listing') or {}
-        values = [item.get(field) for field in ('barcode', 'barcode_key', 'barcode_display', 'asin', 'seller_sku', 'fnsku', 'amazon_fnsku')]
-        values += [listing.get('seller_sku'), listing.get('fnsku')]
-        if not any(value and ((barcode and key(value) == key(barcode)) or (msku and key(value) == key(msku))) for value in values):
+        if not scan_keys.intersection(_fba_item_scan_keys(item)):
             continue
         retryable = item.get('fba_enablement_status') != 'failed' or safety_pending or any(token in error.lower() for token in (
             'internal error', 'has no attribute', 'traceback', 'database is locked',
@@ -55,11 +134,7 @@ def _fba_scan_rejection(session, *, barcode='', msku=''):
 
 def _fba_planned_label_match(barcode, session_rows):
     """Resolve a warehouse barcode to the newest printable item in an open FBA plan."""
-    target_variants = {
-        str(value or '').strip().casefold()
-        for value in ss_warehouse_locations._movelocation_barcode_variants(barcode)
-        if str(value or '').strip()
-    }
+    target_variants = _fba_scan_keys(barcode)
     if not target_variants:
         return None
 
@@ -74,31 +149,21 @@ def _fba_planned_label_match(barcode, session_rows):
         if not state.get('inbound_plan_id') or not plan_items:
             continue
 
-        plan_by_msku = {}
-        for plan_item in plan_items:
-            if not isinstance(plan_item, dict):
-                continue
-            msku = ss_fba_schema._fba_trim(plan_item.get('msku') or plan_item.get('seller_sku'), 255)
-            if msku:
-                plan_by_msku[msku.casefold()] = plan_item
+        plan_by_msku = _fba_plan_items_by_msku(state)
 
         for item in session.get('items') or []:
             if not isinstance(item, dict):
                 continue
-            item_variants = {
-                str(value or '').strip().casefold()
-                for value in ss_warehouse_locations._movelocation_barcode_variants(item.get('barcode'))
-                if str(value or '').strip()
-            }
-            if not target_variants.intersection(item_variants):
-                continue
-
             msku = ss_fba_schema._fba_trim(
                 item.get('seller_sku')
                 or ((item.get('fba') or {}).get('amazon_listing') or {}).get('seller_sku'),
                 255,
             )
             plan_item = plan_by_msku.get(msku.casefold()) if msku else None
+            # A unit already wearing its FNSKU label can only be scanned by that
+            # label, so match on every identifier the plan knows for the item.
+            if not target_variants.intersection(_fba_item_scan_keys(item, plan_item, msku)):
+                continue
             fnsku = ss_fba_schema._fba_trim((plan_item or {}).get('fnsku'), 30).upper()
             box_assignments = []
             for raw_box in state.get('boxes') or []:
@@ -401,8 +466,6 @@ def api_fba_prep_amazon_pack_scan(session_id):
             raise FbaInboundValidationError('A valid packing scan token is required')
         if not barcode:
             raise FbaInboundValidationError('Scan an item barcode')
-        if not msku:
-            raise FbaInboundValidationError('The scanned item is not matched to an Amazon Seller SKU')
 
         conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
         conn.row_factory = sqlite3.Row
@@ -426,6 +489,18 @@ def api_fba_prep_amazon_pack_scan(session_id):
             })
 
         _row, session_data, state = ss_fba_shipments._fba_amazon_session(conn, session_id)
+        # The scanned code can be the FNSKU label that now covers the item's own
+        # barcode. Resolve it back to the planned unit, and pull the warehouse
+        # barcode from that unit so stock still comes off the shelf.
+        scan_item, resolved_msku = _fba_resolve_scan_item(session_data, state, barcode=barcode, msku=msku)
+        if not msku:
+            msku = resolved_msku
+        if not msku:
+            raise FbaInboundValidationError('The scanned item is not matched to an Amazon Seller SKU')
+        if isinstance(scan_item, dict):
+            warehouse_barcode = ss_fba_schema._fba_trim(scan_item.get('barcode'), 160)
+            if warehouse_barcode:
+                barcode = warehouse_barcode
         rejection = _fba_scan_rejection(session_data, msku=msku, barcode=barcode)
         if rejection:
             return jsonify(rejection), 422

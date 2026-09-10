@@ -47,6 +47,14 @@ class FbaLabelScannerTest(unittest.TestCase):
         self.assertEqual(match["msku"], "SKU-1")
         self.assertEqual(match["fnsku"], "X001234567")
 
+    def test_resolves_a_scanned_fnsku_label_to_the_same_planned_item(self):
+        for scanned in ("X001234567", "x001234567", "SKU-1"):
+            with self.subTest(scanned=scanned):
+                match = ss_fba_scanning._fba_planned_label_match(scanned, [session_row()])
+                self.assertTrue(match["printable"])
+                self.assertEqual(match["fnsku"], "X001234567")
+                self.assertEqual(match["barcode"], "025398232475")
+
     def test_returns_waiting_match_when_amazon_has_not_assigned_fnsku(self):
         match = ss_fba_scanning._fba_planned_label_match(
             "025398232475", [session_row(fnsku="")]

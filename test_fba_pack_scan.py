@@ -90,6 +90,41 @@ class FbaPackScanTest(unittest.TestCase):
             },
         )
 
+    def test_packs_from_a_scanned_fnsku_label_and_still_pulls_warehouse_stock(self):
+        """An FNSKU label covers the UPC, so the label alone must identify the unit."""
+        with sqlite3.connect(self.base_dir / "searchRack.db") as db:
+            workflow = json.loads(
+                db.execute("SELECT amazon_state_json FROM fba_prep_sessions WHERE id=1").fetchone()[0]
+            )
+            workflow["plan_items"][0]["fnsku"] = "X001234567"
+            db.execute(
+                "UPDATE fba_prep_sessions SET items_json=?, amazon_state_json=? WHERE id=1",
+                (
+                    json.dumps([{"barcode": "025398232475", "seller_sku": "SKU-1", "quantity": 2}]),
+                    json.dumps(workflow),
+                ),
+            )
+        db.close()
+        with patch.object(ss_config, "BASE_DIR", self.base_dir),                 patch.object(ss_inventory_age, "_inventory_age_consume_fifo"):
+            response = self.client.post(
+                "/api/fba-prep/sessions/1/amazon/pack-scan",
+                json={
+                    "scan_token": "fba:1:1:fnsku-label-scan",
+                    "barcode": "X001234567",
+                    "source_locations": ["A1B1"],
+                    "client_id": "scanner-test-01",
+                    "operator_name": "Test Scanner",
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        scan = response.get_json()["scan"]
+        self.assertEqual(scan["msku"], "SKU-1")
+        self.assertEqual(scan["inventory_removed"], 1)
+        self.assertEqual(scan["source_location"], "A1B1")
+        with sqlite3.connect(self.base_dir / "searchRack.db") as db:
+            self.assertEqual(db.execute("SELECT QUANTITY FROM SEARCHRACK WHERE ID=1").fetchone()[0], 1)
+        db.close()
+
     def test_failed_plan_approval_overrides_ready_and_can_be_set_aside(self):
         workflow = {'stage': 'plan_failed', 'inbound_plan_id': 'wf-failed', 'boxes': [],
                     'operation': {'kind': 'create_plan', 'status': 'FAILED', 'problems': [
