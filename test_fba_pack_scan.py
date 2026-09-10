@@ -468,6 +468,129 @@ class FbaPackScanTest(unittest.TestCase):
         db.close()
         self.assertEqual(saved_items[0]["quantity"], 1)
 
+    NOT_VALID = (
+        "[{'code': 'BadRequest', 'message': 'ERROR: The following MSKUs are not valid: [SKU-1].', "
+        "'details': ''}]"
+    )
+
+    def test_scan_stops_when_amazon_no_longer_recognizes_the_listing(self):
+        ss_fba_shipments._FBA_SCAN_LISTING_CACHE.clear()
+        api = Mock()
+        api.list_prep_details.side_effect = Exception(self.NOT_VALID)
+        try:
+            with (
+                patch.object(ss_config, "BASE_DIR", self.base_dir),
+                patch.object(ss_fba_shipments, "_fba_amazon_client", return_value=(api, US_MARKETPLACE_ID)),
+            ):
+                response = self.post_scan(label_printed=False)
+        finally:
+            ss_fba_shipments._FBA_SCAN_LISTING_CACHE.clear()
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("no longer recognizes Seller SKU SKU-1", response.get_json()["error"])
+        api.list_prep_details.assert_called_once_with(marketplaceId=US_MARKETPLACE_ID, mskus=["SKU-1"])
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        self.assertEqual(db.execute("SELECT QUANTITY FROM SEARCHRACK WHERE ID = 1").fetchone()[0], 2)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fba_pack_scans").fetchone()[0], 0)
+        db.close()
+
+    def test_scan_proceeds_when_the_listing_check_itself_fails(self):
+        ss_fba_shipments._FBA_SCAN_LISTING_CACHE.clear()
+        api = Mock()
+        api.list_prep_details.side_effect = Exception("InternalServerError")
+        try:
+            with (
+                patch.object(ss_config, "BASE_DIR", self.base_dir),
+                patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+                patch.object(ss_caching, "update_data_version"),
+                patch.object(ss_caching, "_invalidate_searchrack_cache"),
+                patch.object(ss_fba_shipments, "_fba_amazon_client", return_value=(api, US_MARKETPLACE_ID)),
+            ):
+                response = self.post_scan(label_printed=False)
+        finally:
+            ss_fba_shipments._FBA_SCAN_LISTING_CACHE.clear()
+        self.assertEqual(response.status_code, 200)
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fba_pack_scans").fetchone()[0], 1)
+        db.close()
+
+    def _send_boxes_and_add_second_sku(self, **state_updates):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        row = db.execute("SELECT items_json, amazon_state_json FROM fba_prep_sessions WHERE id = 1").fetchone()
+        items = json.loads(row[0]) + [{"seller_sku": "SKU-2", "quantity": 1}]
+        state = json.loads(row[1])
+        state["boxes_submitted"] = True
+        state["stage"] = "placement_generating"
+        state["plan_items"].append({"msku": "SKU-2", "quantity": 1})
+        state["packing_groups"][0]["items"].append({"msku": "SKU-2", "quantity": 1})
+        state["plan_health"] = {
+            "findings": [{"msku": "SKU-1", "severity": "blocking", "code": "listing_missing"}],
+            "blocking_count": 1,
+        }
+        state.update(state_updates)
+        db.execute(
+            "UPDATE fba_prep_sessions SET items_json = ?, amazon_state_json = ? WHERE id = 1",
+            (json.dumps(items), json.dumps(state)),
+        )
+        db.commit()
+        db.close()
+
+    def test_packed_unit_of_deleted_listing_can_be_removed_after_boxes_are_sent(self):
+        cancel_api = Mock()
+        cancel_api.cancel_inbound_plan.return_value = SimpleNamespace(
+            payload={"operationId": "cancel-operation-2"}, errors=None
+        )
+        with (
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_inventory_age, "_inventory_age_consume_fifo"),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
+        ):
+            packed = self.post_scan(token="fba:1:recover:packed-deleted", label_printed=False)
+        self.assertEqual(packed.status_code, 200)
+        self._send_boxes_and_add_second_sku()
+        url = "/api/fba-prep/sessions/1/amazon/recover-remove-item"
+        with (
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_caching, "update_data_version"),
+            patch.object(ss_caching, "_invalidate_searchrack_cache"),
+            patch.object(ss_fba_shipments, "_fba_amazon_client", return_value=(cancel_api, US_MARKETPLACE_ID)),
+        ):
+            refused = self.client.post(url, json={"msku": "SKU-1", "quantity": 2, "confirm": True})
+            response = self.client.post(
+                url, json={"msku": "SKU-1", "quantity": 2, "include_packed": True, "confirm": True}
+            )
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn("unpacked unit", refused.get_json()["error"])
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        removed = payload["recovery"]["removed_item"]
+        self.assertEqual(removed["new_quantity"], 0)
+        self.assertEqual(len(removed["reversed_scans"]), 1)
+        self.assertTrue(removed["reversed_scans"][0]["inventory_restored"])
+        self.assertEqual([row["seller_sku"] for row in payload["recovery"]["updated_items"]], ["SKU-2"])
+        self.assertEqual(payload["recovery"]["saved_boxes"][0]["contents"], [])
+        self.assertEqual(payload["amazon_workflow"]["plan_health"]["blocking_count"], 0)
+        self.assertEqual(payload["amazon_workflow"]["recovery"]["phase"], "canceling")
+        cancel_api.cancel_inbound_plan.assert_called_once_with("wf-test-plan")
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        self.assertEqual(db.execute("SELECT QUANTITY FROM SEARCHRACK WHERE ID = 1").fetchone()[0], 2)
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM fba_pack_scans").fetchone()[0], 0)
+        db.close()
+
+    def test_recovery_is_refused_once_placement_is_confirmed(self):
+        self._send_boxes_and_add_second_sku(placement_confirmed=True)
+        with (
+            patch.object(ss_config, "BASE_DIR", self.base_dir),
+            patch.object(ss_fba_shipments, "_fba_amazon_client") as amazon,
+        ):
+            response = self.client.post(
+                "/api/fba-prep/sessions/1/amazon/recover-remove-item",
+                json={"msku": "SKU-1", "quantity": 2, "include_packed": True, "confirm": True},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("placement option is already confirmed", response.get_json()["error"])
+        amazon.assert_not_called()
+
     def test_failed_amazon_cancellation_keeps_original_plan_quantity(self):
         cancel_api = Mock()
         cancel_api.cancel_inbound_plan.return_value = SimpleNamespace(

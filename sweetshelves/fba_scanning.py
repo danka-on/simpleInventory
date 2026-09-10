@@ -442,6 +442,11 @@ def api_fba_prep_amazon_pack_scan(session_id):
         ), None)
         if not plan_item:
             raise FbaInboundValidationError(f'{msku} is not part of this Amazon plan')
+        # Amazon can delete or reject a listing after the plan accepted it; ask
+        # while the unit is in hand rather than discovering it at the placement step.
+        listing_problem = ss_fba_shipments._fba_scan_listing_problem(msku)
+        if listing_problem:
+            raise FbaInboundValidationError(listing_problem)
         expected = max(0, ss_listing_settings._listingagent_parse_int(plan_item.get('quantity'), 0) or 0)
         packed = sum(
             max(0, ss_listing_settings._listingagent_parse_int(item.get('quantity'), 0) or 0)
@@ -694,110 +699,14 @@ def api_fba_prep_amazon_reset_pack_scan(session_id):
         if state.get('boxes_submitted'):
             raise FbaInboundValidationError('Box contents have already been submitted to Amazon and cannot be reset')
 
-        scan = cur.execute('''
-            SELECT * FROM fba_pack_scans
-            WHERE session_id = ? AND msku = ? COLLATE NOCASE
-            ORDER BY id DESC LIMIT 1
-        ''', (session_id, msku)).fetchone()
-        if not scan:
-            raise FbaInboundValidationError(f'{msku} has no saved packing scan to reset')
-        scan = dict(scan)
-        scan_msku = ss_fba_schema._fba_trim(scan.get('msku'), 255) or msku
-        scan_token = ss_fba_schema._fba_trim(scan.get('scan_token'), 100)
-        box_id = ss_fba_schema._fba_trim(scan.get('box_id'), 40).upper()
-
-        boxes = state.get('boxes') if isinstance(state.get('boxes'), list) else []
-        box = next((
-            row for row in boxes if isinstance(row, dict)
-            and ss_fba_schema._fba_trim(row.get('local_id'), 40).upper() == box_id
-        ), None)
-        if box is None:
-            raise FbaInboundValidationError('The saved packing carton could not be found; refresh before resetting')
-        contents = box.get('contents') if isinstance(box.get('contents'), list) else []
-        content = next((
-            row for row in contents if isinstance(row, dict)
-            and ss_fba_schema._fba_trim(row.get('msku'), 255).casefold() == scan_msku.casefold()
-        ), None)
-        packed_quantity = max(0, ss_listing_settings._listingagent_parse_int((content or {}).get('quantity'), 0) or 0)
-        if content is None or packed_quantity <= 0:
-            raise FbaInboundValidationError('The saved packing count changed; refresh before resetting')
-        if packed_quantity == 1:
-            box['contents'] = [row for row in contents if row is not content]
-        else:
-            content['quantity'] = packed_quantity - 1
-            box['contents'] = contents
-        state['boxes'] = boxes
-
-        restored = None
-        source_location = ss_fba_schema._fba_trim(scan.get('source_location'), 120)
-        if max(0, ss_normalization._coerce_int(scan.get('inventory_removed'), 0)):
-            event_id = 'fba-pack-' + scan_token
-            history = cur.execute(
-                'SELECT * FROM rackhist.removed_items WHERE event_id = ? LIMIT 1', (event_id,)
-            ).fetchone()
-            if not history:
-                raise FbaInboundValidationError(
-                    'The warehouse-removal history for this scan is missing; inventory was not changed'
-                )
-            restored = ss_inventory_history._restore_searchrack_with_undo_claim(cur, history, 1)
-            if restored.get('already_claimed'):
-                raise FbaInboundValidationError('This packing scan was already restored by another worker')
-            cur.execute('''
-                UPDATE rackhist.removed_items
-                SET event_status = 'reset', undone_at = ?
-                WHERE id = ?
-            ''', (ss_listing_checks._listagent_now_iso(), int(history['id'])))
-            inventory_restored = True
-
-        def state_key(mapping):
-            return next((key for key in mapping if str(key).casefold() == scan_msku.casefold()), scan_msku)
-
-        removed_by_msku = state.get('inventory_removed_by_msku')
-        removed_by_msku = removed_by_msku if isinstance(removed_by_msku, dict) else {}
-        removed_key = state_key(removed_by_msku)
-        removed_by_msku[removed_key] = max(
-            0, (ss_listing_settings._listingagent_parse_int(removed_by_msku.get(removed_key), 0) or 0)
-            - (1 if inventory_restored else 0)
-        )
-        state['inventory_removed_by_msku'] = removed_by_msku
-
-        removed_locations = state.get('removed_locations_by_msku')
-        removed_locations = removed_locations if isinstance(removed_locations, dict) else {}
-        location_key = state_key(removed_locations)
-        location_rows = removed_locations.get(location_key)
-        location_rows = location_rows if isinstance(location_rows, list) else []
-        if inventory_restored and source_location:
-            location_row = next((
-                row for row in location_rows if isinstance(row, dict)
-                and ss_warehouse_matching._sold_location_key(row.get('code')) == ss_warehouse_matching._sold_location_key(source_location)
-            ), None)
-            if location_row:
-                location_row['quantity'] = max(
-                    0, (ss_listing_settings._listingagent_parse_int(location_row.get('quantity'), 0) or 0) - 1
-                )
-                location_rows = [
-                    row for row in location_rows
-                    if max(0, ss_listing_settings._listingagent_parse_int((row or {}).get('quantity'), 0) or 0) > 0
-                ]
-        removed_locations[location_key] = location_rows
-        state['removed_locations_by_msku'] = removed_locations
-
-        if max(0, ss_normalization._coerce_int(scan.get('label_printed'), 0)):
-            printed_counts = state.get('printed_item_label_counts')
-            printed_counts = printed_counts if isinstance(printed_counts, dict) else {}
-            printed_key = state_key(printed_counts)
-            printed_counts[printed_key] = max(
-                0, (ss_listing_settings._listingagent_parse_int(printed_counts.get(printed_key), 0) or 0) - 1
-            )
-            state['printed_item_label_counts'] = printed_counts
-        if isinstance(state.get('last_item_label_print'), dict) and state['last_item_label_print'].get('scan_token') == scan_token:
-            state.pop('last_item_label_print', None)
-        if isinstance(state.get('last_pack_scan'), dict) and state['last_pack_scan'].get('scan_token') == scan_token:
-            state.pop('last_pack_scan', None)
-
-        cur.execute('DELETE FROM fba_pack_scans WHERE id = ? AND session_id = ?', (scan['id'], session_id))
-        if cur.rowcount != 1:
-            raise FbaInboundValidationError('Another worker already reset this packing scan')
+        undo = _fba_undo_newest_pack_scan(cur, session_id, state, msku)
+        scan = undo['scan']
+        scan_msku = undo['msku']
+        scan_token = undo['scan_token']
+        box_id = undo['box_id']
+        source_location = undo['source_location']
+        inventory_restored = undo['inventory_restored']
+        restored = undo['restored']
         ss_fba_shipments._fba_save_amazon_state(conn, session_id, state)
         conn.commit()
         if inventory_restored:
@@ -826,6 +735,126 @@ def api_fba_prep_amazon_reset_pack_scan(session_id):
     finally:
         if conn is not None:
             conn.close()
+
+
+def _fba_undo_newest_pack_scan(cur, session_id, state, msku):
+    """Reverse the newest carton scan for one MSKU inside the caller's transaction.
+
+    The carton count, warehouse stock (through the removal history, which must
+    be attached as ``rackhist``), label counters, and the scan row itself are
+    all undone together so the physical unit can be rescanned or set aside.
+    ``state`` is updated in place; the caller saves it.
+    """
+    scan = cur.execute('''
+        SELECT * FROM fba_pack_scans
+        WHERE session_id = ? AND msku = ? COLLATE NOCASE
+        ORDER BY id DESC LIMIT 1
+    ''', (session_id, msku)).fetchone()
+    if not scan:
+        raise FbaInboundValidationError(f'{msku} has no saved packing scan to reset')
+    scan = dict(scan)
+    scan_msku = ss_fba_schema._fba_trim(scan.get('msku'), 255) or msku
+    scan_token = ss_fba_schema._fba_trim(scan.get('scan_token'), 100)
+    box_id = ss_fba_schema._fba_trim(scan.get('box_id'), 40).upper()
+    inventory_restored = False
+
+    boxes = state.get('boxes') if isinstance(state.get('boxes'), list) else []
+    box = next((
+        row for row in boxes if isinstance(row, dict)
+        and ss_fba_schema._fba_trim(row.get('local_id'), 40).upper() == box_id
+    ), None)
+    if box is None:
+        raise FbaInboundValidationError('The saved packing carton could not be found; refresh before resetting')
+    contents = box.get('contents') if isinstance(box.get('contents'), list) else []
+    content = next((
+        row for row in contents if isinstance(row, dict)
+        and ss_fba_schema._fba_trim(row.get('msku'), 255).casefold() == scan_msku.casefold()
+    ), None)
+    packed_quantity = max(0, ss_listing_settings._listingagent_parse_int((content or {}).get('quantity'), 0) or 0)
+    if content is None or packed_quantity <= 0:
+        raise FbaInboundValidationError('The saved packing count changed; refresh before resetting')
+    if packed_quantity == 1:
+        box['contents'] = [row for row in contents if row is not content]
+    else:
+        content['quantity'] = packed_quantity - 1
+        box['contents'] = contents
+    state['boxes'] = boxes
+
+    restored = None
+    source_location = ss_fba_schema._fba_trim(scan.get('source_location'), 120)
+    if max(0, ss_normalization._coerce_int(scan.get('inventory_removed'), 0)):
+        event_id = 'fba-pack-' + scan_token
+        history = cur.execute(
+            'SELECT * FROM rackhist.removed_items WHERE event_id = ? LIMIT 1', (event_id,)
+        ).fetchone()
+        if not history:
+            raise FbaInboundValidationError(
+                'The warehouse-removal history for this scan is missing; inventory was not changed'
+            )
+        restored = ss_inventory_history._restore_searchrack_with_undo_claim(cur, history, 1)
+        if restored.get('already_claimed'):
+            raise FbaInboundValidationError('This packing scan was already restored by another worker')
+        cur.execute('''
+            UPDATE rackhist.removed_items
+            SET event_status = 'reset', undone_at = ?
+            WHERE id = ?
+        ''', (ss_listing_checks._listagent_now_iso(), int(history['id'])))
+        inventory_restored = True
+
+    def state_key(mapping):
+        return next((key for key in mapping if str(key).casefold() == scan_msku.casefold()), scan_msku)
+
+    removed_by_msku = state.get('inventory_removed_by_msku')
+    removed_by_msku = removed_by_msku if isinstance(removed_by_msku, dict) else {}
+    removed_key = state_key(removed_by_msku)
+    removed_by_msku[removed_key] = max(
+        0, (ss_listing_settings._listingagent_parse_int(removed_by_msku.get(removed_key), 0) or 0)
+        - (1 if inventory_restored else 0)
+    )
+    state['inventory_removed_by_msku'] = removed_by_msku
+
+    removed_locations = state.get('removed_locations_by_msku')
+    removed_locations = removed_locations if isinstance(removed_locations, dict) else {}
+    location_key = state_key(removed_locations)
+    location_rows = removed_locations.get(location_key)
+    location_rows = location_rows if isinstance(location_rows, list) else []
+    if inventory_restored and source_location:
+        location_row = next((
+            row for row in location_rows if isinstance(row, dict)
+            and ss_warehouse_matching._sold_location_key(row.get('code')) == ss_warehouse_matching._sold_location_key(source_location)
+        ), None)
+        if location_row:
+            location_row['quantity'] = max(
+                0, (ss_listing_settings._listingagent_parse_int(location_row.get('quantity'), 0) or 0) - 1
+            )
+            location_rows = [
+                row for row in location_rows
+                if max(0, ss_listing_settings._listingagent_parse_int((row or {}).get('quantity'), 0) or 0) > 0
+            ]
+    removed_locations[location_key] = location_rows
+    state['removed_locations_by_msku'] = removed_locations
+
+    if max(0, ss_normalization._coerce_int(scan.get('label_printed'), 0)):
+        printed_counts = state.get('printed_item_label_counts')
+        printed_counts = printed_counts if isinstance(printed_counts, dict) else {}
+        printed_key = state_key(printed_counts)
+        printed_counts[printed_key] = max(
+            0, (ss_listing_settings._listingagent_parse_int(printed_counts.get(printed_key), 0) or 0) - 1
+        )
+        state['printed_item_label_counts'] = printed_counts
+    if isinstance(state.get('last_item_label_print'), dict) and state['last_item_label_print'].get('scan_token') == scan_token:
+        state.pop('last_item_label_print', None)
+    if isinstance(state.get('last_pack_scan'), dict) and state['last_pack_scan'].get('scan_token') == scan_token:
+        state.pop('last_pack_scan', None)
+
+    cur.execute('DELETE FROM fba_pack_scans WHERE id = ? AND session_id = ?', (scan['id'], session_id))
+    if cur.rowcount != 1:
+        raise FbaInboundValidationError('Another worker already reset this packing scan')
+    return {
+        'scan': scan, 'msku': scan_msku, 'scan_token': scan_token, 'box_id': box_id,
+        'source_location': source_location, 'inventory_restored': inventory_restored,
+        'restored': restored,
+    }
 
 
 def api_fba_prep_count_scan(session_id):

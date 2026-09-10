@@ -41,12 +41,54 @@ _FBA_LISTING_READINESS_CACHE_LOCK = threading.Lock()
 _FBA_LISTING_READINESS_CACHE_TTL = 5 * 60
 
 
-def _fba_inbound_unavailable_skus(exc):
+def _fba_prep_error_mskus(exc):
+    """Classify an Amazon prep-details rejection that names Seller SKUs.
+
+    Returns (kind, mskus). ``invalid`` means Amazon no longer recognizes the
+    MSKU at all (the listing was deleted or never activated); ``unavailable``
+    means a fresh FBA offer is still propagating to the inbound service.
+    """
     text = str(exc or '')
-    match = re.search(r'MSKUs?\s*:\s*\[([^\]]+)\]', text, re.IGNORECASE)
+    match = re.search(r'\bMSKUs?\b[^\[\]]{0,80}\[([^\]]+)\]', text, re.IGNORECASE)
     if not match:
-        return []
-    return [ss_fba_schema._fba_trim(value.strip(" '\""), 255) for value in match.group(1).split(',') if value.strip(" '\"")]
+        return '', []
+    mskus = [
+        ss_fba_schema._fba_trim(value.strip(" '\""), 255)
+        for value in match.group(1).split(',') if value.strip(" '\"")
+    ]
+    lowered = text.lower()
+    if 'not valid' in lowered:
+        return 'invalid', mskus
+    if 'not available for inbound' in lowered:
+        return 'unavailable', mskus
+    return 'other', mskus
+
+
+def _fba_inbound_unavailable_skus(exc):
+    kind, mskus = _fba_prep_error_mskus(exc)
+    return mskus if kind == 'unavailable' else []
+
+
+def _fba_invalid_msku_message(invalid_mskus, items):
+    """Amazon answers a deleted or never-activated MSKU with 'not valid'."""
+    item_by_msku = {
+        ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255).casefold(): item
+        for item in items or [] if isinstance(item, dict)
+    }
+    details = []
+    for raw_msku in invalid_mskus or []:
+        msku = ss_fba_schema._fba_trim(raw_msku, 255)
+        item = item_by_msku.get(msku.casefold()) or {}
+        barcode = ss_fba_schema._fba_trim(item.get('barcode'), 160)
+        title = ss_fba_schema._fba_trim(item.get('title'), 120)
+        if msku and msku not in details:
+            details.append(msku + (f' · barcode {barcode}' if barcode else '') + (f' · {title}' if title else ''))
+    return (
+        'Amazon no longer recognizes these Seller SKUs, so they cannot go in an inbound plan: '
+        + ('; '.join(details[:20]) or 'unknown')
+        + '. The listing was removed or never finished activating. Restore each listing in Seller '
+        'Central with exactly the same Seller SKU, or remove the item from this session.'
+    )
 
 
 def _fba_inbound_activation_message(unavailable_mskus, items):
@@ -385,7 +427,12 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
     prep_details = _fba_item_prep_details(seller_sku)
     inbound_pending = _fba_prep_error_is_inbound_pending((prep_details or {}).get('error'))
     activation_note = ''
-    if fnsku and not inbound_pending:
+    # An FNSKU alone does not make a SKU shippable: a listing switched back to
+    # merchant fulfillment keeps its old FNSKU but has no FBA offer to receive.
+    merchant_only = bool(fulfillment_channels) and (
+        'AMAZON_NA' not in fulfillment_channels and 'AMAZON_NA' not in submitted_channels
+    )
+    if fnsku and not inbound_pending and not merchant_only:
         status = 'ready'
         error = ''
     elif blocking_issues:
@@ -394,6 +441,13 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
     elif safety_issues:
         status = 'needs_safety_info'
         error = _fba_listing_issue_notes(safety_issues)
+    elif fnsku and merchant_only and not inbound_pending:
+        status = 'needs_enablement'
+        error = ''
+        activation_note = (
+            f'This SKU has FNSKU {fnsku} but is currently merchant-fulfilled on Amazon; '
+            'it needs an FBA offer before it can be sent inbound.'
+        )
     elif fnsku:
         status = 'enabling'
         error = ''

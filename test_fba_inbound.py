@@ -1,7 +1,8 @@
 import datetime
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+from sweetshelves import fba_readiness as ss_fba_readiness
 from sweetshelves import fba_shipments as ss_fba_shipments
 
 from sweetshelves.fba_inventory import (
@@ -875,4 +876,200 @@ class FbaInboundHelpersTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
+    unittest.main()
+
+
+class PlanHealthTest(unittest.TestCase):
+    NOT_VALID = (
+        "[{'code': 'BadRequest', 'message': 'ERROR: The following MSKUs are not valid: [SKU-BAD].', "
+        "'details': ''}]"
+    )
+    PENDING = (
+        'ERROR: The following MSKUs are not available for inbound. If these were recently added, '
+        'please try again later. MSKUs: [SKU-NEW, SKU-2].'
+    )
+
+    def test_prep_error_parser_classifies_amazon_messages(self):
+        self.assertEqual(
+            ss_fba_readiness._fba_prep_error_mskus(Exception(self.NOT_VALID)), ('invalid', ['SKU-BAD'])
+        )
+        self.assertEqual(
+            ss_fba_readiness._fba_prep_error_mskus(Exception(self.PENDING)), ('unavailable', ['SKU-NEW', 'SKU-2'])
+        )
+        self.assertEqual(_fba_inbound_unavailable_skus(Exception(self.PENDING)), ['SKU-NEW', 'SKU-2'])
+        self.assertEqual(_fba_inbound_unavailable_skus(Exception(self.NOT_VALID)), [])
+        self.assertEqual(ss_fba_readiness._fba_prep_error_mskus(Exception('Something went wrong')), ('', []))
+        validation = Exception(
+            "1 validation error detected: Value '[MskuPrepDetailInput(msku=SKU-9, prepCategory=NONE, "
+            "prepTypes=[ITEM_NO_PREP])]' at 'request.mskuPrepDetails' failed to satisfy constraint"
+        )
+        self.assertNotIn(ss_fba_readiness._fba_prep_error_mskus(validation)[0], ('invalid', 'unavailable'))
+
+    def _fake_api(self):
+        api = SimpleNamespace(calls=[])
+
+        def list_prep_details(**kwargs):
+            api.calls.append(list(kwargs['mskus']))
+            if 'SKU-BAD' in kwargs['mskus']:
+                raise Exception(self.NOT_VALID)
+            return SimpleNamespace(
+                payload={'mskuPrepDetails': [{'msku': msku} for msku in kwargs['mskus']]}, errors=None
+            )
+        api.list_prep_details = list_prep_details
+        return api
+
+    def _fake_listings(self):
+        listings = SimpleNamespace(calls=[])
+
+        def search_listings_items(seller_id, **kwargs):
+            listings.calls.append(list(kwargs['identifiers']))
+            rows = []
+            for sku in kwargs['identifiers']:
+                if sku == 'SKU-BAD':
+                    continue
+                channel = 'DEFAULT' if sku == 'SKU-FBM' else 'AMAZON_NA'
+                rows.append({
+                    'sku': sku, 'summaries': [{}],
+                    'fulfillmentAvailability': [{'fulfillmentChannelCode': channel, 'quantity': 1}],
+                })
+            return SimpleNamespace(payload={'items': rows}, errors=None)
+        listings.search_listings_items = search_listings_items
+        return listings, 'SELLER', US_MARKETPLACE_ID
+
+    def test_plan_health_names_deleted_listing_and_its_carton(self):
+        api = self._fake_api()
+        health = ss_fba_shipments._fba_plan_health(
+            api, US_MARKETPLACE_ID,
+            [
+                {'msku': 'SKU-OK', 'quantity': 2, 'asin': 'B0OK'},
+                {'msku': 'SKU-BAD', 'quantity': 1, 'asin': 'B0BAD', 'fnsku': 'X00BAD'},
+                {'msku': 'SKU-FBM', 'quantity': 1},
+            ],
+            session_items=[{'seller_sku': 'SKU-BAD', 'title': 'Waterford Decanter', 'barcode': '701587419475'}],
+            boxes=[{'local_id': 'BOX-04', 'contents': [
+                {'msku': 'SKU-BAD', 'quantity': 1}, {'msku': 'SKU-OK', 'quantity': 2},
+            ]}],
+            listings=self._fake_listings(),
+        )
+        self.assertEqual(api.calls, [['SKU-OK', 'SKU-BAD', 'SKU-FBM'], ['SKU-OK', 'SKU-FBM']])
+        self.assertEqual(health['blocking_count'], 1)
+        self.assertEqual(health['checked_count'], 3)
+        self.assertEqual(
+            [(row['msku'], row['code'], row['severity']) for row in health['findings']],
+            [('SKU-BAD', 'listing_missing', 'blocking'), ('SKU-FBM', 'merchant_fulfilled', 'warning')],
+        )
+        bad = health['findings'][0]
+        self.assertEqual(bad['box_ids'], ['BOX-04'])
+        self.assertEqual(bad['fnsku'], 'X00BAD')
+        self.assertEqual(bad['quantity'], 1)
+        for text in ('SKU-BAD', 'Waterford Decanter', '701587419475', 'BOX-04', 'not valid'):
+            self.assertIn(text, bad['message'])
+        self.assertIn('SKU-BAD', health['summary'])
+        self.assertIn('BOX-04', health['summary'])
+        self.assertIn('merchant-fulfilled', health['findings'][1]['message'])
+
+    def test_plan_health_ignores_amazon_outages(self):
+        def fail(*args, **kwargs):
+            raise Exception('InternalServerError')
+        api = SimpleNamespace(list_prep_details=fail)
+        listings = SimpleNamespace(search_listings_items=fail)
+        health = ss_fba_shipments._fba_plan_health(
+            api, US_MARKETPLACE_ID, [{'msku': 'SKU-OK', 'quantity': 1}],
+            listings=(listings, 'SELLER', US_MARKETPLACE_ID),
+        )
+        self.assertEqual(health['findings'], [])
+        self.assertEqual(health['blocking_count'], 0)
+        self.assertEqual(health['summary'], '')
+
+    def test_failed_placement_is_diagnosed_once_and_explained(self):
+        state = {
+            'operation': {'id': 'op-1', 'kind': 'generate_placement', 'status': 'FAILED', 'problems': [
+                {'code': 'InternalServerError', 'message': 'ERROR: Something went wrong.'},
+            ]},
+            'plan': {'marketplaceIds': [US_MARKETPLACE_ID]},
+            'plan_items': [{'msku': 'SKU-BAD', 'quantity': 1}], 'boxes': [],
+            'last_error': 'ERROR: Something went wrong.',
+        }
+        health = {
+            'findings': [{'msku': 'SKU-BAD', 'severity': 'blocking'}], 'blocking_count': 1,
+            'summary': 'Plan check found 1 item Amazon can no longer ship: SKU-BAD',
+        }
+        with patch.object(ss_fba_shipments, '_fba_plan_health', return_value=dict(health)) as check:
+            state = ss_fba_shipments._fba_diagnose_failed_operation(object(), state)
+            state = ss_fba_shipments._fba_diagnose_failed_operation(object(), state)
+        self.assertEqual(check.call_count, 1)
+        self.assertEqual(state['last_error'], health['summary'])
+        self.assertEqual(state['plan_health']['operation_id'], 'op-1')
+        self.assertEqual(state['plan_health']['trigger'], 'generate_placement')
+        untouched = {'operation': {'id': 'op-2', 'kind': 'create_plan', 'status': 'FAILED'}, 'plan_items': []}
+        with patch.object(ss_fba_shipments, '_fba_plan_health') as check:
+            ss_fba_shipments._fba_diagnose_failed_operation(object(), untouched)
+        check.assert_not_called()
+
+    def test_plan_creation_names_deleted_listings(self):
+        message = self.NOT_VALID.replace('SKU-BAD', 'SKU-001')
+
+        class InvalidApi(PrepBatchApi):
+            def list_prep_details(self, **kwargs):
+                raise Exception(message)
+
+        api = InvalidApi()
+        with patch.object(ss_fba_shipments, '_fba_amazon_source_from_settings', return_value=ADDRESS):
+            with self.assertRaisesRegex(FbaInboundValidationError, 'no longer recognizes.*SKU-001'):
+                ss_fba_shipments._fba_prepare_and_create_plan(api, US_MARKETPLACE_ID, ready_plan_session(3), {})
+        self.assertEqual(api.created, [])
+
+    def test_scan_listing_check_stops_only_definite_rejections(self):
+        ss_fba_shipments._FBA_SCAN_LISTING_CACHE.clear()
+
+        def reject(**kwargs):
+            raise Exception(self.NOT_VALID)
+
+        def outage(**kwargs):
+            raise Exception('boom')
+
+        rejecting = SimpleNamespace(list_prep_details=reject)
+        down = SimpleNamespace(list_prep_details=outage)
+        fine = SimpleNamespace(list_prep_details=lambda **kwargs: SimpleNamespace(
+            payload={'mskuPrepDetails': []}, errors=None))
+        try:
+            message = ss_fba_shipments._fba_scan_listing_problem(
+                'SKU-BAD', api=rejecting, marketplace_id=US_MARKETPLACE_ID)
+            self.assertIn('no longer recognizes Seller SKU SKU-BAD', message)
+            self.assertEqual(ss_fba_shipments._fba_scan_listing_problem(
+                'SKU-BAD', api=down, marketplace_id=US_MARKETPLACE_ID), message)
+            self.assertEqual(ss_fba_shipments._fba_scan_listing_problem(
+                'SKU-OK', api=down, marketplace_id=US_MARKETPLACE_ID), '')
+            self.assertEqual(ss_fba_shipments._fba_scan_listing_problem(
+                'SKU-OK', api=fine, marketplace_id=US_MARKETPLACE_ID), '')
+        finally:
+            ss_fba_shipments._FBA_SCAN_LISTING_CACHE.clear()
+
+    def test_readiness_treats_merchant_only_fnsku_as_needing_enablement(self):
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            'summaries': [{'productType': 'PICTURE_FRAME', 'status': ['BUYABLE'], 'fnSku': 'X0059HIRRX'}],
+            'issues': [],
+            'fulfillmentAvailability': [{'fulfillmentChannelCode': 'DEFAULT', 'quantity': 1}],
+            'attributes': {'fulfillment_availability': [{'fulfillment_channel_code': 'DEFAULT', 'quantity': 1}]},
+        })
+        client = (listings, 'SELLER', US_MARKETPLACE_ID)
+        with (patch.object(ss_fba_readiness, '_fba_inventory_fnsku', return_value='X0059HIRRX'),
+              patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value={'checked': True, 'error': ''})):
+            result = ss_fba_readiness._fba_listing_readiness('DS-IOM1-7N19', force_refresh=True, client=client)
+        self.assertEqual(result['status'], 'needs_enablement')
+        self.assertIn('merchant-fulfilled', result['activation_note'])
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            'summaries': [{'productType': 'PICTURE_FRAME', 'status': ['BUYABLE'], 'fnSku': 'X0059HIRRX'}],
+            'issues': [],
+            'fulfillmentAvailability': [{'fulfillmentChannelCode': 'AMAZON_NA'}],
+            'attributes': {},
+        })
+        with (patch.object(ss_fba_readiness, '_fba_inventory_fnsku', return_value='X0059HIRRX'),
+              patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value={'checked': True, 'error': ''})):
+            result = ss_fba_readiness._fba_listing_readiness('DS-IOM1-7N19', force_refresh=True, client=client)
+        self.assertEqual(result['status'], 'ready')
+
+
+if __name__ == '__main__':
     unittest.main()

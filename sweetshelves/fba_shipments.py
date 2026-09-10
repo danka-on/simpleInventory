@@ -345,6 +345,238 @@ def _fba_amazon_box_name_map(api, plan_id, local_boxes):
     return names
 
 
+_FBA_PLAN_HEALTH_DIAGNOSED_KINDS = (
+    'submit_boxes', 'generate_placement', 'confirm_placement',
+    'generate_transportation', 'confirm_transportation',
+)
+_FBA_SCAN_LISTING_CACHE = {}
+_FBA_SCAN_LISTING_CACHE_TTL = 600
+
+
+def _fba_plan_health_message(code, msku, *, title='', barcode='', box_ids=None):
+    label = msku + (f' ({title})' if title else '') + (f', barcode {barcode}' if barcode else '')
+    packed = ''
+    if box_ids:
+        packed = ' It is packed in ' + ', '.join(box_ids) + '.'
+    if code == 'listing_missing':
+        return (
+            f'Amazon no longer has a listing for Seller SKU {label}. Its inbound service answers '
+            '"The following MSKUs are not valid", which is why the placement step fails with a bare '
+            f'InternalServerError.{packed} Restore the listing in Seller Central with exactly this Seller '
+            'SKU, or remove the item from the plan and rebuild.'
+        )
+    if code == 'inbound_unavailable':
+        return (
+            f'Amazon says Seller SKU {label} is not available for inbound.{packed} If its FBA offer was '
+            'created within the last hour, wait and retry; otherwise the offer was removed and the item '
+            'must be restored or taken out of the plan.'
+        )
+    if code == 'merchant_fulfilled':
+        return (
+            f'Seller SKU {label} is still merchant-fulfilled on Amazon (no FBA offer).{packed} Amazon '
+            'accepted it in this plan, but switch it to Fulfilled by Amazon in Seller Central before '
+            'the cartons ship.'
+        )
+    return f'Amazon reported a problem with Seller SKU {label}.'
+
+
+def _fba_plan_health(api, marketplace_id, plan_items, *, session_items=None, boxes=None, listings=None):
+    """Ask Amazon whether every MSKU in the plan still exists as an inbound-able FBA offer.
+
+    Amazon's placement engine answers a plan that contains a deleted or
+    de-listed MSKU with a bare InternalServerError. This check is what turns
+    that into an exact message naming the Seller SKU and the carton it is in.
+    """
+    mskus = []
+    plan_by_msku = {}
+    for row in plan_items if isinstance(plan_items, list) else []:
+        if not isinstance(row, dict):
+            continue
+        msku = ss_fba_schema._fba_trim(row.get('msku') or row.get('seller_sku'), 255)
+        if msku and msku.casefold() not in plan_by_msku:
+            mskus.append(msku)
+            plan_by_msku[msku.casefold()] = row
+    session_by_msku = {
+        ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255).casefold(): item
+        for item in session_items if isinstance(session_items, list) and isinstance(item, dict)
+    } if session_items else {}
+    boxes_by_msku = {}
+    for box in boxes if isinstance(boxes, list) else []:
+        if not isinstance(box, dict):
+            continue
+        local_id = ss_fba_schema._fba_trim(box.get('local_id'), 40)
+        for content in box.get('contents') if isinstance(box.get('contents'), list) else []:
+            if isinstance(content, dict) and int(content.get('quantity') or 0) > 0:
+                key = ss_fba_schema._fba_trim(content.get('msku'), 255).casefold()
+                if key and local_id and local_id not in boxes_by_msku.setdefault(key, []):
+                    boxes_by_msku[key].append(local_id)
+
+    findings = {}
+
+    def add(msku, code, severity):
+        key = msku.casefold()
+        if key in findings:
+            return
+        plan_row = plan_by_msku.get(key) or {}
+        item = session_by_msku.get(key) or {}
+        title = ss_fba_schema._fba_trim(item.get('title'), 120)
+        barcode = ss_fba_schema._fba_trim(item.get('barcode_display') or item.get('barcode'), 160)
+        box_ids = boxes_by_msku.get(key) or []
+        findings[key] = {
+            'msku': msku, 'code': code, 'severity': severity,
+            'asin': ss_fba_schema._fba_trim(plan_row.get('asin'), 30),
+            'fnsku': ss_fba_schema._fba_trim(plan_row.get('fnsku'), 80),
+            'quantity': int(plan_row.get('quantity') or 0),
+            'title': title, 'barcode': barcode, 'box_ids': box_ids,
+            'message': _fba_plan_health_message(code, msku, title=title, barcode=barcode, box_ids=box_ids),
+        }
+
+    # Amazon rejects a whole prep-details batch when one MSKU is bad and names
+    # the culprits, so keep re-asking about the remainder until a batch passes.
+    for offset in range(0, len(mskus), 100):
+        chunk = list(mskus[offset:offset + 100])
+        for _attempt in range(8):
+            if not chunk:
+                break
+            try:
+                _fba_amazon_payload(api.list_prep_details(marketplaceId=marketplace_id, mskus=chunk))
+                break
+            except Exception as exc:
+                kind, named = ss_fba_readiness._fba_prep_error_mskus(exc)
+                chunk_keys = {value.casefold() for value in chunk}
+                bad_keys = {value.casefold() for value in named} & chunk_keys
+                if not bad_keys:
+                    ss_config.logger.warning('fba plan health: prep check skipped: %s', exc)
+                    break
+                code = 'listing_missing' if kind == 'invalid' else 'inbound_unavailable'
+                for msku in chunk:
+                    if msku.casefold() in bad_keys:
+                        add(msku, code, 'blocking')
+                chunk = [value for value in chunk if value.casefold() not in bad_keys]
+
+    try:
+        client, seller_id, listing_marketplace = listings or ss_fba_readiness._fba_listings_client()
+        for offset in range(0, len(mskus), 20):
+            chunk = list(mskus[offset:offset + 20])
+            payload = _fba_amazon_payload(client.search_listings_items(
+                seller_id, marketplaceIds=[listing_marketplace or marketplace_id],
+                identifiers=chunk, identifiersType='SKU',
+                includedData=['summaries', 'fulfillmentAvailability'], pageSize=20,
+            ))
+            found = {}
+            for row in payload.get('items') if isinstance(payload.get('items'), list) else []:
+                if isinstance(row, dict) and ss_fba_schema._fba_trim(row.get('sku'), 255):
+                    found[ss_fba_schema._fba_trim(row.get('sku'), 255).casefold()] = row
+            for msku in chunk:
+                row = found.get(msku.casefold())
+                if row is None:
+                    add(msku, 'listing_missing', 'blocking')
+                    continue
+                channels = {
+                    ss_fba_schema._fba_trim(
+                        entry.get('fulfillmentChannelCode') or entry.get('fulfillment_channel_code'), 40
+                    ).upper()
+                    for entry in row.get('fulfillmentAvailability') or [] if isinstance(entry, dict)
+                }
+                channels.discard('')
+                if channels and 'AMAZON_NA' not in channels:
+                    add(msku, 'merchant_fulfilled', 'warning')
+    except Exception as exc:
+        ss_config.logger.warning('fba plan health: listing check skipped: %s', exc)
+
+    rows = list(findings.values())
+    rows.sort(key=lambda row: (0 if row['severity'] == 'blocking' else 1, row['msku']))
+    blocking = [row for row in rows if row['severity'] == 'blocking']
+    summary = ''
+    if blocking:
+        summary = (
+            f'Plan check found {len(blocking)} item{"" if len(blocking) == 1 else "s"} Amazon can no '
+            'longer ship: ' + ' '.join(row['message'] for row in blocking[:3])
+        )
+        if len(blocking) > 3:
+            summary += f' ({len(blocking) - 3} more listed on the page.)'
+    return {
+        'checked_at': ss_listing_checks._listagent_now_iso(),
+        'checked_count': len(mskus),
+        'findings': rows,
+        'blocking_count': len(blocking),
+        'summary': summary,
+    }
+
+
+def _fba_diagnose_failed_operation(api, state):
+    """Explain a generic Amazon failure once per operation by checking the plan items."""
+    operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
+    kind = ss_fba_schema._fba_trim(operation.get('kind'), 80)
+    operation_id = ss_fba_schema._fba_trim(operation.get('id'), 38)
+    if str(operation.get('status') or '').upper() != 'FAILED' or kind not in _FBA_PLAN_HEALTH_DIAGNOSED_KINDS:
+        return state
+    health = state.get('plan_health') if isinstance(state.get('plan_health'), dict) else {}
+    if operation_id and health.get('operation_id') == operation_id:
+        return state
+    marketplace_ids = (state.get('plan') or {}).get('marketplaceIds') if isinstance(state.get('plan'), dict) else None
+    marketplace_id = ss_fba_schema._fba_trim((marketplace_ids or [''])[0], 20) if isinstance(marketplace_ids, list) else ''
+    if not marketplace_id:
+        try:
+            marketplace_id = ss_amazon_catalog._amazon_spapi_context()[2]
+        except Exception:
+            return state
+    try:
+        health = _fba_plan_health(
+            api, marketplace_id, state.get('plan_items') or [], boxes=state.get('boxes') or []
+        )
+    except Exception:
+        ss_config.logger.warning('fba plan health check failed', exc_info=True)
+        return state
+    health['operation_id'] = operation_id
+    health['trigger'] = kind
+    state['plan_health'] = health
+    if health.get('blocking_count'):
+        state['last_error'] = health['summary']
+    return state
+
+
+def _fba_scan_listing_problem(msku, *, api=None, marketplace_id=''):
+    """Return an exact stop message when Amazon no longer accepts this MSKU for inbound.
+
+    Checked at scan time so a deleted listing is caught while the unit is in
+    hand, not after the cartons are sealed. Amazon outages never block a scan:
+    only a definite rejection naming this MSKU does.
+    """
+    seller_sku = ss_fba_schema._fba_trim(msku, 255)
+    key = seller_sku.casefold()
+    if not key:
+        return ''
+    now = time.time()
+    cached = _FBA_SCAN_LISTING_CACHE.get(key)
+    if cached and now - cached[0] < _FBA_SCAN_LISTING_CACHE_TTL:
+        return cached[1]
+    message = ''
+    try:
+        if api is None or not marketplace_id:
+            api, marketplace_id = _fba_amazon_client()
+        _fba_amazon_payload(api.list_prep_details(marketplaceId=marketplace_id, mskus=[seller_sku]))
+    except Exception as exc:
+        kind, named = ss_fba_readiness._fba_prep_error_mskus(exc)
+        if not any(value.casefold() == key for value in named):
+            ss_config.logger.warning('fba scan listing check skipped for %s: %s', seller_sku, exc)
+            return ''
+        if kind == 'invalid':
+            message = (
+                f'STOP: Amazon no longer recognizes Seller SKU {seller_sku}. Its listing was removed or '
+                'never finished activating (Amazon: "The following MSKUs are not valid"). Do not pack '
+                'this unit. Restore the listing in Seller Central with exactly this Seller SKU, or remove '
+                'the item from the plan and rebuild.'
+            )
+        elif kind == 'unavailable':
+            message = (
+                f'STOP: Amazon says Seller SKU {seller_sku} is not available for inbound right now. Do not '
+                'pack it until Amazon accepts it, usually within an hour of enabling FBA.'
+            )
+    _FBA_SCAN_LISTING_CACHE[key] = (now, message)
+    return message
+
+
 def _fba_amazon_refresh_operation(api, state):
     operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
     operation_id = ss_fba_schema._fba_trim(operation.get('id'), 38)
@@ -409,6 +641,7 @@ def _fba_amazon_sync_snapshot(api, state):
     operation = state.get('operation') if isinstance(state.get('operation'), dict) else {}
     if str(operation.get('status') or '').upper() not in ('', 'SUCCESS', 'FAILED'):
         return state
+    state = _fba_diagnose_failed_operation(api, state)
 
     plan = _fba_amazon_payload(api.get_inbound_plan(plan_id))
     state['plan'] = {
@@ -658,7 +891,7 @@ def api_fba_prep_amazon_action(session_id, action):
         'generate-transportation', 'confirm-transportation', 'reset-failed-plan',
         'recover-remove-item', 'retry-recovery', 'package-measurements',
         'package-measurement-status',
-        'set-aside-approval-items',
+        'set-aside-approval-items', 'check-plan',
     }
     if action not in allowed:
         return jsonify({'success': False, 'error': 'Unknown Amazon workflow action'}), 404
@@ -667,6 +900,10 @@ def api_fba_prep_amazon_action(session_id, action):
         data = request.get_json(silent=True) or {}
         conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
         conn.row_factory = sqlite3.Row
+        if action == 'recover-remove-item':
+            # Packed units may need their carton scans reversed, which restores
+            # shelf stock through the warehouse-removal history.
+            conn.execute('ATTACH DATABASE ? AS rackhist', (str(ss_config.BASE_DIR / 'rackhistory.db'),))
         if action in ('save-boxes', 'create-box', 'remove-box', 'recover-remove-item', 'retry-recovery', 'set-aside-approval-items'):
             conn.execute('BEGIN IMMEDIATE')
         _row, session_data, state = _fba_amazon_session(conn, session_id)
@@ -872,9 +1109,10 @@ def api_fba_prep_amazon_action(session_id, action):
                 raise FbaInboundValidationError('Confirm the missing-item plan rebuild')
             if not plan_id or not state.get('packing_confirmed'):
                 raise FbaInboundValidationError('Missing items can be removed during physical carton packing')
-            if state.get('boxes_submitted'):
+            if state.get('placement_confirmed'):
                 raise FbaInboundValidationError(
-                    'Box contents are already submitted to Amazon; use Seller Central shipment-content editing'
+                    'A placement option is already confirmed; Amazon has locked this plan. '
+                    'Use Seller Central shipment-content editing'
                 )
             if (state.get('recovery') or {}).get('active'):
                 raise FbaInboundValidationError('A missing-item recovery is already running')
@@ -883,12 +1121,38 @@ def api_fba_prep_amazon_action(session_id, action):
                 raise FbaInboundValidationError('Wait for the current Amazon operation to finish')
 
             msku = ss_fba_schema._fba_trim(data.get('msku') or data.get('seller_sku'), 255)
+            requested_quantity = ss_listing_settings._listingagent_parse_int(data.get('quantity'), 0) or 1
             packed_quantities = _fba_packed_quantities(conn, session_id)
+            packed_quantity = packed_quantities.get(msku.casefold(), 0)
+            reversed_scans = []
+            if data.get('include_packed') is True and packed_quantity:
+                # A listing Amazon no longer accepts must leave the shipment even
+                # when its units are already in a carton: reverse those scans
+                # (stock returns to the shelf) before shrinking the plan.
+                from . import fba_scanning as ss_fba_scanning
+                cur = conn.cursor()
+                for _index in range(min(packed_quantity, requested_quantity)):
+                    reversed_scans.append(
+                        ss_fba_scanning._fba_undo_newest_pack_scan(cur, session_id, state, msku)
+                    )
+                packed_quantity -= len(reversed_scans)
             updated_items, reduction = reduce_missing_plan_quantity(
-                session_data.get('items') or [], msku, data.get('quantity') or 1,
-                packed_quantity=packed_quantities.get(msku.casefold(), 0),
+                session_data.get('items') or [], msku, requested_quantity,
+                packed_quantity=packed_quantity,
                 barcode_key=data.get('barcode_key') or '',
             )
+            reduction['reversed_scans'] = [
+                {key: row.get(key) for key in ('scan_token', 'box_id', 'source_location', 'inventory_restored')}
+                for row in reversed_scans
+            ]
+            if isinstance(state.get('plan_health'), dict):
+                state['plan_health']['findings'] = [
+                    row for row in state['plan_health'].get('findings') or []
+                    if ss_fba_schema._fba_trim((row or {}).get('msku'), 255).casefold() != msku.casefold()
+                ]
+                state['plan_health']['blocking_count'] = sum(
+                    1 for row in state['plan_health']['findings'] if (row or {}).get('severity') == 'blocking'
+                )
             if not updated_items:
                 raise FbaInboundValidationError('An Amazon plan must contain at least one item')
             fnsku_by_msku = {
@@ -942,6 +1206,10 @@ def api_fba_prep_amazon_action(session_id, action):
                 )
             _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
             conn.commit()
+            if any(row.get('inventory_restored') for row in reversed_scans):
+                from . import caching as ss_caching
+                ss_caching.update_data_version()
+                ss_caching._invalidate_searchrack_cache()
             return jsonify({
                 'success': True, 'amazon_workflow': state,
                 'operation_id': ss_fba_schema._fba_trim((state.get('operation') or {}).get('id'), 38),
@@ -1118,6 +1386,16 @@ def api_fba_prep_amazon_action(session_id, action):
         else:
             if not plan_id:
                 raise FbaInboundValidationError('Create the Amazon inbound plan first')
+            if action == 'check-plan':
+                health = _fba_plan_health(
+                    api, marketplace_id, state.get('plan_items') or [],
+                    session_items=session_data.get('items') or [], boxes=state.get('boxes') or [],
+                )
+                health['trigger'] = 'check_plan'
+                state['plan_health'] = health
+                _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
+                conn.commit()
+                return jsonify({'success': True, 'amazon_workflow': state, 'plan_health': health})
             state = _fba_amazon_refresh_operation(api, state)
             pending = state.get('operation') if isinstance(state.get('operation'), dict) else {}
             if str(pending.get('status') or '').upper() == 'FAILED':
@@ -1170,6 +1448,18 @@ def api_fba_prep_amazon_action(session_id, action):
             elif action == 'generate-placement':
                 if not state.get('boxes_submitted'):
                     raise FbaInboundValidationError('Submit complete box contents to Amazon first')
+                # Amazon answers a plan with a deleted MSKU with a bare
+                # InternalServerError, so name the culprit before asking.
+                health = _fba_plan_health(
+                    api, marketplace_id, state.get('plan_items') or [],
+                    session_items=session_data.get('items') or [], boxes=state.get('boxes') or [],
+                )
+                health['trigger'] = 'generate_placement_preflight'
+                state['plan_health'] = health
+                if health.get('blocking_count'):
+                    _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
+                    conn.commit()
+                    raise FbaInboundValidationError(health['summary'])
                 response_payload = _fba_amazon_payload(api.generate_placement_options(plan_id))
                 state['stage'] = 'placement_generating'
                 next_stage = 'placement_options'
@@ -1388,11 +1678,15 @@ def _fba_prepare_and_create_plan(api, marketplace_id, session_data, state):
                 for row in prep_payload.get('mskuPrepDetails') or [] if isinstance(row, dict)
             })
     except Exception as prep_error:
-        unavailable_mskus = ss_fba_readiness._fba_inbound_unavailable_skus(prep_error)
-        if not unavailable_mskus:
+        kind, named_mskus = ss_fba_readiness._fba_prep_error_mskus(prep_error)
+        if kind == 'invalid' and named_mskus:
+            raise FbaInboundValidationError(ss_fba_readiness._fba_invalid_msku_message(
+                named_mskus, session_data.get('items') or []
+            ))
+        if kind != 'unavailable' or not named_mskus:
             raise
         raise FbaInboundValidationError(ss_fba_readiness._fba_inbound_activation_message(
-            unavailable_mskus, session_data.get('items') or []
+            named_mskus, session_data.get('items') or []
         ))
     # Amazon's live listPrepDetails endpoint currently returns only the first
     # row for some multi-MSKU calls. Prefer the exact one-SKU details captured
