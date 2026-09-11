@@ -789,7 +789,7 @@
     // sweetshelves/fba_shipments.py by test_fba_carton_freight.py.
     const CARTON_LIMITS={dimDivisor:139,largePackageGirthIn:130,largePackageMinBillableLb:90,
       girthMarginIn:10,additionalHandlingLongestIn:48,additionalHandlingSecondIn:30,
-      additionalHandlingWeightLb:50,mechLiftLb:100,ltlCubeFt3:60,ltlWeightLb:300};
+      additionalHandlingWeightLb:50,mechLiftLb:100,ltlCubeFt3:60,ltlWeightLb:300,ratePerLb:0.45};
     const CARTON_DENSITY_BREAK_EVEN=1728/CARTON_LIMITS.dimDivisor;
     const cartonSides=box=>['length_in','width_in','height_in'].map(field=>Number(box?.[field]||0)).sort((a,b)=>b-a);
     const cartonMeasured=box=>cartonSides(box).every(value=>value>0)&&Number(box?.weight_lb||0)>0;
@@ -813,6 +813,11 @@
         kind=kind||'warn';
         parts.push(fmtNumber(weight)+' lb is over '+CARTON_LIMITS.additionalHandlingWeightLb+' lb: additional handling, plus a '+(weight>CARTON_LIMITS.mechLiftLb?'Mechanical':'Team')+' Lift label. Moving weight to another carton does help here');
       }
+      const cubic=boxCubicInches(box);
+      if(cubic>0){
+        const dim=cubic/CARTON_LIMITS.dimDivisor;
+        if(dim>weight)parts.push('Mostly air: this box bills as '+fmtNumber(dim)+' lb, not its '+fmtNumber(weight)+' lb, because cube is charged when it is the greater of the two. That is '+fmtNumber(dim-weight)+' lb of nothing, about $'+fmtNumber((dim-weight)*CARTON_LIMITS.ratePerLb)+'. A smaller box is the only fix: every '+CARTON_LIMITS.dimDivisor+' cubic inches you cut is 1 lb off');
+      }
       return parts.length?{kind:kind||'warn',text:parts.join(' · ')}:{kind:'',text:''};
     }
     const boxFreightHtml=box=>{const freight=boxFreightText(box);return freight.text?'<div class="box-freight '+freight.kind+'">'+esc(freight.text)+'</div>':''};
@@ -822,7 +827,9 @@
         const cube=measured.reduce((sum,box)=>sum+boxCubicInches(box)/1728,0);
         const weight=measured.reduce((sum,box)=>sum+Number(box.weight_lb||0),0);
         if(cube>0&&weight>0){
-            if(cube>=CARTON_LIMITS.ltlCubeFt3||weight>=CARTON_LIMITS.ltlWeightLb)notes.push('<strong>Worth pricing LTL against small parcel</strong>'+fmtNumber(cube)+' ft³ and '+fmtNumber(weight)+' lb is roughly a pallet per destination, which is where palletised LTL starts to compete with small parcel. Compare both quotes at the shipping step.');
+            const dim=cube*1728/CARTON_LIMITS.dimDivisor;
+          if(dim>weight)notes.push('<strong>Paying for '+fmtNumber(dim-weight)+' lb of air</strong>'+(measured.length===boxes.length?('All '+measured.length+' cartons weigh '):(measured.length+' of '+boxes.length+' cartons measured so far weigh '))+fmtNumber(weight)+' lb but bill as '+fmtNumber(dim)+' lb, because the carrier charges the greater of real weight and cube. That gap is about $'+fmtNumber((dim-weight)*CARTON_LIMITS.ratePerLb)+' at $'+CARTON_LIMITS.ratePerLb+' per billable pound. Every cubic foot you remove is '+fmtNumber(1728/CARTON_LIMITS.dimDivisor)+' lb off the bill, about $'+fmtNumber(1728/CARTON_LIMITS.dimDivisor*CARTON_LIMITS.ratePerLb)+'. Splitting cartons does not help: the same goods take the same cube. A smaller box or less void does.');
+          if(cube>=CARTON_LIMITS.ltlCubeFt3||weight>=CARTON_LIMITS.ltlWeightLb)notes.push('<strong>Worth pricing LTL against small parcel</strong>'+fmtNumber(cube)+' ft³ and '+fmtNumber(weight)+' lb is roughly a pallet per destination, which is where palletised LTL starts to compete with small parcel. Compare both quotes at the shipping step.');
         }
       }
       return notes;

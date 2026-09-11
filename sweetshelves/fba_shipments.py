@@ -396,6 +396,10 @@ _FBA_ADDITIONAL_HANDLING_LONGEST_IN = 48.0
 _FBA_ADDITIONAL_HANDLING_SECOND_IN = 30.0
 _FBA_ADDITIONAL_HANDLING_WEIGHT_LB = 50.0
 _FBA_MECH_LIFT_LB = 100.0
+# Dollars per billable pound, averaged from this account's confirmed quotes
+# (cellar 1 $0.50, cellar 2 $0.37, cellar 3 $0.45). Used only to put a figure
+# on the advice; the arithmetic stands without it.
+_FBA_OBSERVED_RATE_PER_LB = 0.45
 _FBA_LTL_CUBE_FT3 = 60.0
 _FBA_LTL_WEIGHT_LB = 300.0
 
@@ -434,7 +438,7 @@ def _fba_carton_geometry(box):
 
 
 def _fba_carton_freight_findings(boxes):
-    """Advisory carton findings: the carrier surcharge cliffs, and pallet mode.
+    """Advisory carton findings: surcharge cliffs, cube billing, and pallet mode.
 
     Every finding here is a warning and never blocking. A carton that costs more
     than it should is still a carton Amazon accepts, so this must not be able to
@@ -525,6 +529,24 @@ def _fba_carton_freight_findings(boxes):
     if total_cube <= 0:
         return rows
 
+
+    density = total_weight / total_cube
+    dim_weight = total_cube * 1728.0 / _FBA_DIM_DIVISOR
+    if dim_weight > total_weight:
+        air = dim_weight - total_weight
+        per_cubic_foot = (1728.0 / _FBA_DIM_DIVISOR) * _FBA_OBSERVED_RATE_PER_LB
+        worst = sorted(measured, key=lambda row: row['weight'] / row['cube'])[:3]
+        add('carton_low_density', 'Paying for %.0f lb of air' % air, (
+            'These %d cartons weigh %.0f lb but bill as %.0f lb, because the carrier charges the greater of '
+            'real weight and cube. That is %.0f lb of air, roughly $%.0f at this account\'s recent rate of '
+            '$%.2f per billable pound. Every cubic foot you remove takes %.1f lb off the bill, about $%.2f. '
+            'Splitting cartons changes nothing, since the same goods occupy the same cube either way: only a '
+            'smaller box or less void helps. Loosest cartons first: %s.'
+        ) % (len(measured), total_weight, dim_weight, air, air * _FBA_OBSERVED_RATE_PER_LB,
+             _FBA_OBSERVED_RATE_PER_LB, 1728.0 / _FBA_DIM_DIVISOR, per_cubic_foot,
+             ', '.join('%s at %.1f lb/ft3' % (row['local_id'], row['weight'] / row['cube'])
+                       for row in worst)),
+            [row['local_id'] for row in worst])
 
     if total_cube >= _FBA_LTL_CUBE_FT3 or total_weight >= _FBA_LTL_WEIGHT_LB:
         add('carton_consider_ltl', 'Worth pricing LTL against small parcel', (

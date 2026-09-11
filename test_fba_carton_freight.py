@@ -114,25 +114,43 @@ class CartonCliffTests(unittest.TestCase):
         self.assertEqual(len(large[0]['box_ids']), 6)
 
     def test_cellar_three_clears_every_cliff(self):
-        # The real shipment trips no carrier threshold at all, so the only thing
-        # left to say about it is that a pallet is worth pricing.
-        self.assertEqual(codes(_fba_carton_freight_findings(CELLAR3)), {'carton_consider_ltl'})
+        # The real shipment trips no dimension or weight threshold; what costs it
+        # money is cube, plus the pallet option worth pricing against that.
+        self.assertEqual(codes(_fba_carton_freight_findings(CELLAR3)),
+                         {'carton_consider_ltl', 'carton_low_density'})
 
 
 
 
-class CartonSilenceTests(unittest.TestCase):
-    """Density and tiny-SKU advice were removed: both rested on a dimensional
-    divisor this account shows no evidence of being charged, and advising a
-    repack against a cost that may not exist is worse than saying nothing."""
+class CubeBillingTests(unittest.TestCase):
+    """Cellar 3 quoted near $450, which is its 1,005 lb of cube at $0.45/lb and
+    not its 348 lb of actual weight at $1.29/lb. So this account is billed
+    max(actual, cube/139) and the gap is real money."""
 
-    def test_light_bulky_freight_that_clears_every_cliff_says_nothing(self):
-        self.assertEqual(_fba_carton_freight_findings([box('B1', 34, 22, 18, 33)]), [])
+    def test_dense_freight_is_billed_on_weight_and_says_nothing(self):
+        # 24x18x12 is 3.0 ft3; 60 lb beats its 37.3 lb of cube.
+        self.assertNotIn('carton_low_density', codes(_fba_carton_freight_findings([box('B1', 24, 18, 12, 60)])))
 
-    def test_no_finding_mentions_cube_billing_or_tiny_quantities(self):
-        text = ' '.join(row['message'] + row['title'] for row in _fba_carton_freight_findings(CELLAR3))
-        for claim in ('lb/ft3', 'break-even', 'dimensional', 'very small quantity', 'placement fee'):
-            self.assertNotIn(claim, text)
+    def test_light_bulky_freight_reports_the_air_it_is_paying_for(self):
+        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_low_density')
+        self.assertIn('657 lb of air', row['title'])
+        self.assertIn('weigh 348 lb but bill as 1005 lb', row['message'])
+
+    def test_it_puts_a_dollar_figure_on_the_gap_and_on_a_cubic_foot(self):
+        # Advice the operator cannot price is advice they cannot act on.
+        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_low_density')
+        self.assertIn('$296', row['message'])
+        self.assertIn('$5.59', row['message'])
+
+    def test_it_does_not_suggest_splitting_which_conserves_cube(self):
+        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_low_density')
+        self.assertIn('Splitting cartons changes nothing', row['message'])
+
+    def test_it_names_the_loosest_cartons_to_repack_first(self):
+        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_low_density')
+        self.assertEqual(len(row['box_ids']), 3)
+        self.assertIn('BOX-05', row['box_ids'])
+        self.assertNotIn('BOX-06', row['box_ids'])
 
 
 class CartonShipmentAdviceTests(unittest.TestCase):
@@ -192,6 +210,7 @@ class CartonLimitsMatchTheUiTests(unittest.TestCase):
             'mechLiftLb': fba_shipments._FBA_MECH_LIFT_LB,
             'ltlCubeFt3': fba_shipments._FBA_LTL_CUBE_FT3,
             'ltlWeightLb': fba_shipments._FBA_LTL_WEIGHT_LB,
+            'ratePerLb': fba_shipments._FBA_OBSERVED_RATE_PER_LB,
         }
         self.assertEqual(js, expected)
 

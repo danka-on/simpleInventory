@@ -97,21 +97,41 @@ check('cellar 3 trips no dimension or weight cliff, only density', () => {
   }
 });
 
-console.log('silence');
-check('a light bulky carton that clears every cliff says nothing', () => {
-  assert.strictEqual(api.boxFreightText(box('B', 34, 22, 18, 33)).text, '');
-  assert.strictEqual(api.boxFreightHtml(box('B', 34, 22, 18, 33)), '');
+console.log('cube billing');
+check('a dense carton says nothing; a light bulky one prices the air', () => {
+  assert.strictEqual(api.boxFreightText(box('B', 24, 18, 12, 45)).text, '');
+  const bulky = api.boxFreightText(box('BOX-10', 36, 22, 18, 36.4)).text;
+  assert.match(bulky, /Mostly air/);
+  assert.match(bulky, /bills as 102\.56 lb, not its 36\.4 lb/);
 });
-check('no carton text mentions cube billing', () => {
+check('the per-carton line gives a dollar figure and the fix', () => {
+  const text = api.boxFreightText(box('BOX-10', 36, 22, 18, 36.4)).text;
+  assert.match(text, /\$29\.77/);
+  assert.match(text, /A smaller box is the only fix/);
+  assert.match(text, /every 139 cubic inches you cut is 1 lb off/);
+});
+check('cellar 3 cartons report cube but still trip no cliff', () => {
   for (const carton of CELLAR3) {
     const text = api.boxFreightText(carton).text;
-    for (const claim of ['lb/ft', 'break-even', 'bills on cube']) {
-      assert.ok(!text.includes(claim), carton.local_id + ' should not mention ' + claim);
-    }
+    assert.ok(!/Large package/.test(text), carton.local_id);
+    assert.ok(!/Additional handling/.test(text), carton.local_id);
   }
 });
 
 console.log('shipment summary');
+check('the summary prices the air across the shipment', () => {
+  scope.state.amazon.boxes = CELLAR3;
+  scope.expected = new Map([['a', 20]]);
+  const note = api.packFreightNotes().find(n => /lb of air/.test(n));
+  assert.ok(note, 'expected an air note');
+  assert.match(note, /348\.4 lb but bill as 1,005\.38 lb/);
+  assert.match(note, /Splitting cartons does not help/);
+  assert.match(note, /All 11 cartons/);
+});
+check('partial measurement is labelled as provisional', () => {
+  scope.state.amazon.boxes = [CELLAR3[0], CELLAR3[1], box('BOX-99', 0, 0, 0, 0)];
+  assert.match(api.packFreightNotes().find(n => /lb of air/.test(n)), /2 of 3 cartons measured so far/);
+});
 check('LTL is suggested at about a pallet and not for a single carton', () => {
   scope.state.amazon.boxes = CELLAR3;
   assert.ok(api.packFreightNotes().some(note => /pricing LTL/.test(note)));
