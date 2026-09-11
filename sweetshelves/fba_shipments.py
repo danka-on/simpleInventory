@@ -383,6 +383,210 @@ def _fba_plan_health_message(code, msku, *, title='', barcode='', box_ids=None):
     return f'Amazon reported a problem with Seller SKU {label}.'
 
 
+# Carrier and Amazon carton thresholds. These are independent tests: a carton can
+# clear every single-side rule and still bill as a large package, because the
+# expensive trigger is girth rather than any one dimension. They are kept separate
+# so a finding can name the rule it actually broke.
+_FBA_DIM_DIVISOR = 139.0
+_FBA_DENSITY_BREAK_EVEN_LB_FT3 = 1728.0 / _FBA_DIM_DIVISOR  # ~12.4 lb/ft3
+_FBA_LARGE_PACKAGE_GIRTH_IN = 130.0
+_FBA_LARGE_PACKAGE_MIN_BILLABLE_LB = 90.0
+_FBA_GIRTH_MARGIN_IN = 10.0
+_FBA_ADDITIONAL_HANDLING_LONGEST_IN = 48.0
+_FBA_ADDITIONAL_HANDLING_SECOND_IN = 30.0
+_FBA_ADDITIONAL_HANDLING_WEIGHT_LB = 50.0
+_FBA_AMAZON_SIDE_LIMIT_IN = 25.0
+_FBA_MECH_LIFT_LB = 100.0
+_FBA_LTL_CUBE_FT3 = 60.0
+_FBA_LTL_WEIGHT_LB = 300.0
+_FBA_STRAGGLER_UNITS = 2
+
+
+def _fba_carton_geometry(box):
+    """Sides longest-first, weight, units, cubic feet and girth for one carton.
+
+    Returns None when the carton has not been measured yet, so an unmeasured
+    carton is skipped rather than reported as a zero-density problem.
+    """
+    if not isinstance(box, dict):
+        return None
+    try:
+        sides = sorted(
+            (float(box.get(field) or 0) for field in ('length_in', 'width_in', 'height_in')),
+            reverse=True,
+        )
+        weight = float(box.get('weight_lb') or 0)
+    except (TypeError, ValueError):
+        return None
+    if not all(side > 0 for side in sides) or weight <= 0:
+        return None
+    units = sum(
+        int(content.get('quantity') or 0)
+        for content in box.get('contents') or [] if isinstance(content, dict)
+    )
+    return {
+        'local_id': ss_fba_schema._fba_trim(box.get('local_id'), 40),
+        'sides': sides,
+        'weight': weight,
+        'units': units,
+        'cube': (sides[0] * sides[1] * sides[2]) / 1728.0,
+        'girth': sides[0] + 2 * (sides[1] + sides[2]),
+        'oversize_exception': bool(box.get('single_oversize_exception')),
+        'contents': box.get('contents') or [],
+    }
+
+
+def _fba_carton_freight_findings(boxes):
+    """Advisory carton findings: surcharge cliffs, density, mode and tiny SKUs.
+
+    Every finding here is a warning and never blocking. A carton that costs more
+    than it should is still a carton Amazon accepts, so this must not be able to
+    stop a shipment; it only has to make the cost visible before it is paid.
+    """
+    measured = []
+    for box in boxes if isinstance(boxes, list) else []:
+        carton = _fba_carton_geometry(box)
+        if carton and carton['local_id']:
+            measured.append(carton)
+    if not measured:
+        return []
+
+    rows = []
+
+    def add(code, title, message, box_ids=()):
+        rows.append({
+            'msku': '', 'code': code, 'severity': 'warning', 'title': title,
+            'asin': '', 'fnsku': '', 'quantity': 0, 'barcode': '',
+            'box_ids': list(box_ids), 'message': message,
+        })
+
+    # One finding per rule listing every carton that broke it, rather than one
+    # finding per carton, so eleven identical cartons do not produce eleven rows.
+    grouped = {}
+
+    def flag(code, carton, detail):
+        entry = grouped.setdefault(code, {'box_ids': [], 'details': []})
+        if carton['local_id'] not in entry['box_ids']:
+            entry['box_ids'].append(carton['local_id'])
+            entry['details'].append(detail)
+
+    for carton in measured:
+        longest, second, third = carton['sides']
+        girth, weight, box_id = carton['girth'], carton['weight'], carton['local_id']
+        dims = '%gx%gx%g' % (longest, second, third)
+        if girth > _FBA_LARGE_PACKAGE_GIRTH_IN:
+            flag('carton_large_package', carton, '%s %s girth %gin' % (box_id, dims, girth))
+        elif girth >= _FBA_LARGE_PACKAGE_GIRTH_IN - _FBA_GIRTH_MARGIN_IN:
+            flag('carton_girth_margin', carton, '%s girth %gin' % (box_id, girth))
+        if longest > _FBA_ADDITIONAL_HANDLING_LONGEST_IN or second > _FBA_ADDITIONAL_HANDLING_SECOND_IN:
+            flag('carton_additional_handling', carton, '%s %s' % (box_id, dims))
+        if weight > _FBA_ADDITIONAL_HANDLING_WEIGHT_LB:
+            flag('carton_overweight', carton, '%s %g lb' % (box_id, weight))
+        if longest > _FBA_AMAZON_SIDE_LIMIT_IN and not carton['oversize_exception']:
+            flag('carton_amazon_limit', carton, '%s longest side %gin' % (box_id, longest))
+
+    for code, entry in grouped.items():
+        ids = entry['box_ids']
+        detail = '; '.join(entry['details'])
+        count = len(ids)
+        noun = 'carton' if count == 1 else 'cartons'
+        if code == 'carton_large_package':
+            add(code, 'Large package surcharge: %d %s' % (count, noun), (
+                '%s exceed the large-package girth limit of %gin, measured as longest side plus twice the '
+                'other two: %s. This is the expensive trigger: it adds a flat surcharge and forces a minimum '
+                'billable weight of %g lb per carton, which hurts most on light cargo. Repack so longest + '
+                '2x(width + height) stays at or below %gin. With a 36in long side the other two sides must '
+                'sum to 47in or less.'
+            ) % (', '.join(ids), _FBA_LARGE_PACKAGE_GIRTH_IN, detail,
+                 _FBA_LARGE_PACKAGE_MIN_BILLABLE_LB, _FBA_LARGE_PACKAGE_GIRTH_IN), ids)
+        elif code == 'carton_girth_margin':
+            add(code, 'Girth close to the limit: %d %s' % (count, noun), (
+                '%s. Still inside the %gin large-package limit, so nothing is wrong today, but there is '
+                'little room left. One box size larger would cross into the surcharge and its %g lb minimum '
+                'billable weight.'
+            ) % (detail, _FBA_LARGE_PACKAGE_GIRTH_IN, _FBA_LARGE_PACKAGE_MIN_BILLABLE_LB), ids)
+        elif code == 'carton_additional_handling':
+            add(code, 'Additional handling on dimensions: %d %s' % (count, noun), (
+                '%s. A carton draws an additional-handling charge once its longest side passes %gin or its '
+                'second-longest side passes %gin. Bringing the second-longest side under %gin is usually the '
+                'easier of the two to fix.'
+            ) % (detail, _FBA_ADDITIONAL_HANDLING_LONGEST_IN, _FBA_ADDITIONAL_HANDLING_SECOND_IN,
+                 _FBA_ADDITIONAL_HANDLING_SECOND_IN), ids)
+        elif code == 'carton_overweight':
+            heavy = [row['local_id'] for row in measured
+                     if row['local_id'] in ids and row['weight'] > _FBA_MECH_LIFT_LB]
+            lift = ''
+            if heavy:
+                lift = (' %s also pass %g lb and need a mechanical-lift label.'
+                        % (', '.join(heavy), _FBA_MECH_LIFT_LB))
+            add(code, 'Over 50 lb: %d %s' % (count, noun), (
+                '%s. Past %g lb a carton draws an additional-handling charge and Amazon requires a team-lift '
+                'label.%s Splitting weight across more cartons genuinely helps here, because this threshold '
+                'is on actual weight rather than cube.'
+            ) % (detail, _FBA_ADDITIONAL_HANDLING_WEIGHT_LB, lift), ids)
+        elif code == 'carton_amazon_limit':
+            add(code, 'Over Amazon %gin limit without exception: %d %s' % (
+                _FBA_AMAZON_SIDE_LIMIT_IN, count, noun), (
+                '%s, but single_oversize_exception is not set. Amazon caps inbound cartons at %gin on any '
+                'side unless a single unit inside genuinely requires a bigger box. If these hold oversize '
+                'units, set the exception so the declaration matches the carton; if they do not, Amazon can '
+                'reject them on arrival.'
+            ) % (detail, _FBA_AMAZON_SIDE_LIMIT_IN), ids)
+
+    total_weight = sum(row['weight'] for row in measured)
+    total_cube = sum(row['cube'] for row in measured)
+    if total_cube <= 0:
+        return rows
+    density = total_weight / total_cube
+    dim_weight = total_cube * 1728.0 / _FBA_DIM_DIVISOR
+
+    if density < _FBA_DENSITY_BREAK_EVEN_LB_FT3:
+        worst = sorted(measured, key=lambda row: row['weight'] / row['cube'])[:3]
+        add('carton_low_density', 'Billed on cube, not weight: %.1f lb/ft3' % density, (
+            'These %d cartons hold %.0f lb in %.1f ft3, a density of %.1f lb/ft3. Break-even is about '
+            '%.1f lb/ft3, which is a /%g dimensional divisor, so below that the carrier bills cube rather '
+            'than scale weight: roughly %.0f lb billable against %.0f lb actual, about %.1fx. Splitting '
+            'cartons will not help, because the same goods occupy the same cube either way; the only fixes '
+            'are a smaller box and less void. Loosest cartons: %s. Confirm the divisor on the transport '
+            'quote before acting on that multiplier.'
+        ) % (len(measured), total_weight, total_cube, density, _FBA_DENSITY_BREAK_EVEN_LB_FT3,
+             _FBA_DIM_DIVISOR, dim_weight, total_weight, dim_weight / total_weight,
+             ', '.join('%s at %.1f lb/ft3' % (row['local_id'], row['weight'] / row['cube'])
+                       for row in worst)),
+            [row['local_id'] for row in worst])
+
+    if total_cube >= _FBA_LTL_CUBE_FT3 or total_weight >= _FBA_LTL_WEIGHT_LB:
+        add('carton_consider_ltl', 'Worth pricing LTL against small parcel', (
+            '%d cartons, %.1f ft3 and %.0f lb is roughly a pallet per destination, which is where '
+            'palletised LTL starts to compete with small parcel. LTL prices on weight and freight class '
+            'instead of per-carton dimensional weight, so it matters most when density is low, as it is '
+            'here at %.1f lb/ft3. Generate both quotes and compare before confirming: the quote is shown '
+            'before you commit and costs nothing to look at.'
+        ) % (len(measured), total_cube, total_weight, density))
+
+    units_by_msku = {}
+    for carton in measured:
+        for content in carton['contents']:
+            if isinstance(content, dict):
+                key = ss_fba_schema._fba_trim(content.get('msku'), 255)
+                if key:
+                    units_by_msku[key] = units_by_msku.get(key, 0) + int(content.get('quantity') or 0)
+    stragglers = sorted(
+        '%s x%d' % (msku, units) for msku, units in units_by_msku.items()
+        if 0 < units <= _FBA_STRAGGLER_UNITS
+    )
+    # Only worth raising when the shipment is mostly real quantities; a shipment
+    # that is all ones is a deliberate small top-up, not an oversight.
+    if stragglers and len(stragglers) < len(units_by_msku):
+        add('carton_straggler_skus', '%d SKU(s) shipping in tiny quantity' % len(stragglers), (
+            'These ship in very small quantity: %s. Carton space and the per-unit placement fee are charged '
+            'regardless, so a one or two unit SKU carries the same overhead as a full one. Holding them for '
+            'the next shipment is usually cheaper, unless Amazon is out of stock and needs them now.'
+        ) % ', '.join(stragglers))
+
+    return rows
+
+
 def _fba_plan_health(api, marketplace_id, plan_items, *, session_items=None, boxes=None, listings=None):
     """Ask Amazon whether every MSKU in the plan still exists as an inbound-able FBA offer.
 
@@ -498,11 +702,19 @@ def _fba_plan_health(api, marketplace_id, plan_items, *, session_items=None, box
         )
         if len(blocking) > 3:
             summary += f' ({len(blocking) - 3} more listed on the page.)'
+    # Carton economics are advisory and appended after blocking_count is taken, so
+    # an expensive carton never gates a shipment the way a dead listing does.
+    carton_rows = _fba_carton_freight_findings(boxes)
+    rows.extend(carton_rows)
     return {
         'checked_at': ss_listing_checks._listagent_now_iso(),
         'checked_count': len(mskus),
+        'cartons_checked': len([
+            box for box in (boxes if isinstance(boxes, list) else []) if _fba_carton_geometry(box)
+        ]),
         'findings': rows,
         'blocking_count': len(blocking),
+        'carton_warning_count': len(carton_rows),
         'summary': summary,
     }
 
