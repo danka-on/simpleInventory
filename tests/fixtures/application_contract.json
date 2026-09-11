@@ -4560,6 +4560,19 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/fba-prep/sessions/<int:session_id>/amazon-restore",
+      "endpoint": "api_fba_prep_amazon_restore",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/fba-prep/sessions/<int:session_id>/amazon/<action>",
       "endpoint": "api_fba_prep_amazon_action",
       "methods": [

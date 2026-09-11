@@ -790,3 +790,77 @@ def summarize_money(rows):
 
 def option_state(option):
     return _text((option or {}).get("status"), 40).upper()
+
+
+# A plan or shipment Amazon reports in one of these states can never ship again.
+# Restoring means rebuilding a replacement plan, not editing the dead one.
+FBA_DEAD_SHIPMENT_STATUSES = frozenset({
+    "CANCELLED", "CANCELED", "DELETED", "VOID", "VOIDED", "ABANDONED", "CLOSED",
+})
+FBA_DEAD_PLAN_STATUSES = frozenset({"VOIDED", "VOID", "CANCELLED", "CANCELED", "DELETED"})
+
+
+def detect_amazon_cancellation(plan, shipments):
+    """Describe an inbound plan that was cancelled outside this app.
+
+    Cancelling shipping in Seller Central kills the Amazon plan while the
+    physical work — packed cartons, carton scans, printed FNSKU labels — stays
+    valid.  Returns ``None`` while the plan is still usable, otherwise a summary
+    whose ``restorable`` flag says the whole plan is dead and may be rebuilt.  A
+    partially cancelled plan is reported but never auto-restored, because its
+    live shipments still belong to Amazon.
+    """
+    plan = plan if isinstance(plan, dict) else {}
+    rows = [row for row in (shipments or []) if isinstance(row, dict)]
+    plan_status = _text(plan.get("status"), 40).upper()
+    plan_dead = plan_status in FBA_DEAD_PLAN_STATUSES
+    cancelled = []
+    live = []
+    for row in rows:
+        status = _text(row.get("status"), 40).upper()
+        entry = {
+            "shipmentId": _text(row.get("shipmentId"), 38),
+            "shipmentConfirmationId": _text(row.get("shipmentConfirmationId"), 40),
+            "status": status,
+            "warehouseId": _text((row.get("destination") or {}).get("warehouseId"), 40).upper(),
+        }
+        (cancelled if status in FBA_DEAD_SHIPMENT_STATUSES else live).append(entry)
+    if not plan_dead and not cancelled:
+        return None
+    every_shipment_dead = bool(rows) and not live
+    destinations = []
+    for entry in cancelled + live:
+        if entry["warehouseId"] and entry["warehouseId"] not in destinations:
+            destinations.append(entry["warehouseId"])
+    return {
+        "plan_status": plan_status,
+        "plan_cancelled": plan_dead,
+        "cancelled_shipments": cancelled,
+        "live_shipments": live,
+        "destinations": destinations,
+        # A dead plan is restorable even with no shipments: nothing can ship from it.
+        "restorable": bool(plan_dead or every_shipment_dead),
+        "partial": bool(cancelled and live and not plan_dead),
+    }
+
+
+def transport_option_block_reason(option, *, can_purchase=None):
+    """Explain in one sentence why an option cannot be bought inside this app."""
+    option = option if isinstance(option, dict) else {}
+    if can_purchase is None:
+        can_purchase = False
+    if can_purchase:
+        return ""
+    solution = _text(option.get("shippingSolution"), 80).upper()
+    mode = _text(option.get("shippingMode"), 80).upper()
+    preconditions = [
+        _text(value, 120) for value in (option.get("preconditions") or []) if _text(value, 120)
+    ]
+    if solution and solution != "AMAZON_PARTNERED_CARRIER":
+        return "Book this yourself with the carrier — Amazon does not sell it through this API."
+    if mode and mode != "GROUND_SMALL_PARCEL":
+        readable = mode.replace("_", " ").lower()
+        return f"Amazon partnered {readable} is arranged in Seller Central, not here."
+    if preconditions:
+        return "Amazon requires first: " + ", ".join(preconditions) + "."
+    return "Amazon did not return a confirmed price for this option."

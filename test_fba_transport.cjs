@@ -48,4 +48,47 @@ assert.equal(context.purchasableTransportationOptions().length, 2);
 assert.doesNotMatch(rendered, /value="freight"|value="self-booked"/);
 assert.match(rendered, /data-generate-transport/);
 
-console.log('FBA transport: all destinations require quotes; parcel filtering and purchase gating passed.');
+// Every option Amazon returned stays visible with its price and the reason it cannot be bought.
+assert.match(rendered, /2 other options Amazon returned for this destination/);
+assert.match(rendered, /Amazon partnered freight ltl is arranged in Seller Central/);
+assert.match(rendered, /Book this yourself with the carrier/);
+assert.equal((rendered.match(/\$12\.34/g) || []).length, 4, 'each option shows a price');
+
+// A carrier Amazon priced but blocked on a precondition still shows both.
+state.amazon.transportation_options.push({...parcel('B'), transportationOptionId: 'needs-pallet',
+                                        can_purchase: false, preconditions: ['PALLET_INFORMATION_REQUIRED'],
+                                        quote: {cost: {amount: 88.5}}});
+rendered = context.transportationHtml();
+assert.match(rendered, /Amazon requires first: PALLET_INFORMATION_REQUIRED/);
+assert.match(rendered, /\$88\.5/);
+assert.doesNotMatch(rendered, /value="needs-pallet"/);
+
+// A server-supplied reason always wins over the browser fallback.
+state.amazon.transportation_options.push({...parcel('B'), transportationOptionId: 'server-reason',
+                                        can_purchase: false, block_reason: 'Amazon said no.'});
+assert.match(context.transportationHtml(), /Amazon said no\./);
+
+// A plan cancelled on Amazon offers a rebuild that keeps the packed cartons.
+context.packedUnits = () => 122;
+vm.runInContext(block('    function cancelledPlanHtml(', '    function finishedAmazonHtml('), context);
+state.amazon.boxes = [{local_id: 'BOX-01'}, {local_id: 'BOX-02'}];
+state.amazon.amazon_cancelled = {plan_status: 'VOIDED', restorable: true, plan_cancelled: true,
+  cancelled_shipments: [{shipmentId: 'A', shipmentConfirmationId: 'FBA19PL7W2P5', status: 'CANCELLED', warehouseId: 'SCK8'}],
+  live_shipments: [], destinations: ['SCK8']};
+let cancelled = context.cancelledPlanHtml();
+assert.match(cancelled, /FBA19PL7W2P5/);
+assert.match(cancelled, /VOIDED/);
+assert.match(cancelled, /2 cartons and 122 packed units are kept exactly as scanned/);
+assert.match(cancelled, /data-restore-plan/);
+assert.match(cancelled, /id="restorePlanText"/);
+
+// A half-cancelled plan is reported but never offers the rebuild.
+state.amazon.amazon_cancelled = {plan_status: 'ACTIVE', restorable: false, partial: true,
+  cancelled_shipments: [{shipmentId: 'A', shipmentConfirmationId: 'FBA-A', status: 'CANCELLED', warehouseId: 'SCK8'}],
+  live_shipments: [{shipmentId: 'B', shipmentConfirmationId: 'FBA-B', status: 'IN_TRANSIT'}], destinations: []};
+cancelled = context.cancelledPlanHtml();
+assert.doesNotMatch(cancelled, /data-restore-plan/);
+assert.match(cancelled, /FBA-B \(IN_TRANSIT\)/);
+assert.match(cancelled, /Cancel the remaining shipment in Seller Central/);
+
+console.log('FBA transport: quote gating, full option visibility with prices, and cancelled-plan restore passed.');

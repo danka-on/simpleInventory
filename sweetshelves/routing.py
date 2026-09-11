@@ -474,6 +474,7 @@ def register_routes():
     ss_runtime.app.route('/api/fba-prep/amazon/readiness', methods=['GET', 'POST'])(ss_fba_shipments.api_fba_prep_amazon_readiness)
     ss_runtime.app.route('/api/fba-prep/amazon/plans', methods=['GET'])(ss_fba_shipments.api_fba_prep_amazon_plans)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon/sync', methods=['GET'])(ss_fba_shipments.api_fba_prep_amazon_sync)
+    ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon-restore', methods=['GET', 'POST'])(ss_fba_shipments.api_fba_prep_amazon_restore)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon/<action>', methods=['POST'])(ss_fba_shipments.api_fba_prep_amazon_action)
     ss_runtime.app.route('/api/fba-prep/sessions/<int:session_id>/amazon/box-labels/<shipment_id>', methods=['GET'])(ss_fba_shipments.api_fba_prep_amazon_box_labels)
     ss_runtime.app.route('/api/fba-labels/resolve', methods=['GET'])(ss_fba_scanning.api_fba_labels_resolve)

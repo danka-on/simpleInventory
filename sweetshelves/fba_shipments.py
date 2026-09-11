@@ -13,8 +13,8 @@ from decimal import Decimal, InvalidOperation
 from fba_inbound import (
     FbaInboundValidationError, US_MARKETPLACE_ID, apply_owner_corrections_from_amazon_error,
     build_create_plan_request, build_set_packing_request, build_transportation_request,
-    missing_source_address_fields, normalize_box_drafts, normalize_source_address, option_state,
-    summarize_money,
+    detect_amazon_cancellation, missing_source_address_fields, normalize_box_drafts,
+    normalize_source_address, option_state, summarize_money, transport_option_block_reason,
 )
 from flask import jsonify, redirect, request
 from . import (
@@ -231,6 +231,7 @@ def _fba_amazon_transport_summary(option):
     option = option if isinstance(option, dict) else {}
     quote = option.get('quote') if isinstance(option.get('quote'), dict) else {}
     carrier = option.get('carrier') if isinstance(option.get('carrier'), dict) else {}
+    can_purchase = _fba_transport_option_can_purchase(option)
     return {
         'transportationOptionId': ss_fba_schema._fba_trim(option.get('transportationOptionId'), 38),
         'shipmentId': ss_fba_schema._fba_trim(option.get('shipmentId'), 38),
@@ -242,7 +243,8 @@ def _fba_amazon_transport_summary(option):
         },
         'quote': quote,
         'preconditions': option.get('preconditions') if isinstance(option.get('preconditions'), list) else [],
-        'can_purchase': _fba_transport_option_can_purchase(option),
+        'can_purchase': can_purchase,
+        'block_reason': transport_option_block_reason(option, can_purchase=can_purchase),
     }
 
 
@@ -713,9 +715,21 @@ def _fba_amazon_sync_snapshot(api, state):
             'selectedTransportationOptionId': ss_fba_schema._fba_trim(shipment.get('selectedTransportationOptionId'), 38),
         })
     state['shipments'] = shipments
+    # Shipping cancelled in Seller Central kills the Amazon plan while the packed
+    # cartons, carton scans, and printed labels stay valid. Never keep reporting a
+    # confirmed shipment Amazon has thrown away.
+    cancellation = detect_amazon_cancellation(state.get('plan'), shipments)
+    if cancellation:
+        state['amazon_cancelled'] = cancellation
+    else:
+        state.pop('amazon_cancelled', None)
+    plan_cancelled = bool(cancellation and cancellation.get('restorable'))
+    if plan_cancelled:
+        state['transport_confirmed'] = False
+        state['selected_transportation'] = []
     # Amazon is one workflow: when an API operation will not go through, the operator
     # can finish a step in Seller Central. Adopt whatever Amazon reports as already done.
-    if not state.get('transport_confirmed') and accepted_placement:
+    if not plan_cancelled and not state.get('transport_confirmed') and accepted_placement:
         booked = [
             row for row in shipments
             if row.get('placementOptionId') == accepted_placement.get('placementOptionId')
@@ -772,6 +786,8 @@ def _fba_amazon_sync_snapshot(api, state):
     if operation_failed or plan_failed:
         if (state.get('operation') or {}).get('kind') == 'create_plan' or plan_failed:
             state['stage'] = 'plan_failed'
+    elif plan_cancelled:
+        state['stage'] = 'plan_cancelled'
     elif state.get('transport_confirmed'):
         state['stage'] = 'transport_confirmed'
     elif state.get('placement_confirmed'):
@@ -878,6 +894,164 @@ def api_fba_prep_amazon_sync(session_id):
             ss_config.logger.error('fba amazon sync: %s', exc, exc_info=True)
             return jsonify({'success': False, 'error': amazon_detail}), 502
         return jsonify({'success': False, 'error': ss_errors._safe_error(exc, 'fba amazon sync')}), 502
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _fba_restore_session_row(conn, session_id):
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    ss_fba_schema._ensure_fba_prep_tables(cur)
+    row = cur.execute('SELECT * FROM fba_prep_sessions WHERE id = ?', (session_id,)).fetchone()
+    if not row:
+        raise FbaInboundValidationError('FBA session not found')
+    if str(row['status'] or '') == 'deleted':
+        raise FbaInboundValidationError('This FBA session was deleted and cannot be restored')
+    return row
+
+
+def _fba_restore_summary(conn, session_id, row, state):
+    """What a restore would carry over, so nothing is rebuilt from stale numbers."""
+    boxes = state.get('boxes') if isinstance(state.get('boxes'), list) else []
+    packed_units = 0
+    for box in boxes:
+        for item in (box.get('contents') or []) if isinstance(box, dict) else []:
+            packed_units += max(0, ss_listing_settings._listingagent_parse_int(item.get('quantity'), 0) or 0)
+    batch_id = ss_listing_settings._listingagent_parse_int(
+        row['completed_batch_id'] if 'completed_batch_id' in row.keys() else 0, 0
+    ) or 0
+    return {
+        'session_id': session_id,
+        'session_status': str(row['status'] or ''),
+        'session_name': str((row['session_name'] if 'session_name' in row.keys() else '') or ''),
+        'plan_id': ss_fba_schema._fba_trim(state.get('inbound_plan_id'), 38),
+        'cancellation': state.get('amazon_cancelled') if isinstance(state.get('amazon_cancelled'), dict) else {},
+        'box_count': len(boxes),
+        'packed_units': packed_units,
+        'pack_scan_count': int(conn.execute(
+            'SELECT COUNT(*) FROM fba_pack_scans WHERE session_id = ?', (session_id,)
+        ).fetchone()[0] or 0),
+        'completed_batch_id': batch_id,
+    }
+
+
+def api_fba_prep_amazon_restore(session_id):
+    """Rebuild a plan Amazon cancelled, keeping the cartons and prep work already done.
+
+    GET reports what Amazon says right now. POST (with ``confirm``) reopens the
+    session and starts the same recovery pipeline used for missing items: a
+    replacement plan, a compatible packing option, and the saved cartons remapped
+    onto it. No unit is rescanned, unpacked, or relabelled.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        row = _fba_restore_session_row(conn, session_id)
+        state = _fba_amazon_state(row)
+        plan_id = ss_fba_schema._fba_trim(state.get('inbound_plan_id'), 38)
+        if not plan_id:
+            raise FbaInboundValidationError('This session has no Amazon plan to restore')
+        api, marketplace_id = _fba_amazon_client()
+        # Always decide from Amazon's live answer, never from the saved snapshot.
+        state = _fba_amazon_sync_snapshot(api, state)
+        summary = _fba_restore_summary(conn, session_id, row, state)
+        cancellation = summary['cancellation']
+        if request.method == 'GET':
+            return jsonify({'success': True, 'restore': summary, 'amazon_workflow': state})
+
+        data = request.get_json(silent=True) or {}
+        if data.get('confirm') is not True:
+            raise FbaInboundValidationError('Confirm the restore before rebuilding the plan')
+        if not cancellation.get('restorable'):
+            live = ', '.join(
+                ss_fba_schema._fba_trim(item.get('shipmentConfirmationId') or item.get('shipmentId'), 40)
+                for item in cancellation.get('live_shipments') or []
+            )
+            raise FbaInboundValidationError(
+                'Amazon still reports this plan as usable'
+                + (f' (active shipments: {live})' if live else '')
+                + '. Cancel the shipment in Seller Central first, then restore.'
+            )
+        if not summary['box_count']:
+            raise FbaInboundValidationError('This session has no saved cartons to restore')
+
+        session_data = ss_fba_inventory._fba_session_row_payload(row, include_items=True)
+        items = session_data.get('items') or []
+        if not items:
+            raise FbaInboundValidationError('This session has no items to rebuild a plan from')
+
+        conn.execute('BEGIN IMMEDIATE')
+        now = ss_listing_checks._listagent_now_iso()
+        if summary['session_status'] != 'open':
+            conn.execute("""
+                UPDATE fba_prep_sessions
+                SET status = 'open', completed_batch_id = NULL, completed_at = NULL, updated_at = ?
+                WHERE id = ?
+            """, (now, session_id))
+        # The first completion already wrote a ledger batch for these exact units.
+        # Park it so re-finishing this shipment cannot count them a second time.
+        if summary['completed_batch_id']:
+            conn.execute(
+                "UPDATE fba_prep_batches SET status = 'reopened' WHERE id = ? AND status = 'completed'",
+                (summary['completed_batch_id'],),
+            )
+        fnsku_by_msku = {
+            ss_fba_schema._fba_trim(item.get('msku') or item.get('seller_sku'), 60).upper():
+                ss_fba_schema._fba_trim(item.get('fnsku'), 40).upper()
+            for item in state.get('plan_items') or []
+            if ss_fba_schema._fba_trim(item.get('fnsku'), 40)
+        }
+        recovery = {
+            'active': True,
+            'kind': 'cancelled_plan',
+            'phase': 'creating_plan',
+            'old_plan_cancelled': True,
+            'started_at': now,
+            'old_plan_id': plan_id,
+            'old_stage': ss_fba_schema._fba_trim(state.get('stage'), 60) or 'transport_confirmed',
+            'cancellation': cancellation,
+            'restored_from_batch_id': summary['completed_batch_id'],
+            'reopened_session': summary['session_status'] != 'open',
+            'updated_items': items,
+            'saved_boxes': json.loads(json.dumps(state.get('boxes') or [])),
+            'preferred_destinations': cancellation.get('destinations') or [],
+            'fnsku_by_msku': fnsku_by_msku,
+            'packed_scan_count': summary['pack_scan_count'],
+        }
+        preserved = {
+            key: state.get(key) for key in (
+                'inventory_removed_by_msku', 'removed_locations_by_msku',
+                'printed_item_label_counts', 'last_item_label_print', 'last_pack_scan',
+            ) if key in state
+        }
+        state = {
+            'stage': 'draft', 'inbound_plan_id': '', 'boxes': [],
+            'packing_options': [], 'packing_groups': [], 'placement_options': [],
+            'shipments': [], 'transportation_options': [], 'recovery': recovery,
+            **preserved,
+        }
+        state, response_payload = _fba_prepare_and_create_plan(api, marketplace_id, session_data, state)
+        operation_id = _fba_set_amazon_operation(state, response_payload, 'recovery_create_plan', 'plan_created')
+        _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
+        conn.commit()
+        return jsonify({
+            'success': True, 'amazon_workflow': state, 'operation_id': operation_id,
+            'restore': summary, 'items': items,
+        })
+    except FbaInboundValidationError as exc:
+        if conn is not None:
+            conn.rollback()
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    except Exception as exc:
+        if conn is not None:
+            conn.rollback()
+        amazon_detail = _fba_amazon_exception_detail(exc)
+        if amazon_detail:
+            ss_config.logger.error('fba amazon restore: %s', exc, exc_info=True)
+            return jsonify({'success': False, 'error': amazon_detail}), 502
+        return jsonify({'success': False, 'error': ss_errors._safe_error(exc, 'fba amazon restore')}), 502
     finally:
         if conn is not None:
             conn.close()

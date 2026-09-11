@@ -29,6 +29,8 @@ from sweetshelves.fba_shipments import (
 )
 from fba_inbound import (
     FbaInboundValidationError,
+    detect_amazon_cancellation,
+    transport_option_block_reason,
     US_MARKETPLACE_ID,
     apply_owner_corrections_from_amazon_error,
     build_create_plan_request,
@@ -1137,6 +1139,202 @@ class PlanHealthTest(unittest.TestCase):
         self.assertIs(caught.exception.health, health)
         self.assertEqual(api.created, [])
         self.assertEqual(api.read_batches, [])
+
+
+class CancelledPlanRestoreTests(unittest.TestCase):
+    """Shipping cancelled in Seller Central must stop looking like a live shipment."""
+
+    @staticmethod
+    def shipment(shipment_id, status, warehouse='LBE1'):
+        return {
+            'shipmentId': shipment_id,
+            'shipmentConfirmationId': 'FBA' + shipment_id.upper(),
+            'status': status,
+            'destination': {'warehouseId': warehouse},
+        }
+
+    def test_live_plan_reports_no_cancellation(self):
+        self.assertIsNone(detect_amazon_cancellation(
+            {'status': 'ACTIVE'},
+            [self.shipment('s1', 'WORKING'), self.shipment('s2', 'IN_TRANSIT')],
+        ))
+
+    def test_voided_plan_is_restorable_with_destinations_preserved(self):
+        result = detect_amazon_cancellation(
+            {'status': 'VOIDED'},
+            [self.shipment('s1', 'CANCELLED', 'LBE1'), self.shipment('s2', 'CANCELLED', 'SCK8')],
+        )
+        self.assertTrue(result['restorable'])
+        self.assertTrue(result['plan_cancelled'])
+        self.assertFalse(result['partial'])
+        self.assertEqual(result['destinations'], ['LBE1', 'SCK8'])
+        self.assertEqual([row['shipmentConfirmationId'] for row in result['cancelled_shipments']],
+                         ['FBAS1', 'FBAS2'])
+
+    def test_every_shipment_cancelled_is_restorable_on_an_active_plan(self):
+        result = detect_amazon_cancellation({'status': 'ACTIVE'}, [self.shipment('s1', 'DELETED')])
+        self.assertTrue(result['restorable'])
+        self.assertFalse(result['plan_cancelled'])
+
+    def test_partly_cancelled_plan_is_reported_but_never_restorable(self):
+        result = detect_amazon_cancellation(
+            {'status': 'ACTIVE'},
+            [self.shipment('s1', 'CANCELLED'), self.shipment('s2', 'IN_TRANSIT')],
+        )
+        self.assertFalse(result['restorable'])
+        self.assertTrue(result['partial'])
+        self.assertEqual([row['shipmentId'] for row in result['live_shipments']], ['s2'])
+
+    def test_sync_clears_a_confirmed_shipment_amazon_cancelled(self):
+        class FakeInboundApi:
+            @staticmethod
+            def response(**payload):
+                return SimpleNamespace(payload=payload, errors=None)
+
+            def get_inbound_plan(self, _plan_id):
+                return self.response(inboundPlanId='plan-1', status='VOIDED')
+
+            def list_inbound_plan_items(self, _plan_id, **_kwargs):
+                return self.response(items=[])
+
+            def list_packing_options(self, _plan_id, **_kwargs):
+                return self.response(packingOptions=[{
+                    'packingOptionId': 'packing-1', 'status': 'ACCEPTED', 'packingGroups': [],
+                }])
+
+            def list_placement_options(self, _plan_id, **_kwargs):
+                return self.response(placementOptions=[{
+                    'placementOptionId': 'placement-1', 'status': 'ACCEPTED',
+                    'shipmentIds': ['shipment-1'],
+                }])
+
+            def get_shipment(self, _plan_id, shipment_id):
+                return self.response(
+                    shipmentId=shipment_id, status='CANCELLED',
+                    shipmentConfirmationId='FBA19PL7W2P5',
+                    destination={'warehouseId': 'SCK8'},
+                    selectedTransportationOptionId='to-1',
+                )
+
+            def list_transportation_options(self, _plan_id, **kwargs):
+                return self.response(transportationOptions=[])
+
+            def list_shipment_boxes(self, _plan_id, _shipment_id, **_kwargs):
+                raise AssertionError('carton labels must not be fetched for a cancelled plan')
+
+        state = {
+            'inbound_plan_id': 'plan-1',
+            'operation': {'status': 'SUCCESS'},
+            'boxes_submitted': True,
+            'transport_confirmed': True,
+            'selected_transportation': [{'shipmentId': 'shipment-1'}],
+        }
+
+        refreshed = _fba_amazon_sync_snapshot(FakeInboundApi(), state)
+
+        self.assertFalse(refreshed['transport_confirmed'])
+        self.assertEqual(refreshed['selected_transportation'], [])
+        self.assertEqual(refreshed['stage'], 'plan_cancelled')
+        self.assertTrue(refreshed['amazon_cancelled']['restorable'])
+        self.assertEqual(
+            refreshed['amazon_cancelled']['cancelled_shipments'][0]['shipmentConfirmationId'],
+            'FBA19PL7W2P5',
+        )
+
+    def test_sync_keeps_a_live_confirmed_shipment(self):
+        class FakeInboundApi:
+            def __init__(self):
+                self.label_calls = []
+
+            @staticmethod
+            def response(**payload):
+                return SimpleNamespace(payload=payload, errors=None)
+
+            def get_inbound_plan(self, _plan_id):
+                return self.response(inboundPlanId='plan-1', status='ACTIVE')
+
+            def list_inbound_plan_items(self, _plan_id, **_kwargs):
+                return self.response(items=[])
+
+            def list_packing_options(self, _plan_id, **_kwargs):
+                return self.response(packingOptions=[{
+                    'packingOptionId': 'packing-1', 'status': 'ACCEPTED', 'packingGroups': [],
+                }])
+
+            def list_placement_options(self, _plan_id, **_kwargs):
+                return self.response(placementOptions=[{
+                    'placementOptionId': 'placement-1', 'status': 'ACCEPTED',
+                    'shipmentIds': ['shipment-1'],
+                }])
+
+            def get_shipment(self, _plan_id, shipment_id):
+                return self.response(
+                    shipmentId=shipment_id, status='IN_TRANSIT',
+                    destination={'warehouseId': 'HIA1'},
+                    selectedTransportationOptionId='to-1',
+                )
+
+            def list_transportation_options(self, _plan_id, **_kwargs):
+                return self.response(transportationOptions=[])
+
+            def list_shipment_boxes(self, _plan_id, shipment_id, **_kwargs):
+                self.label_calls.append(shipment_id)
+                return self.response(boxes=[])
+
+        api = FakeInboundApi()
+        refreshed = _fba_amazon_sync_snapshot(api, {
+            'inbound_plan_id': 'plan-1', 'operation': {'status': 'SUCCESS'}, 'boxes_submitted': True,
+        })
+
+        self.assertTrue(refreshed['transport_confirmed'])
+        self.assertEqual(refreshed['stage'], 'transport_confirmed')
+        self.assertNotIn('amazon_cancelled', refreshed)
+        self.assertEqual(api.label_calls, ['shipment-1'])
+
+
+class TransportOptionVisibilityTests(unittest.TestCase):
+    """Every quote Amazon returns is shown; only partnered small parcel is buyable."""
+
+    def test_partnered_small_parcel_stays_purchasable_without_a_reason(self):
+        summary = _fba_amazon_transport_summary({
+            'transportationOptionId': 'to-1', 'shipmentId': 'sh-1',
+            'shippingSolution': 'AMAZON_PARTNERED_CARRIER', 'shippingMode': 'GROUND_SMALL_PARCEL',
+            'carrier': {'name': 'UPS', 'alphaCode': 'UPSN'},
+            'quote': {'cost': {'amount': 28.44, 'code': 'USD'}},
+        })
+        self.assertTrue(summary['can_purchase'])
+        self.assertEqual(summary['block_reason'], '')
+        self.assertEqual(summary['quote']['cost']['amount'], 28.44)
+
+    def test_self_booked_option_is_kept_with_its_price_and_reason(self):
+        summary = _fba_amazon_transport_summary({
+            'transportationOptionId': 'to-2', 'shipmentId': 'sh-1',
+            'shippingSolution': 'USE_YOUR_OWN_CARRIER', 'shippingMode': 'GROUND_SMALL_PARCEL',
+            'carrier': {'name': 'Seller carrier'},
+            'quote': {'cost': {'amount': 0, 'code': 'USD'}},
+        })
+        self.assertFalse(summary['can_purchase'])
+        self.assertIn('Book this yourself', summary['block_reason'])
+        self.assertEqual(summary['quote']['cost']['amount'], 0)
+
+    def test_freight_and_precondition_reasons_name_the_blocker(self):
+        freight = transport_option_block_reason(
+            {'shippingSolution': 'AMAZON_PARTNERED_CARRIER', 'shippingMode': 'LTL_FREIGHT'},
+            can_purchase=False,
+        )
+        self.assertIn('ltl freight', freight)
+        blocked = transport_option_block_reason(
+            {
+                'shippingSolution': 'AMAZON_PARTNERED_CARRIER', 'shippingMode': 'GROUND_SMALL_PARCEL',
+                'preconditions': ['PALLET_INFORMATION_REQUIRED'],
+            },
+            can_purchase=False,
+        )
+        self.assertIn('PALLET_INFORMATION_REQUIRED', blocked)
+        self.assertEqual(
+            transport_option_block_reason({'shippingSolution': 'AMAZON_PARTNERED_CARRIER'}, can_purchase=True),
+            '',
+        )
 
 
 if __name__ == '__main__':
