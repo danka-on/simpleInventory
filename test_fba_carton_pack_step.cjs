@@ -131,6 +131,10 @@ check('tiny-quantity SKUs come from planned quantities, not what is packed yet',
   assert.match(note, /co-lwuc-322h x1/);
   assert.match(note, /u5-0fba-w0xu x2/);
   assert.ok(!/af-f499-gxgk/.test(note));
+  // Placement fees are per unit, so deferring moves the cost rather than saving it.
+  assert.match(note, /Placement fees are per unit/);
+  assert.match(note, /per-parcel minimum charge/);
+  assert.ok(!/Holding them for the next shipment/.test(note));
 });
 check('an all-small shipment is a deliberate top-up, not a warning', () => {
   scope.expected = new Map([['a', 1], ['b', 2]]);

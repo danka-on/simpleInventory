@@ -567,9 +567,10 @@ def _fba_carton_freight_findings(boxes):
     # that is all ones is a deliberate small top-up, not an oversight.
     if stragglers and len(stragglers) < len(units_by_msku):
         add('carton_straggler_skus', '%d SKU(s) shipping in tiny quantity' % len(stragglers), (
-            'These ship in very small quantity: %s. Carton space and the per-unit placement fee are charged '
-            'regardless, so a one or two unit SKU carries the same overhead as a full one. Holding them for '
-            'the next shipment is usually cheaper, unless Amazon is out of stock and needs them now.'
+            'These ship in very small quantity: %s. Placement fees are per unit, so deferring them saves '
+            'nothing there; what costs is giving them cube of their own. If they fit in the void already in '
+            'another carton, put them there. A carton opened just for them also pays the per-parcel minimum '
+            'charge, which is the only real per-carton cost.'
         ) % ', '.join(stragglers))
 
     return rows

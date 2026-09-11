@@ -166,6 +166,15 @@ class CartonShipmentAdviceTests(unittest.TestCase):
         self.assertIn('U5-0FBA-W0XU x2', row['message'])
         self.assertNotIn('AF-F499-GXGK', row['message'])
 
+    def test_straggler_advice_does_not_claim_deferring_saves_placement_fees(self):
+        # Placement fees are per unit, so holding a tiny SKU back moves that cost
+        # rather than avoiding it. The advice is about cube and the parcel minimum.
+        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_straggler_skus')
+        self.assertIn('per unit', row['message'])
+        self.assertIn('cube of their own', row['message'])
+        self.assertIn('per-parcel minimum', row['message'])
+        self.assertNotIn('Holding them for the next shipment is usually cheaper', row['message'])
+
     def test_an_all_singleton_shipment_is_a_deliberate_top_up_not_a_warning(self):
         tiny = [box('B1', 20, 16, 12, 30, [{'msku': 'M1', 'quantity': 1}, {'msku': 'M2', 'quantity': 2}])]
         self.assertNotIn('carton_straggler_skus', codes(_fba_carton_freight_findings(tiny)))

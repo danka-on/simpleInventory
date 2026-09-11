@@ -835,7 +835,7 @@
       }
       const expected=expectedByMsku();
       const stragglers=[...expected.entries()].filter(entry=>entry[1]>0&&entry[1]<=CARTON_LIMITS.stragglerUnits);
-      if(stragglers.length&&stragglers.length<expected.size)notes.push('<strong>'+stragglers.length+' SKU'+(stragglers.length===1?'':'s')+' shipping in ones and twos</strong>'+stragglers.map(entry=>esc(entry[0])+' x'+entry[1]).join(', ')+'. Carton space and the per-unit placement fee apply regardless, so these carry a full SKU of overhead. Holding them for the next shipment is usually cheaper.');
+      if(stragglers.length&&stragglers.length<expected.size)notes.push('<strong>'+stragglers.length+' SKU'+(stragglers.length===1?'':'s')+' shipping in ones and twos</strong>'+stragglers.map(entry=>esc(entry[0])+' x'+entry[1]).join(', ')+'. Placement fees are per unit, so deferring these saves nothing there; the cost is giving them cube of their own. Tuck them into void already in another carton if they fit. A carton opened just for them also pays the per-parcel minimum charge.');
       return notes;
     }
     function packFreightSummaryHtml(){
