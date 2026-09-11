@@ -395,7 +395,6 @@ _FBA_GIRTH_MARGIN_IN = 10.0
 _FBA_ADDITIONAL_HANDLING_LONGEST_IN = 48.0
 _FBA_ADDITIONAL_HANDLING_SECOND_IN = 30.0
 _FBA_ADDITIONAL_HANDLING_WEIGHT_LB = 50.0
-_FBA_AMAZON_SIDE_LIMIT_IN = 25.0
 _FBA_MECH_LIFT_LB = 100.0
 _FBA_LTL_CUBE_FT3 = 60.0
 _FBA_LTL_WEIGHT_LB = 300.0
@@ -431,7 +430,6 @@ def _fba_carton_geometry(box):
         'units': units,
         'cube': (sides[0] * sides[1] * sides[2]) / 1728.0,
         'girth': sides[0] + 2 * (sides[1] + sides[2]),
-        'oversize_exception': bool(box.get('single_oversize_exception')),
         'contents': box.get('contents') or [],
     }
 
@@ -482,8 +480,6 @@ def _fba_carton_freight_findings(boxes):
             flag('carton_additional_handling', carton, '%s %s' % (box_id, dims))
         if weight > _FBA_ADDITIONAL_HANDLING_WEIGHT_LB:
             flag('carton_overweight', carton, '%s %g lb' % (box_id, weight))
-        if longest > _FBA_AMAZON_SIDE_LIMIT_IN and not carton['oversize_exception']:
-            flag('carton_amazon_limit', carton, '%s longest side %gin' % (box_id, longest))
 
     for code, entry in grouped.items():
         ids = entry['box_ids']
@@ -524,14 +520,6 @@ def _fba_carton_freight_findings(boxes):
                 'label.%s Splitting weight across more cartons genuinely helps here, because this threshold '
                 'is on actual weight rather than cube.'
             ) % (detail, _FBA_ADDITIONAL_HANDLING_WEIGHT_LB, lift), ids)
-        elif code == 'carton_amazon_limit':
-            add(code, 'Over Amazon %gin limit without exception: %d %s' % (
-                _FBA_AMAZON_SIDE_LIMIT_IN, count, noun), (
-                '%s, but single_oversize_exception is not set. Amazon caps inbound cartons at %gin on any '
-                'side unless a single unit inside genuinely requires a bigger box. If these hold oversize '
-                'units, set the exception so the declaration matches the carton; if they do not, Amazon can '
-                'reject them on arrival.'
-            ) % (detail, _FBA_AMAZON_SIDE_LIMIT_IN), ids)
 
     total_weight = sum(row['weight'] for row in measured)
     total_cube = sum(row['cube'] for row in measured)

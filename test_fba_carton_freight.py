@@ -14,10 +14,10 @@ from sweetshelves.fba_shipments import (
 )
 
 
-def box(local_id, length, width, height, weight, contents=None, oversize=False):
+def box(local_id, length, width, height, weight, contents=None):
     return {
         'local_id': local_id, 'length_in': length, 'width_in': width, 'height_in': height,
-        'weight_lb': weight, 'single_oversize_exception': oversize,
+        'weight_lb': weight,
         'contents': contents if contents is not None else [{'msku': 'M-' + local_id, 'quantity': 10}],
     }
 
@@ -107,20 +107,21 @@ class CartonCliffTests(unittest.TestCase):
         mech = _fba_carton_freight_findings([box('B1', 24, 18, 12, 120)])
         self.assertIn('mechanical-lift', by_code(mech, 'carton_overweight')['message'])
 
-    def test_amazon_limit_respects_the_declared_oversize_exception(self):
-        self.assertIn('carton_amazon_limit',
-                      codes(_fba_carton_freight_findings([box('B1', 34, 22, 18, 40)])))
-        self.assertNotIn('carton_amazon_limit',
-                         codes(_fba_carton_freight_findings([box('B1', 34, 22, 18, 40, oversize=True)])))
-        self.assertNotIn('carton_amazon_limit',
-                         codes(_fba_carton_freight_findings([box('B1', 25, 20, 18, 40)])))
-
     def test_one_finding_per_rule_listing_every_carton_that_broke_it(self):
-        # Eleven similar cartons must not produce eleven rows of the same advice.
-        findings = _fba_carton_freight_findings(CELLAR3)
-        limit = by_code(findings, 'carton_amazon_limit')
-        self.assertEqual(len(limit['box_ids']), 9)
-        self.assertEqual(len([row for row in findings if row['code'] == 'carton_amazon_limit']), 1)
+        # Six oversized cartons must not produce six rows of the same advice.
+        findings = _fba_carton_freight_findings([box('B%d' % index, 36, 24, 24, 40) for index in range(6)])
+        large = [row for row in findings if row['code'] == 'carton_large_package']
+        self.assertEqual(len(large), 1)
+        self.assertEqual(len(large[0]['box_ids']), 6)
+
+    def test_cellar_three_clears_every_cliff(self):
+        # The real shipment trips no dimension or weight rule; only density.
+        findings = codes(_fba_carton_freight_findings(CELLAR3))
+        self.assertNotIn('carton_large_package', findings)
+        self.assertNotIn('carton_additional_handling', findings)
+        self.assertNotIn('carton_overweight', findings)
+        self.assertNotIn('carton_girth_margin', findings)
+        self.assertIn('carton_low_density', findings)
 
 
 class CartonDensityTests(unittest.TestCase):
@@ -194,6 +195,36 @@ class CartonFindingContractTests(unittest.TestCase):
         self.assertEqual(_fba_carton_freight_findings([box('B1', 0, 0, 0, 0)]), [])
         self.assertEqual(_fba_carton_freight_findings([{'length_in': 34, 'width_in': 22,
                                                        'height_in': 18, 'weight_lb': 30}]), [])
+
+
+class CartonLimitsMatchTheUiTests(unittest.TestCase):
+    """The Pack step re-implements these thresholds in JavaScript to give live
+    feedback while cartons are still open. Two copies can drift, so pin them."""
+
+    def test_js_carton_limits_match_the_python_constants(self):
+        from pathlib import Path
+        import re
+
+        from sweetshelves import fba_shipments
+
+        template = (Path(__file__).parent / 'templates' / 'fba_prep.html').read_text(encoding='utf-8')
+        block = re.search(r'const CARTON_LIMITS=\{(.*?)\};', template, re.S)
+        self.assertIsNotNone(block, 'CARTON_LIMITS not found in fba_prep.html')
+        js = {key: float(value) for key, value in re.findall(r'(\w+):([\d.]+)', block.group(1))}
+        expected = {
+            'dimDivisor': fba_shipments._FBA_DIM_DIVISOR,
+            'largePackageGirthIn': fba_shipments._FBA_LARGE_PACKAGE_GIRTH_IN,
+            'largePackageMinBillableLb': fba_shipments._FBA_LARGE_PACKAGE_MIN_BILLABLE_LB,
+            'girthMarginIn': fba_shipments._FBA_GIRTH_MARGIN_IN,
+            'additionalHandlingLongestIn': fba_shipments._FBA_ADDITIONAL_HANDLING_LONGEST_IN,
+            'additionalHandlingSecondIn': fba_shipments._FBA_ADDITIONAL_HANDLING_SECOND_IN,
+            'additionalHandlingWeightLb': fba_shipments._FBA_ADDITIONAL_HANDLING_WEIGHT_LB,
+            'mechLiftLb': fba_shipments._FBA_MECH_LIFT_LB,
+            'ltlCubeFt3': fba_shipments._FBA_LTL_CUBE_FT3,
+            'ltlWeightLb': fba_shipments._FBA_LTL_WEIGHT_LB,
+            'stragglerUnits': fba_shipments._FBA_STRAGGLER_UNITS,
+        }
+        self.assertEqual(js, expected)
 
 
 if __name__ == '__main__':
