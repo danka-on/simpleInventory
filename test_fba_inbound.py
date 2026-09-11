@@ -30,6 +30,7 @@ from sweetshelves.fba_shipments import (
 from fba_inbound import (
     FbaInboundValidationError,
     detect_amazon_cancellation,
+    estimate_straight_line_miles,
     transport_option_block_reason,
     US_MARKETPLACE_ID,
     apply_owner_corrections_from_amazon_error,
@@ -1339,3 +1340,29 @@ class TransportOptionVisibilityTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class DistanceEstimateTests(unittest.TestCase):
+    """Straight-line distance to a destination, or nothing when the area is unknown."""
+
+    FORT_MYERS = {'postalCode': '33908'}
+
+    def test_known_areas_estimate_within_a_few_percent(self):
+        # Reference great-circle distances from Fort Myers, FL.
+        for postal, expected in (('94561-2677', 2443), ('21740-7301', 933), ('92509', 2167), ('87031', 1577)):
+            with self.subTest(postal=postal):
+                miles = estimate_straight_line_miles(self.FORT_MYERS, {'postalCode': postal})
+                self.assertAlmostEqual(miles, expected, delta=max(30, expected * 0.03))
+
+    def test_an_unknown_area_shows_nothing_rather_than_a_guess(self):
+        self.assertIsNone(estimate_straight_line_miles(self.FORT_MYERS, {'postalCode': '00000'}))
+        self.assertIsNone(estimate_straight_line_miles({}, {'postalCode': '94561'}))
+        self.assertIsNone(estimate_straight_line_miles(self.FORT_MYERS, {}))
+        self.assertIsNone(estimate_straight_line_miles(None, None))
+
+    def test_the_same_area_is_zero_and_the_measure_is_symmetric(self):
+        self.assertEqual(estimate_straight_line_miles(self.FORT_MYERS, {'postalCode': '33901'}), 0)
+        there = estimate_straight_line_miles(self.FORT_MYERS, {'postalCode': '94561'})
+        back = estimate_straight_line_miles({'postalCode': '94561'}, self.FORT_MYERS)
+        self.assertEqual(there, back)
+

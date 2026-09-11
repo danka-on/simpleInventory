@@ -13,8 +13,9 @@ from decimal import Decimal, InvalidOperation
 from fba_inbound import (
     FbaInboundValidationError, US_MARKETPLACE_ID, apply_owner_corrections_from_amazon_error,
     build_create_plan_request, build_set_packing_request, build_transportation_request,
-    detect_amazon_cancellation, missing_source_address_fields, normalize_box_drafts,
-    normalize_source_address, option_state, summarize_money, transport_option_block_reason,
+    detect_amazon_cancellation, estimate_straight_line_miles, missing_source_address_fields,
+    normalize_box_drafts, normalize_source_address, option_state, summarize_money,
+    transport_option_block_reason,
 )
 from flask import jsonify, redirect, request
 from . import (
@@ -700,6 +701,8 @@ def _fba_amazon_sync_snapshot(api, state):
         shipment = _fba_amazon_payload(api.get_shipment(plan_id, shipment_id))
         destination = shipment.get('destination') if isinstance(shipment.get('destination'), dict) else {}
         source = shipment.get('source') if isinstance(shipment.get('source'), dict) else {}
+        destination_address = destination.get('address') if isinstance(destination.get('address'), dict) else {}
+        source_address = source.get('address') if isinstance(source.get('address'), dict) else {}
         shipments.append({
             'shipmentId': shipment_id,
             'shipmentConfirmationId': ss_fba_schema._fba_trim(shipment.get('shipmentConfirmationId'), 40),
@@ -708,12 +711,39 @@ def _fba_amazon_sync_snapshot(api, state):
             'status': ss_fba_schema._fba_trim(shipment.get('status'), 60),
             'destination': {
                 'warehouseId': ss_fba_schema._fba_trim(destination.get('warehouseId'), 40),
-                'city': ss_fba_schema._fba_trim(destination.get('city'), 80),
-                'stateOrProvinceCode': ss_fba_schema._fba_trim(destination.get('stateOrProvinceCode'), 30),
+                'city': ss_fba_schema._fba_trim(destination_address.get('city') or destination.get('city'), 80).title(),
+                'stateOrProvinceCode': ss_fba_schema._fba_trim(
+                    destination_address.get('stateOrProvinceCode') or destination.get('stateOrProvinceCode'), 30
+                ).upper(),
+                'postalCode': ss_fba_schema._fba_trim(destination_address.get('postalCode') or destination.get('postalCode'), 20),
             },
-            'source': {'city': ss_fba_schema._fba_trim(source.get('city'), 80), 'stateOrProvinceCode': ss_fba_schema._fba_trim(source.get('stateOrProvinceCode'), 30)},
+            'source': {
+                'city': ss_fba_schema._fba_trim(source_address.get('city') or source.get('city'), 80),
+                'stateOrProvinceCode': ss_fba_schema._fba_trim(
+                    source_address.get('stateOrProvinceCode') or source.get('stateOrProvinceCode'), 30
+                ),
+                'postalCode': ss_fba_schema._fba_trim(source_address.get('postalCode') or source.get('postalCode'), 20),
+            },
+            'distance_miles': estimate_straight_line_miles(source_address or source, destination_address or destination),
             'selectedTransportationOptionId': ss_fba_schema._fba_trim(shipment.get('selectedTransportationOptionId'), 38),
         })
+    if len(shipments) <= 24:
+        for shipment in shipments:
+            try:
+                shipment_items = _fba_amazon_collect(
+                    lambda shipment_id=shipment['shipmentId'], **kwargs: api.list_shipment_items(
+                        plan_id, shipment_id, **kwargs
+                    ), 'items', page_size=100, limit=1000,
+                )
+            except Exception as exc:  # noqa: BLE001 - counts are informational, never block a sync
+                ss_config.logger.info('fba shipment items unavailable for %s: %s', shipment['shipmentId'], exc)
+                continue
+            rows = [row for row in shipment_items if isinstance(row, dict)]
+            shipment['units'] = sum(max(0, int(row.get('quantity') or 0)) for row in rows)
+            shipment['sku_count'] = len({
+                ss_fba_schema._fba_trim(row.get('msku'), 60).casefold() for row in rows
+                if ss_fba_schema._fba_trim(row.get('msku'), 60)
+            })
     state['shipments'] = shipments
     # Shipping cancelled in Seller Central kills the Amazon plan while the packed
     # cartons, carton scans, and printed labels stay valid. Never keep reporting a

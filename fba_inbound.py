@@ -864,3 +864,51 @@ def transport_option_block_reason(option, *, can_purchase=None):
     if preconditions:
         return "Amazon requires first: " + ", ".join(preconditions) + "."
     return "Amazon did not return a confirmed price for this option."
+
+
+# Approximate centres of the US ZIP3 areas Sweet Shelves ships from and to, used
+# only to show roughly how far a placement option sends the cartons. These are
+# metro centres, not exact warehouse coordinates, and the result is straight-line
+# distance rather than road miles. A prefix that is not listed yields no distance
+# at all: an honest blank beats an invented number. Add a prefix when a new
+# fulfillment centre region shows up.
+US_ZIP3_CENTRES = {
+    "021": (42.36, -71.06), "088": (40.12, -74.75), "100": (40.71, -74.01),
+    "176": (40.30, -76.83), "191": (39.95, -75.17), "217": (39.64, -77.72),
+    "232": (37.54, -77.44), "282": (35.23, -80.84), "300": (33.75, -84.39),
+    "327": (28.54, -81.38), "331": (25.78, -80.20), "336": (27.95, -82.46),
+    "339": (26.60, -81.90), "372": (36.16, -86.78), "432": (39.96, -82.99),
+    "462": (39.77, -86.16), "551": (44.98, -93.27), "606": (41.85, -87.65),
+    "641": (39.10, -94.58), "752": (32.78, -96.80), "802": (39.74, -104.99),
+    "850": (33.45, -112.07), "870": (35.00, -106.70), "890": (36.17, -115.14),
+    "925": (33.95, -117.40), "945": (37.95, -121.90), "972": (45.52, -122.68),
+    "980": (47.61, -122.33),
+}
+
+EARTH_RADIUS_MILES = 3958.8
+
+
+def _zip3_centre(address):
+    postal = _text((address or {}).get("postalCode"), 12)
+    digits = _re.sub(r"\D", "", postal)[:3]
+    return US_ZIP3_CENTRES.get(digits)
+
+
+def estimate_straight_line_miles(origin, destination):
+    """Roughly how far a shipment travels, or None when either end is unknown.
+
+    Straight-line ("as the crow flies") distance between ZIP-area centres. Road
+    mileage runs longer — typically 10-25% on US interstates — so treat this as a
+    comparison between destinations, never as a carrier quote.
+    """
+    start = _zip3_centre(origin)
+    end = _zip3_centre(destination)
+    if not start or not end:
+        return None
+    lat1, lon1 = (math.radians(value) for value in start)
+    lat2, lon2 = (math.radians(value) for value in end)
+    haversine = (
+        math.sin((lat2 - lat1) / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    )
+    return int(round(2 * EARTH_RADIUS_MILES * math.asin(min(1.0, math.sqrt(haversine)))))
