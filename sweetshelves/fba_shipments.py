@@ -398,7 +398,6 @@ _FBA_ADDITIONAL_HANDLING_WEIGHT_LB = 50.0
 _FBA_MECH_LIFT_LB = 100.0
 _FBA_LTL_CUBE_FT3 = 60.0
 _FBA_LTL_WEIGHT_LB = 300.0
-_FBA_STRAGGLER_UNITS = 2
 
 
 def _fba_carton_geometry(box):
@@ -435,7 +434,7 @@ def _fba_carton_geometry(box):
 
 
 def _fba_carton_freight_findings(boxes):
-    """Advisory carton findings: surcharge cliffs, density, mode and tiny SKUs.
+    """Advisory carton findings: the carrier surcharge cliffs, and pallet mode.
 
     Every finding here is a warning and never blocking. A carton that costs more
     than it should is still a carton Amazon accepts, so this must not be able to
@@ -525,53 +524,15 @@ def _fba_carton_freight_findings(boxes):
     total_cube = sum(row['cube'] for row in measured)
     if total_cube <= 0:
         return rows
-    density = total_weight / total_cube
-    dim_weight = total_cube * 1728.0 / _FBA_DIM_DIVISOR
 
-    if density < _FBA_DENSITY_BREAK_EVEN_LB_FT3:
-        worst = sorted(measured, key=lambda row: row['weight'] / row['cube'])[:3]
-        add('carton_low_density', 'Billed on cube, not weight: %.1f lb/ft3' % density, (
-            'These %d cartons hold %.0f lb in %.1f ft3, a density of %.1f lb/ft3. Break-even is about '
-            '%.1f lb/ft3, which is a /%g dimensional divisor, so below that the carrier bills cube rather '
-            'than scale weight: roughly %.0f lb billable against %.0f lb actual, about %.1fx. Splitting '
-            'cartons will not help, because the same goods occupy the same cube either way; the only fixes '
-            'are a smaller box and less void. Loosest cartons: %s. Confirm the divisor on the transport '
-            'quote before acting on that multiplier.'
-        ) % (len(measured), total_weight, total_cube, density, _FBA_DENSITY_BREAK_EVEN_LB_FT3,
-             _FBA_DIM_DIVISOR, dim_weight, total_weight, dim_weight / total_weight,
-             ', '.join('%s at %.1f lb/ft3' % (row['local_id'], row['weight'] / row['cube'])
-                       for row in worst)),
-            [row['local_id'] for row in worst])
 
     if total_cube >= _FBA_LTL_CUBE_FT3 or total_weight >= _FBA_LTL_WEIGHT_LB:
         add('carton_consider_ltl', 'Worth pricing LTL against small parcel', (
             '%d cartons, %.1f ft3 and %.0f lb is roughly a pallet per destination, which is where '
-            'palletised LTL starts to compete with small parcel. LTL prices on weight and freight class '
-            'instead of per-carton dimensional weight, so it matters most when density is low, as it is '
-            'here at %.1f lb/ft3. Generate both quotes and compare before confirming: the quote is shown '
-            'before you commit and costs nothing to look at.'
-        ) % (len(measured), total_cube, total_weight, density))
+            'palletised LTL starts to compete with small parcel. Generate both quotes and compare before '
+            'confirming: the quote is shown before you commit and costs nothing to look at.'
+        ) % (len(measured), total_cube, total_weight))
 
-    units_by_msku = {}
-    for carton in measured:
-        for content in carton['contents']:
-            if isinstance(content, dict):
-                key = ss_fba_schema._fba_trim(content.get('msku'), 255)
-                if key:
-                    units_by_msku[key] = units_by_msku.get(key, 0) + int(content.get('quantity') or 0)
-    stragglers = sorted(
-        '%s x%d' % (msku, units) for msku, units in units_by_msku.items()
-        if 0 < units <= _FBA_STRAGGLER_UNITS
-    )
-    # Only worth raising when the shipment is mostly real quantities; a shipment
-    # that is all ones is a deliberate small top-up, not an oversight.
-    if stragglers and len(stragglers) < len(units_by_msku):
-        add('carton_straggler_skus', '%d SKU(s) shipping in tiny quantity' % len(stragglers), (
-            'These ship in very small quantity: %s. Placement fees are per unit, so deferring them saves '
-            'nothing there; what costs is giving them cube of their own. If they fit in the void already in '
-            'another carton, put them there. A carton opened just for them also pays the per-parcel minimum '
-            'charge, which is the only real per-carton cost.'
-        ) % ', '.join(stragglers))
 
     return rows
 

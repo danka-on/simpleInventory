@@ -789,7 +789,7 @@
     // sweetshelves/fba_shipments.py by test_fba_carton_freight.py.
     const CARTON_LIMITS={dimDivisor:139,largePackageGirthIn:130,largePackageMinBillableLb:90,
       girthMarginIn:10,additionalHandlingLongestIn:48,additionalHandlingSecondIn:30,
-      additionalHandlingWeightLb:50,mechLiftLb:100,ltlCubeFt3:60,ltlWeightLb:300,stragglerUnits:2};
+      additionalHandlingWeightLb:50,mechLiftLb:100,ltlCubeFt3:60,ltlWeightLb:300};
     const CARTON_DENSITY_BREAK_EVEN=1728/CARTON_LIMITS.dimDivisor;
     const cartonSides=box=>['length_in','width_in','height_in'].map(field=>Number(box?.[field]||0)).sort((a,b)=>b-a);
     const cartonMeasured=box=>cartonSides(box).every(value=>value>0)&&Number(box?.weight_lb||0)>0;
@@ -813,11 +813,6 @@
         kind=kind||'warn';
         parts.push(fmtNumber(weight)+' lb is over '+CARTON_LIMITS.additionalHandlingWeightLb+' lb: additional handling, plus a '+(weight>CARTON_LIMITS.mechLiftLb?'Mechanical':'Team')+' Lift label. Moving weight to another carton does help here');
       }
-      const cubic=boxCubicInches(box);
-      if(cubic>0){
-        const density=weight/(cubic/1728);
-        if(density<CARTON_DENSITY_BREAK_EVEN)parts.push(fmtNumber(density)+' lb/ft³ is under the '+fmtNumber(CARTON_DENSITY_BREAK_EVEN)+' lb/ft³ break-even, so this carton bills on cube at about '+fmtNumber(cubic/CARTON_LIMITS.dimDivisor)+' lb rather than its '+fmtNumber(weight)+' lb. A smaller box or less void is the only fix');
-      }
       return parts.length?{kind:kind||'warn',text:parts.join(' · ')}:{kind:'',text:''};
     }
     const boxFreightHtml=box=>{const freight=boxFreightText(box);return freight.text?'<div class="box-freight '+freight.kind+'">'+esc(freight.text)+'</div>':''};
@@ -827,15 +822,9 @@
         const cube=measured.reduce((sum,box)=>sum+boxCubicInches(box)/1728,0);
         const weight=measured.reduce((sum,box)=>sum+Number(box.weight_lb||0),0);
         if(cube>0&&weight>0){
-          const density=weight/cube,dim=cube*1728/CARTON_LIMITS.dimDivisor;
-          const scope=measured.length===boxes.length?('all '+measured.length+' cartons'):(measured.length+' of '+boxes.length+' cartons measured so far');
-          if(density<CARTON_DENSITY_BREAK_EVEN)notes.push('<strong>Billed on cube, not weight: '+fmtNumber(density)+' lb/ft³</strong>'+scope+' hold '+fmtNumber(weight)+' lb in '+fmtNumber(cube)+' ft³, so roughly '+fmtNumber(dim)+' lb billable against '+fmtNumber(weight)+' lb actual, about '+fmtNumber(dim/weight)+'x. Break-even is '+fmtNumber(CARTON_DENSITY_BREAK_EVEN)+' lb/ft³. Splitting cartons will not help, because the same goods take the same cube either way. A smaller box or less void is what moves this.');
-          if(cube>=CARTON_LIMITS.ltlCubeFt3||weight>=CARTON_LIMITS.ltlWeightLb)notes.push('<strong>Worth pricing LTL against small parcel</strong>'+fmtNumber(cube)+' ft³ and '+fmtNumber(weight)+' lb is roughly a pallet per destination. LTL prices on weight and freight class rather than per-carton dimensional weight, which matters most when density is low. Compare both quotes at the shipping step.');
+            if(cube>=CARTON_LIMITS.ltlCubeFt3||weight>=CARTON_LIMITS.ltlWeightLb)notes.push('<strong>Worth pricing LTL against small parcel</strong>'+fmtNumber(cube)+' ft³ and '+fmtNumber(weight)+' lb is roughly a pallet per destination, which is where palletised LTL starts to compete with small parcel. Compare both quotes at the shipping step.');
         }
       }
-      const expected=expectedByMsku();
-      const stragglers=[...expected.entries()].filter(entry=>entry[1]>0&&entry[1]<=CARTON_LIMITS.stragglerUnits);
-      if(stragglers.length&&stragglers.length<expected.size)notes.push('<strong>'+stragglers.length+' SKU'+(stragglers.length===1?'':'s')+' shipping in ones and twos</strong>'+stragglers.map(entry=>esc(entry[0])+' x'+entry[1]).join(', ')+'. Placement fees are per unit, so deferring these saves nothing there; the cost is giving them cube of their own. Tuck them into void already in another carton if they fit. A carton opened just for them also pays the per-parcel minimum charge.');
       return notes;
     }
     function packFreightSummaryHtml(){

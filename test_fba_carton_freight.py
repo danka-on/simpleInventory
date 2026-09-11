@@ -8,7 +8,6 @@ three times their scale weight, which is the case the density check exists for.
 import unittest
 
 from sweetshelves.fba_shipments import (
-    _FBA_DENSITY_BREAK_EVEN_LB_FT3,
     _fba_carton_freight_findings,
     _fba_carton_geometry,
 )
@@ -115,37 +114,25 @@ class CartonCliffTests(unittest.TestCase):
         self.assertEqual(len(large[0]['box_ids']), 6)
 
     def test_cellar_three_clears_every_cliff(self):
-        # The real shipment trips no dimension or weight rule; only density.
-        findings = codes(_fba_carton_freight_findings(CELLAR3))
-        self.assertNotIn('carton_large_package', findings)
-        self.assertNotIn('carton_additional_handling', findings)
-        self.assertNotIn('carton_overweight', findings)
-        self.assertNotIn('carton_girth_margin', findings)
-        self.assertIn('carton_low_density', findings)
+        # The real shipment trips no carrier threshold at all, so the only thing
+        # left to say about it is that a pallet is worth pricing.
+        self.assertEqual(codes(_fba_carton_freight_findings(CELLAR3)), {'carton_consider_ltl'})
 
 
-class CartonDensityTests(unittest.TestCase):
-    def test_break_even_is_the_divisor_expressed_in_pounds_per_cubic_foot(self):
-        self.assertAlmostEqual(_FBA_DENSITY_BREAK_EVEN_LB_FT3, 1728.0 / 139.0, places=6)
 
-    def test_dense_freight_is_billed_on_weight_and_raises_nothing(self):
-        # 24x18x12 is 3.0 ft3; 60 lb is 20 lb/ft3, well above break-even.
-        self.assertNotIn('carton_low_density', codes(_fba_carton_freight_findings([box('B1', 24, 18, 12, 60)])))
 
-    def test_light_bulky_freight_reports_the_dim_multiplier(self):
-        findings = _fba_carton_freight_findings(CELLAR3)
-        row = by_code(findings, 'carton_low_density')
-        self.assertIn('4.3 lb/ft3', row['title'])
-        self.assertIn('2.9x', row['message'])
-        self.assertIn('348 lb actual', row['message'])
-        # Splitting is cube-neutral, so the advice must not suggest it.
-        self.assertIn('Splitting cartons will not help', row['message'])
+class CartonSilenceTests(unittest.TestCase):
+    """Density and tiny-SKU advice were removed: both rested on a dimensional
+    divisor this account shows no evidence of being charged, and advising a
+    repack against a cost that may not exist is worse than saying nothing."""
 
-    def test_density_names_the_loosest_cartons_to_repack_first(self):
-        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_low_density')
-        self.assertEqual(len(row['box_ids']), 3)
-        self.assertIn('BOX-05', row['box_ids'])
-        self.assertNotIn('BOX-06', row['box_ids'])
+    def test_light_bulky_freight_that_clears_every_cliff_says_nothing(self):
+        self.assertEqual(_fba_carton_freight_findings([box('B1', 34, 22, 18, 33)]), [])
+
+    def test_no_finding_mentions_cube_billing_or_tiny_quantities(self):
+        text = ' '.join(row['message'] + row['title'] for row in _fba_carton_freight_findings(CELLAR3))
+        for claim in ('lb/ft3', 'break-even', 'dimensional', 'very small quantity', 'placement fee'):
+            self.assertNotIn(claim, text)
 
 
 class CartonShipmentAdviceTests(unittest.TestCase):
@@ -154,33 +141,7 @@ class CartonShipmentAdviceTests(unittest.TestCase):
         self.assertNotIn('carton_consider_ltl',
                          codes(_fba_carton_freight_findings([box('B1', 24, 18, 12, 40)])))
 
-    def test_ltl_is_suggested_on_weight_alone_when_freight_is_dense(self):
-        dense = [box('B%d' % index, 24, 18, 12, 45) for index in range(8)]
-        findings = codes(_fba_carton_freight_findings(dense))
-        self.assertIn('carton_consider_ltl', findings)
-        self.assertNotIn('carton_low_density', findings)
 
-    def test_tiny_quantity_skus_are_named(self):
-        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_straggler_skus')
-        self.assertIn('CO-LWUC-322H x1', row['message'])
-        self.assertIn('U5-0FBA-W0XU x2', row['message'])
-        self.assertNotIn('AF-F499-GXGK', row['message'])
-
-    def test_straggler_advice_does_not_claim_deferring_saves_placement_fees(self):
-        # Placement fees are per unit, so holding a tiny SKU back moves that cost
-        # rather than avoiding it. The advice is about cube and the parcel minimum.
-        row = by_code(_fba_carton_freight_findings(CELLAR3), 'carton_straggler_skus')
-        self.assertIn('per unit', row['message'])
-        self.assertIn('cube of their own', row['message'])
-        self.assertIn('per-parcel minimum', row['message'])
-        self.assertNotIn('Holding them for the next shipment is usually cheaper', row['message'])
-
-    def test_an_all_singleton_shipment_is_a_deliberate_top_up_not_a_warning(self):
-        tiny = [box('B1', 20, 16, 12, 30, [{'msku': 'M1', 'quantity': 1}, {'msku': 'M2', 'quantity': 2}])]
-        self.assertNotIn('carton_straggler_skus', codes(_fba_carton_freight_findings(tiny)))
-
-
-class CartonFindingContractTests(unittest.TestCase):
     def test_nothing_here_can_ever_block_a_shipment(self):
         # An expensive carton is still a carton Amazon accepts. Only a dead
         # listing may gate the placement step.
@@ -231,7 +192,6 @@ class CartonLimitsMatchTheUiTests(unittest.TestCase):
             'mechLiftLb': fba_shipments._FBA_MECH_LIFT_LB,
             'ltlCubeFt3': fba_shipments._FBA_LTL_CUBE_FT3,
             'ltlWeightLb': fba_shipments._FBA_LTL_WEIGHT_LB,
-            'stragglerUnits': fba_shipments._FBA_STRAGGLER_UNITS,
         }
         self.assertEqual(js, expected)
 

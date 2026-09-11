@@ -88,10 +88,6 @@ check('over 50 lb names the right lift label and says splitting helps', () => {
   assert.match(api.boxFreightText(box('B', 24, 18, 12, 120)).text, /Mechanical Lift/);
   assert.ok(!/lb is over 50 lb/.test(api.boxFreightText(box('B', 24, 18, 12, 50)).text));
 });
-check('dense carton is quiet; light bulky carton reports cube billing', () => {
-  assert.strictEqual(api.boxFreightText(box('B', 24, 18, 12, 45)).text, '');
-  assert.match(api.boxFreightText(box('BOX-10', 36, 22, 18, 36.4)).text, /bills on cube/);
-});
 check('cellar 3 trips no dimension or weight cliff, only density', () => {
   for (const carton of CELLAR3) {
     const text = api.boxFreightText(carton).text;
@@ -101,44 +97,26 @@ check('cellar 3 trips no dimension or weight cliff, only density', () => {
   }
 });
 
+console.log('silence');
+check('a light bulky carton that clears every cliff says nothing', () => {
+  assert.strictEqual(api.boxFreightText(box('B', 34, 22, 18, 33)).text, '');
+  assert.strictEqual(api.boxFreightHtml(box('B', 34, 22, 18, 33)), '');
+});
+check('no carton text mentions cube billing', () => {
+  for (const carton of CELLAR3) {
+    const text = api.boxFreightText(carton).text;
+    for (const claim of ['lb/ft', 'break-even', 'bills on cube']) {
+      assert.ok(!text.includes(claim), carton.local_id + ' should not mention ' + claim);
+    }
+  }
+});
+
 console.log('shipment summary');
-check('cellar 3 reports 4.3 lb/ft3 and the 2.9x multiplier', () => {
-  scope.state.amazon.boxes = CELLAR3;
-  scope.expected = new Map();
-  const notes = api.packFreightNotes();
-  const density = notes.find(note => /Billed on cube/.test(note));
-  assert.ok(density, 'expected a density note');
-  assert.match(density, /4\.31 lb\/ft/);
-  assert.match(density, /2\.89x/);
-  assert.match(density, /all 11 cartons/);
-  assert.match(density, /Splitting cartons will not help/);
-});
-check('partial measurement is labelled as provisional', () => {
-  scope.state.amazon.boxes = [CELLAR3[0], CELLAR3[1], box('BOX-99', 0, 0, 0, 0)];
-  assert.match(api.packFreightNotes().find(n => /Billed on cube/.test(n)), /2 of 3 cartons measured so far/);
-});
 check('LTL is suggested at about a pallet and not for a single carton', () => {
   scope.state.amazon.boxes = CELLAR3;
   assert.ok(api.packFreightNotes().some(note => /pricing LTL/.test(note)));
   scope.state.amazon.boxes = [box('B', 24, 18, 12, 40)];
   assert.ok(!api.packFreightNotes().some(note => /pricing LTL/.test(note)));
-});
-check('tiny-quantity SKUs come from planned quantities, not what is packed yet', () => {
-  scope.state.amazon.boxes = [];
-  scope.expected = new Map([['af-f499-gxgk', 25], ['co-lwuc-322h', 1], ['u5-0fba-w0xu', 2]]);
-  const note = api.packFreightNotes().find(n => /ones and twos/.test(n));
-  assert.ok(note, 'expected a straggler note');
-  assert.match(note, /co-lwuc-322h x1/);
-  assert.match(note, /u5-0fba-w0xu x2/);
-  assert.ok(!/af-f499-gxgk/.test(note));
-  // Placement fees are per unit, so deferring moves the cost rather than saving it.
-  assert.match(note, /Placement fees are per unit/);
-  assert.match(note, /per-parcel minimum charge/);
-  assert.ok(!/Holding them for the next shipment/.test(note));
-});
-check('an all-small shipment is a deliberate top-up, not a warning', () => {
-  scope.expected = new Map([['a', 1], ['b', 2]]);
-  assert.ok(!api.packFreightNotes().some(note => /ones and twos/.test(note)));
 });
 check('summary renders nothing when there is nothing to say', () => {
   scope.state.amazon.boxes = [box('B', 24, 18, 12, 45)];
