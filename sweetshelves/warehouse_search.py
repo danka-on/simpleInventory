@@ -1113,22 +1113,26 @@ def api_search_all():
         is_upc_search = bool(query_upc and re.fullmatch(r'\d+(?:-\d+)?', query_upc))
         
         # Check cache for UPC searches only
-        cache_key = f"search_all:v3:{query_upc or query_stripped}"
+        cache_key = f"search_all:v4:{query_upc or query_stripped}"
         if is_upc_search and cache_key in _search_all_cache:
             cached_data, cached_time = _search_all_cache[cache_key]
             if time.time() - cached_time < _search_cache_timeout:
                 cached_data['from_cache'] = True
                 return jsonify(cached_data)
-        
-        # Define databases to search with display info (ordered: warehouse, item-manager, Macy BOL, sold, amazon, ebay)
+
+        # Define databases to search with display info (ordered: warehouse, item-manager, Macy BOL, sold, amazon, ebay).
+        # 'tables' lists the table names seen across deployments; the first one that exists is searched.
         databases = [
-            {'key': 'shelves', 'path': 'searchRack.db', 'table': 'SEARCHRACK', 'name': 'Warehouse', 'color': '#9b59b6', 'icon': '📦'},
-            {'key': 'processed', 'path': 'bol.db', 'table': 'bol_items', 'name': 'Item Manager (processed items)', 'color': '#2ecc71', 'icon': '✅', 'filter': 'checked_only'},
-            {'key': 'bol', 'path': 'rawbol.db', 'table': 'raw_bol_items', 'name': 'Macy BOL', 'color': '#3498db', 'icon': '📦'},
-            {'key': 'sold', 'path': 'sold.db', 'table': 'sold_items', 'name': 'Sold Items', 'color': '#e74c3c', 'icon': '💰'},
-            {'key': 'amazon', 'path': 'amazonStore.db', 'table': 'INVENTORY', 'name': 'Amazon Store', 'color': '#1abc9c', 'icon': '📦'},
-            {'key': 'ebay', 'path': 'ebayStore.db', 'table': 'INVENTORY', 'name': 'eBay Store', 'color': '#f39c12', 'icon': '🛒'},
+            {'key': 'shelves', 'path': 'searchRack.db', 'tables': ['SEARCHRACK'], 'name': 'Warehouse', 'color': '#9b59b6', 'icon': '📦'},
+            {'key': 'processed', 'path': 'bol.db', 'tables': ['bol_items'], 'name': 'Item Manager (processed items)', 'color': '#2ecc71', 'icon': '✅', 'filter': 'checked_only'},
+            {'key': 'bol', 'path': 'rawbol.db', 'tables': ['raw_bol_items'], 'name': 'Macy BOL', 'color': '#3498db', 'icon': '📦'},
+            {'key': 'sold', 'path': 'sold.db', 'tables': ['orders', 'sold_items'], 'name': 'Sold Items', 'color': '#e74c3c', 'icon': '💰'},
+            {'key': 'amazon', 'path': 'amazonStore.db', 'tables': ['ITEMS', 'INVENTORY'], 'name': 'Amazon Store', 'color': '#1abc9c', 'icon': '📦'},
+            {'key': 'ebay', 'path': 'ebayStore.db', 'tables': ['INVENTORY'], 'name': 'eBay Store', 'color': '#f39c12', 'icon': '🛒'},
         ]
+        # A single barcode can legitimately have many rows (several shelves, every sale); a text
+        # search only needs a preview because the caller opens one item at a time.
+        sample_limit = 60 if is_upc_search else 20
         
         results = {
             'query': query,
@@ -1159,8 +1163,11 @@ def api_search_all():
                 cur = conn.cursor()
                 
                 # Check if table exists
-                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (db_info['table'],))
-                if not cur.fetchone():
+                placeholders = ','.join('?' for _ in db_info['tables'])
+                cur.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name IN ({placeholders})", db_info['tables'])
+                existing = {row[0] for row in cur.fetchall()}
+                table = next((name for name in db_info['tables'] if name in existing), None)
+                if not table:
                     results['databases'][db_key] = {
                         'name': db_info['name'],
                         'color': db_info['color'],
@@ -1172,7 +1179,7 @@ def api_search_all():
                     continue
                 
                 # Get table columns
-                cur.execute(f"PRAGMA table_info({db_info['table']})")
+                cur.execute(f"PRAGMA table_info({table})")
                 cols = [r[1] for r in cur.fetchall()]
                 
                 # Build search query based on type
@@ -1215,7 +1222,7 @@ def api_search_all():
                         )
                 
                 # Get count and sample results
-                count_sql = f"SELECT COUNT(*) as count FROM {db_info['table']} WHERE {where_clause}"
+                count_sql = f"SELECT COUNT(*) as count FROM {table} WHERE {where_clause}"
                 cur.execute(count_sql, params)
                 count = cur.fetchone()['count']
 
@@ -1224,7 +1231,7 @@ def api_search_all():
                 if db_key == 'shelves':
                     qty_col = next((c for c in cols if c.lower() == 'quantity'), None)
                     if qty_col:
-                        qty_sql = f"SELECT COALESCE(SUM(CAST({qty_col} AS REAL)), 0) AS total_quantity FROM {db_info['table']} WHERE {where_clause}"
+                        qty_sql = f"SELECT COALESCE(SUM(CAST({qty_col} AS REAL)), 0) AS total_quantity FROM {table} WHERE {where_clause}"
                         cur.execute(qty_sql, params)
                         qty_row = cur.fetchone()
                         try:
@@ -1235,7 +1242,7 @@ def api_search_all():
                 # Get sample results (up to 20)
                 sample_results = []
                 if count > 0:
-                    sample_sql = f"SELECT * FROM {db_info['table']} WHERE {where_clause} LIMIT 20"
+                    sample_sql = f"SELECT * FROM {table} WHERE {where_clause} LIMIT {sample_limit}"
                     cur.execute(sample_sql, params)
                     sample_results = [dict(row) for row in cur.fetchall()]
 
