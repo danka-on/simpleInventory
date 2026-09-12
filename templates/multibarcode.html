@@ -1085,10 +1085,10 @@
 
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
-    <script src="/static/scan-feedback.js?v=1"></script>
+    <script src="/static/scan-feedback.js?v=20260912a"></script>
     <script src="/static/warehouse-identity.js?v=1"></script>
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
-    <script src="/static/no-barcode-label.js?v=20260716b"></script>
+    <script src="/static/no-barcode-label.js?v=20260912a"></script>
     <script src="/static/ios-scanner-keyboard.js?v=20260907a"></script>
     
     <script>
@@ -1860,9 +1860,11 @@
             }
         }
 
+        // Resolves to { ready, title }: `title` is the name this barcode ends up
+        // with, so a caller such as the no-barcode label flow can print it.
         async function ensureScannedBarcodeReadyForAdd(code) {
             const key = normalizeManualTitleKey(code);
-            if (!key) return true;
+            if (!key) return { ready: true, title: '' };
 
             const overrides = loadManualTitleOverrides();
 
@@ -1887,7 +1889,7 @@
 
             if (!screenFailed && !item.needs_manual_title) {
                 if (item.missing_image) await runScanFeedback('needsInfo', false, key);
-                return true;
+                return { ready: true, title: String(item.title || '').trim() };
             }
 
             const modalResult = await openMissingTitleModal(code, {
@@ -1901,12 +1903,12 @@
                 // The naming modal is missing from the page. Blocking every scan
                 // would strand receiving, so allow the add and make the gap loud.
                 console.error('Missing-title modal unavailable; added without a name check:', key);
-                return true;
+                return { ready: true, title: String((item && item.title) || overrides[key] || '').trim() };
             }
-            if (!modalResult || modalResult.action !== 'save') return false;
+            if (!modalResult || modalResult.action !== 'save') return { ready: false, title: '' };
 
             const value = String((modalResult && modalResult.title) || '').replace(/\s+/g, ' ').trim();
-            if (!value) return false;
+            if (!value) return { ready: false, title: '' };
             const warehouseNote = cleanMissingTitleWarehouseNote(modalResult.note || '');
             if (warehouseNote) {
                 pendingMissingTitleNotes[key] = warehouseNote;
@@ -1925,7 +1927,7 @@
 
             overrides[key] = value.slice(0, 200);
             saveManualTitleOverrides(overrides);
-            return true;
+            return { ready: true, title: value };
         }
 
         function formatBarcodeEntry(item) {
@@ -1959,14 +1961,14 @@
                     barcodeInput.value = '';
                     barcodeInput.focus();
                 }, 1000);
-                return;
+                return false;
             }
 
-            const ready = await ensureScannedBarcodeReadyForAdd(code);
-            if (!ready) {
+            const screening = await ensureScannedBarcodeReadyForAdd(code);
+            if (!screening.ready) {
                 barcodeInput.value = '';
                 barcodeInput.focus();
-                return;
+                return false;
             }
             
             const s = splitScannedBarcode(code);
@@ -2020,6 +2022,7 @@
             
             // Update display and reset timer
             updateList();
+            return screening.title;
         }
         
         // Remove one quantity of barcode from list
@@ -2097,9 +2100,7 @@
                         .map(item => barcodeItemActualCode(item))
                         .filter(Boolean);
                 },
-                onUseBarcode: (barcode) => {
-                    queueBarcodeScan(barcode);
-                }
+                onUseBarcode: (barcode) => queueBarcodeScan(barcode)
             });
         }
 

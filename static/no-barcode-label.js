@@ -24,6 +24,12 @@
         return String(modal.barcodeInput && modal.barcodeInput.value || '').trim();
     }
 
+    function getDescription(modal) {
+        return String(modal.descriptionInput && modal.descriptionInput.value || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
     function focusBarcodeInput(modal, selectAll) {
         if (!modal || !modal.barcodeInput) return;
 
@@ -166,7 +172,11 @@
         var barcode = options.barcode || validateBarcode(modal);
         if (!barcode) return;
 
-        var description = String(modal.descriptionInput && modal.descriptionInput.value || '').trim() || 'No barcode item';
+        // A blank title prints the barcode on its own. The item is named through
+        // the same prompt a scanned item gets, never with a placeholder.
+        var description = typeof options.description === 'string'
+            ? options.description
+            : getDescription(modal);
         var busyButton = options.busyButton || modal.printBtn;
         buttonBusy(busyButton, true, options.busyText || 'Printing...');
         setStatus(modal, 'Sending label to printer...', '');
@@ -279,8 +289,7 @@
         }
     }
 
-    async function persistCustomIdentity(modal, barcode) {
-        var description = String(modal.descriptionInput && modal.descriptionInput.value || '').trim() || 'No barcode item';
+    async function persistCustomIdentity(barcode, description) {
         var response = await fetch('/api/custom-item/identity', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -443,25 +452,60 @@
                 modal.useBtn.addEventListener('click', async function () {
                     var barcode = validateBarcode(modal);
                     if (!barcode) return;
-                    try {
-                        await persistCustomIdentity(modal, barcode);
-                    } catch (error) {
-                        setStatus(modal, (error && error.message) || 'Could not save custom item.', 'bad');
-                        focusBarcodeInput(modal, true);
-                        return;
+                    var typedTitle = getDescription(modal);
+
+                    if (typedTitle) {
+                        try {
+                            await persistCustomIdentity(barcode, typedTitle);
+                        } catch (error) {
+                            setStatus(modal, (error && error.message) || 'Could not save custom item.', 'bad');
+                            focusBarcodeInput(modal, true);
+                            return;
+                        }
                     }
+
+                    // Hand the barcode to the page before printing. An item with no
+                    // title then runs through the same screening and naming prompt a
+                    // scanned item gets, and the label carries the name it produced.
+                    modal.generatedBarcodes.add(barcode);
+                    var resolvedTitle = typedTitle;
+                    if (typeof options.onUseBarcode === 'function') {
+                        buttonBusy(modal.useBtn, true, 'Adding...');
+                        setStatus(modal, 'Adding item...', '');
+                        var handoff;
+                        try {
+                            handoff = await options.onUseBarcode(barcode);
+                        } catch (error) {
+                            modal.generatedBarcodes.delete(barcode);
+                            buttonBusy(modal.useBtn, false);
+                            setStatus(modal, (error && error.message) || 'Could not add item.', 'bad');
+                            focusBarcodeInput(modal, true);
+                            return;
+                        }
+                        buttonBusy(modal.useBtn, false);
+                        if (handoff === false) {
+                            // Naming was cancelled, so nothing was added.
+                            modal.generatedBarcodes.delete(barcode);
+                            setStatus(modal, 'Item was not added.', 'bad');
+                            focusBarcodeInput(modal, true);
+                            return;
+                        }
+                        if (typeof handoff === 'string' && handoff.trim()) {
+                            resolvedTitle = handoff.trim();
+                        }
+                    }
+
                     var printed = await printBarcode(modal, {
                         barcode: barcode,
+                        description: resolvedTitle,
                         busyButton: modal.useBtn,
                         busyText: 'Printing...'
                     });
                     if (!printed) {
-                        focusBarcodeInput(modal, true);
+                        // The item is already on the list; reprint from its row
+                        // instead of adding it a second time.
+                        setStatus(modal, 'Item added, but the label did not print. Reprint it from the item row.', 'bad');
                         return;
-                    }
-                    modal.generatedBarcodes.add(barcode);
-                    if (typeof options.onUseBarcode === 'function') {
-                        options.onUseBarcode(barcode);
                     }
                     closeModal(modal, null, options);
                 });

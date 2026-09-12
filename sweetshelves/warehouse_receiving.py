@@ -343,7 +343,13 @@ def save_custom_item_identity():
         data = request.get_json(silent=True) or {}
         upc = ss_normalization._normalize_upc(data.get('upc'))
         title = ' '.join(str(data.get('item_description') or data.get('title') or '').split())
-        if len(title) > 200 or title.lower() in ('unknown', 'warehouse item', 'item', 'n/a') or title.replace('-', '').isdigit():
+        # 'No barcode item' was the old client-side placeholder. Storing it set
+        # title_override, which then hid the real catalog name on the warehouse row.
+        placeholders = (
+            'unknown', 'warehouse item', 'item', 'n/a',
+            'no barcode item', 'no barcode', 'custom item'
+        )
+        if len(title) > 200 or title.lower() in placeholders or title.replace('-', '').isdigit():
             return jsonify({'success': False, 'error': 'Use a short descriptive name, not a barcode or placeholder (maximum 200 characters).'}), 400
         if not upc or not title:
             return jsonify({'success': False, 'error': 'Barcode and title are required'}), 400

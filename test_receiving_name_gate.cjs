@@ -46,9 +46,10 @@ const KNOWN='123456789012';
    const runGate=code=>page.evaluate(c=>{window.__gate=ensureScannedBarcodeReadyForAdd(c)},code);
    const gateResult=()=>page.evaluate(()=>window.__gate);
 
-   // A barcode the catalog already names never prompts.
+   // A barcode the catalog already names never prompts, and reports the name
+   // so the no-barcode label flow can print it.
    await runGate(KNOWN);
-   assert.equal(await gateResult(),true,template+' '+screenMode+': known item should pass');
+   assert.deepEqual(await gateResult(),{ready:true,title:'Known item'},template+' '+screenMode+': known item should pass');
    assert.equal(await page.locator('#missingTitleModal').isVisible(),false,template+' '+screenMode+': known item must not prompt');
 
    // Closing the prompt must refuse the add on BOTH screens.
@@ -59,7 +60,7 @@ const KNOWN='123456789012';
    assert.equal(warned,screenMode==='fails',template+' '+screenMode+': warning banner visibility');
    if(screenMode==='fails') assert.equal(screenCalls,2,template+': a failed screen call should be retried once');
    await page.locator('#missingTitleCloseBtn').click();
-   assert.equal(await gateResult(),false,template+' '+screenMode+': closing the prompt must not add the item');
+   assert.deepEqual(await gateResult(),{ready:false,title:''},template+' '+screenMode+': closing the prompt must not add the item');
 
    // The refusal must not be remembered: the next scan prompts again.
    assert.equal(await page.evaluate(()=>sessionStorage.getItem('additem_manual_title_skips')),null,template+' '+screenMode+': no skip should be persisted');
@@ -69,7 +70,7 @@ const KNOWN='123456789012';
    // Naming it saves durably and releases the item.
    await page.locator('#missingTitleInput').fill('Blue cotton shirt medium');
    await page.locator('#missingTitleSaveBtn').click();
-   assert.equal(await gateResult(),true,template+' '+screenMode+': a named item should pass');
+   assert.deepEqual(await gateResult(),{ready:true,title:'Blue cotton shirt medium'},template+' '+screenMode+': a named item should pass');
    assert.deepEqual(identitySaves.map(s=>s.title),['Blue cotton shirt medium'],template+' '+screenMode+': name must reach /api/custom-item/identity');
    assert.equal(identitySaves[0].upc,NEEDS_NAME,template+' '+screenMode+': name must be saved against the scanned barcode');
 

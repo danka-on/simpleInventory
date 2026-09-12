@@ -20,7 +20,10 @@ assert.equal(feedback.inspect('123456789012').length, 0);
 assert.equal(feedback.inspect('123456789012-3').length, 0);
 assert.equal(feedback.inspect('12345678').length, 0);
 assert.equal(feedback.inspect('1234567890123').length, 0);
-assert.match(feedback.inspect('012345678901')[0], /starts with zero/);
+// One leading zero is normal on a UPC-A label, so it must not interrupt a scan.
+assert.equal(feedback.inspect('012345678901').length, 0);
+assert.equal(feedback.inspect('01234567').length, 0);
+assert.match(feedback.inspect('01234')[0], /Check the length/);
 assert.match(feedback.inspect('000123456789')[0], /3 zeroes/);
 assert.equal(feedback.inspect('000000123456789012').length, 2);
 for (const length of [7, 9, 10, 11, 14, 16]) {

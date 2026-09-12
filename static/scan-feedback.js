@@ -11,9 +11,10 @@
         if (!match) return ['Barcode contains unexpected characters or an invalid suffix.'];
         const base = match[1];
         const warnings = [];
+        // A single leading zero is normal on a UPC-A label, so only a run of
+        // them is worth interrupting the scan for.
         const zeroes = (/^0+/.exec(base) || [''])[0].length;
         if (zeroes > 1) warnings.push(`Barcode starts with ${zeroes} zeroes. Check the label.`);
-        else if (zeroes === 1) warnings.push('Barcode starts with zero. Check the label.');
         if (![8, 12, 13].includes(base.length)) {
             warnings.push(`Barcode has ${base.length} digits. Check the length. This screen expects 8, 12, or 13 digits before a warehouse suffix.`);
         }
