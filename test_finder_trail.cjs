@@ -140,29 +140,36 @@ const TILE_KINDS = vm.runInContext('TILE_KINDS', context);
   context.renderTrail();
   assert.ok(content.innerHTML.includes('× 2') && !content.innerHTML.includes('not_on_shelf') && content.innerHTML.includes('warehouse-note-open-btn'));
 
-  // openTrail: stale responses ignored, empty exact UPC retries as a family automatically
-  const first = context.openTrail('111111111111');
-  const second = context.openTrail('222222222222');
+  // Family mode marks related units only when the trail really mixes them
+  trailState.data.family = true;
+  trailState.data.events = [sold];
+  context.renderTrail();
+  assert.ok(!content.innerHTML.includes('showing_related'), 'no marker when every record is the exact UPC');
+  assert.ok(!content.innerHTML.includes('<span class="pill">028199270349</span>'), 'no redundant per-unit UPC pills');
+  trailState.data.events = [moved, sold];
+  context.renderTrail();
+  assert.ok(content.innerHTML.includes('showing_related (1)'), 'one related unit is named in the header');
+  assert.ok(content.innerHTML.includes('<span class="pill">028199270349-2</span>'), 'the mixed-in unit is labelled on its event');
+  trailState.data.family = false;
+
+  // openTrail: family is passed through and stale responses are ignored
+  const first = context.openTrail('111111111111', {family: true});
+  const second = context.openTrail('222222222222', {family: true});
   assert.equal(pending.length, 2);
-  pending[1].resolve({ok: true, json: async () => ({upc: '222222222222', events: [], stock: [], identity: {}, ledger: {}, flags: []})});
-  await new Promise(resolve => setImmediate(resolve));
-  assert.equal(pending.length, 3, 'empty exact result triggers a family retry');
-  assert.ok(pending[2].url.includes('family=1'));
-  pending[2].resolve({ok: true, json: async () => ({upc: '222222222222', family: true, events: [sold], stock: [], identity: {title: 'Family item'}, ledger: {}, flags: []})});
+  assert.ok(pending[1].url.includes('family=1'));
+  pending[1].resolve({ok: true, json: async () => ({upc: '222222222222', family: true, events: [sold], stock: [], identity: {title: 'Family item'}, ledger: {}, flags: []})});
   await second;
   pending[0].resolve({ok: true, json: async () => ({upc: '111111111111', events: [], stock: [], identity: {title: 'Stale'}, ledger: {}, flags: []})});
   await first;
   assert.equal(trailState.upc, '222222222222');
   assert.equal(trailState.family, true);
-  assert.equal(trailState.notice, 'related_notice');
-  assert.equal(elements.get('recordsFamily').checked, true);
   assert.ok(content.innerHTML.includes('Family item') && !content.innerHTML.includes('Stale'));
   assert.equal(elements.get('recordsUpc').value, '222222222222');
   assert.equal(elements.get('recordsSection').hidden, false);
 
   // Errors are shown and never leak markup
   const failed = context.openTrail('333333333333');
-  pending[3].resolve({ok: false, json: async () => ({error: '<b>Unavailable</b>'})});
+  pending[2].resolve({ok: false, json: async () => ({error: '<b>Unavailable</b>'})});
   await failed;
   assert.ok(content.innerHTML.includes('&lt;b&gt;Unavailable&lt;/b&gt;'));
 
@@ -176,5 +183,5 @@ const TILE_KINDS = vm.runInContext('TILE_KINDS', context);
   assert.equal(groups[0].count, 2);
   assert.equal(groups[0].last.removal_type, 'inventoryremoved');
   assert.equal(groups[0].positions.join(','), 'a1,b2');
-  console.log('Finder trail rendering, filtering, family retry, stale requests, and ledger grouping passed');
+  console.log('Finder trail rendering, filtering, related-unit marking, stale requests, and ledger grouping passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });

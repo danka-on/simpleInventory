@@ -484,7 +484,6 @@ const translations = {
   returned: { en: 'Returned', lt: 'Grąžinta' },
   fba_units: { en: 'To FBA', lt: 'Į FBA' },
   on_shelf: { en: 'On shelf', lt: 'Lentynoje' },
-  related_notice: { en: 'Nothing under the exact UPC — showing related -suffix units.', lt: 'Nieko tiksliu UPC — rodomi susiję -priesagos vienetai.' },
   showing_related: { en: 'Includes related -suffix units', lt: 'Įtraukti susiję -priesagos vienetai' },
   exact_upc: { en: 'Exact UPC', lt: 'Tikslus UPC' },
   copy_upc: { en: 'Copy UPC', lt: 'Kopijuoti UPC' },

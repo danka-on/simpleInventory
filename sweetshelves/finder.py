@@ -60,8 +60,12 @@ def api_finder():
         return jsonify({'searchrack': [], 'rawbol': []})
 
     from finder_search import name_scorer, is_barcode_query
+    from finder_records import upc_key
     score_name = name_scorer(q, any_words=data.get('match_mode') == 'any')
     barcode_query = is_barcode_query(q)
+    # A scanned code can stand for every -suffix unit of the same product.
+    family = bool(data.get('family')) and barcode_query
+    family_base = upc_key(q).split('-', 1)[0] if family else ''
     from finder_aliases import load_aliases, barcode_key
     aliases = load_aliases(connect_db)
 
@@ -69,12 +73,18 @@ def api_finder():
         return max([score_name(title)] + [score_name(alias['title'])
                    for alias in aliases.get(barcode_key(barcode), [])])
 
+    def family_matches(value):
+        key = upc_key(value)
+        return bool(key) and key.split('-', 1)[0] == family_base
+
     searchrack_results = []
     rawbol_results = []
     rackhistory_results = []
     rackhistory_error = None
 
     def build_where(title_col, barcode_col):
+        if family:
+            return f'finder_family_matches({barcode_col})', []
         if barcode_query:
             variants = _finder_barcode_search_variants(q)
             variants += [v + '.0' for v in variants if v.isdigit()]
@@ -87,6 +97,7 @@ def api_finder():
         with connect_db('searchRack.db') as conn:
             conn.row_factory = sqlite3.Row
             conn.create_function('finder_name_score', 1, score_name, deterministic=True)
+            conn.create_function('finder_family_matches', 1, family_matches, deterministic=True)
             conn.create_function('finder_warehouse_score', 2, warehouse_score, deterministic=True)
             cur = conn.cursor()
             params = []
@@ -141,6 +152,7 @@ def api_finder():
             with connect_db('rackhistory.db') as conn:
                 conn.row_factory = sqlite3.Row
                 conn.create_function('finder_name_score', 1, score_name, deterministic=True)
+                conn.create_function('finder_family_matches', 1, family_matches, deterministic=True)
                 where, params = build_where('title', 'barcode')
                 rows = conn.execute(f'''
                     SELECT id, title, barcode, quantity_removed, removed_at,
@@ -162,6 +174,7 @@ def api_finder():
         with connect_db('rawbol.db') as conn:
             conn.row_factory = sqlite3.Row
             conn.create_function('finder_name_score', 1, score_name, deterministic=True)
+            conn.create_function('finder_family_matches', 1, family_matches, deterministic=True)
             cur = conn.cursor()
 
             where, params = build_where('item_description', 'upc')

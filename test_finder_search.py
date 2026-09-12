@@ -72,6 +72,24 @@ class FinderTests(unittest.TestCase):
                 self.assertEqual([r['upc'] for r in result['rawbol']], ['111111111111'])
             self.assertEqual([r['id'] for r in search(q='888888888888')['searchrack']], [2])
             self.assertEqual(search(q='8888888')['searchrack'], [])
+            # A scanned code can stand for the whole -suffix family, in every panel.
+            with connect_db('searchRack.db') as conn:
+                conn.execute('INSERT INTO SEARCHRACK VALUES (4, "Frame 8 x 5 unit 2", "111111111111-2", "B2", "", "", 1, "", "", "", 0)')
+            with connect_db('rawbol.db') as conn:
+                conn.execute('INSERT INTO raw_bol_items VALUES (3, "111111111111-2", "Frame 8 x 5", "", "LOT9", 1, "2026-08-09")')
+            self.assertEqual([r['id'] for r in search(q='111111111111')['searchrack']], [1])
+            self.assertEqual([r['id'] for r in search(q='111111111111', family=True)['searchrack']], [1, 4])
+            self.assertEqual([r['id'] for r in search(q='111111111111-2', family=True)['searchrack']], [1, 4])
+            self.assertEqual(sorted(r['upc'] for r in search(q='111111111111', family=True)['rawbol']),
+                             ['111111111111', '111111111111-2'])
+            self.assertEqual([r['id'] for r in search(q='111111111111', family=True, include_history=True)['rackhistory']], [1])
+            # Family mode never widens a name search into unrelated products.
+            self.assertEqual([r['id'] for r in search(q='frame 8', family=True)['searchrack']], [1, 4])
+            self.assertEqual(search(q='blue vase', family=True)['searchrack'][0]['id'], 2)
+            with connect_db('searchRack.db') as conn:
+                conn.execute('DELETE FROM SEARCHRACK WHERE ID = 4')
+            with connect_db('rawbol.db') as conn:
+                conn.execute('DELETE FROM raw_bol_items WHERE id = 3')
             result = search(q='', custom_only=True)
             self.assertEqual([r['id'] for r in result['searchrack']], [1])
             self.assertEqual(result['rawbol'], [])

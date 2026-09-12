@@ -312,7 +312,7 @@
       </span>
       <select id="matchMode" hidden><option value="all">All words</option><option value="any">Any words</option></select>
       <label><input type="checkbox" id="customItemsOnly"> <span data-i18n="custom_items_only">Custom items only</span></label>
-      <label><input type="checkbox" id="recordsFamily"> <span data-i18n="related_upcs">Include related UPCs (-suffix units)</span></label>
+      <label><input type="checkbox" id="recordsFamily" checked> <span data-i18n="related_upcs">Include related UPCs (-suffix units)</span></label>
       <label><input type="checkbox" id="includeHistory" checked> <span data-i18n="ledger_memory">Search the ledger too (removed items)</span></label>
     </div>
     <div class="hint" data-i18n="finder_hint">A complete barcode opens the trail straight away. Words search names; use Any words when names differ. Short numbers are sizes, not codes.</div>
@@ -505,7 +505,14 @@ searchInput.addEventListener('input', () => {
 searchClear.addEventListener('click', () => { searchInput.value = ''; searchClear.classList.remove('show'); searchInput.focus(); doSearch(); });
 customItemsOnly.addEventListener('change', () => doSearch());
 includeHistory.addEventListener('change', () => doSearch());
-familyToggle.addEventListener('change', () => { if (trailState.upc) openTrail(trailState.upc, {family: familyToggle.checked, forced: true}); if (recordsData) showAllUpcData(document.getElementById('recordsUpc').value); });
+function applyFamilyChange() {
+  const query = searchInput.value.trim();
+  doSearch();
+  // doSearch reopens the trail itself for a scanned code; only cover the other cases.
+  if (trailState.upc && !(isBarcodeQuery(query) && sameUpc(query, trailState.upc))) openTrail(trailState.upc, {family: familyToggle.checked});
+  if (recordsData) showAllUpcData(document.getElementById('recordsUpc').value);
+}
+familyToggle.addEventListener('change', applyFamilyChange);
 document.querySelectorAll('.seg [data-mode]').forEach(button => button.addEventListener('click', () => {
   document.querySelectorAll('.seg [data-mode]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
   matchModeSelect.value = button.dataset.mode;
@@ -548,7 +555,7 @@ async function doSearch(overrideQuery) {
   try {
     const resp = await fetch('/api/finder', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, signal: searchController.signal,
-      body: JSON.stringify({q, custom_only: customOnly, include_history: includeHistory.checked, match_mode: matchModeSelect.value})
+      body: JSON.stringify({q, custom_only: customOnly, include_history: includeHistory.checked, match_mode: matchModeSelect.value, family: familyToggle.checked})
     });
     if (!resp.ok) throw new Error('Search failed');
     const data = await resp.json();
@@ -719,7 +726,7 @@ const KIND_META = {
 const CATEGORY_LABELS = {inventory: 'Inventory', sales: 'Sales', prep: 'Prep', bol: 'BOL', fba: 'FBA', listings: 'Listings'};
 const TILE_KINDS = {received: ['received'], shelf_adds: ['added'], pulled: ['pulled'], sold_units: ['sold'], returned: ['returned'], fba_units: ['fba'], on_shelf: []};
 
-const trailState = {upc: '', family: false, data: null, category: 'all', kinds: null, focusIds: null, hideUndone: false, sequence: 0, controller: null, notice: ''};
+const trailState = {upc: '', family: false, data: null, category: 'all', kinds: null, focusIds: null, hideUndone: false, sequence: 0, controller: null};
 
 function kindMeta(kind) { return KIND_META[kind] || {label: String(kind || '').replace(/_/g, ' '), cat: 'other'}; }
 
@@ -826,9 +833,17 @@ function renderTrail() {
   const onShelf = stockRows.filter(row => row.quantity > 0);
   const counts = {};
   for (const event of events) counts[event.category] = (counts[event.category] || 0) + 1;
+  // Related-unit markers only earn their place when the trail really mixes units.
+  const relatedUpcs = [];
+  if (data.family) {
+    for (const value of [...stockRows.map(row => row.upc), ...events.map(event => event.upc)]) {
+      if (value && !sameUpc(value, data.upc) && !relatedUpcs.some(seen => sameUpc(seen, value))) relatedUpcs.push(value);
+    }
+  }
+  const hasRelated = relatedUpcs.length > 0;
 
   const stockHtml = onShelf.length
-    ? `<div class="stock-chips">${onShelf.map(row => `<span class="stock-chip">${locationChip(row.position || '—', row.pictureposition)}<span class="n">× ${esc(String(row.quantity))}</span>${row.upc && data.family ? `<span class="pill">${esc(formatUpcDisplay(row.upc))}</span>` : ''}${!row.position ? `<span class="warn">no location</span>` : ''}${row.warehouse_note ? `<button type="button" class="mini-btn note warehouse-note-open-btn" data-note="${attrEsc(row.warehouse_note)}" data-barcode="${attrEsc(row.upc)}">${esc(t('warehouse_note'))}</button>` : ''}${row.custom ? '<span class="chip custom">custom</span>' : ''}</span>`).join('')}</div>`
+    ? `<div class="stock-chips">${onShelf.map(row => `<span class="stock-chip">${locationChip(row.position || '—', row.pictureposition)}<span class="n">× ${esc(String(row.quantity))}</span>${row.upc && hasRelated ? `<span class="pill">${esc(formatUpcDisplay(row.upc))}</span>` : ''}${!row.position ? `<span class="warn">no location</span>` : ''}${row.warehouse_note ? `<button type="button" class="mini-btn note warehouse-note-open-btn" data-note="${attrEsc(row.warehouse_note)}" data-barcode="${attrEsc(row.upc)}">${esc(t('warehouse_note'))}</button>` : ''}${row.custom ? '<span class="chip custom">custom</span>' : ''}</span>`).join('')}</div>`
     : `<div class="not-on-shelf"><span class="pill">${esc(t('not_on_shelf'))}</span>${data.last_exit ? `<span class="last-exit">${esc(t('last_left'))} <b>${esc(data.last_exit.position || '?')}</b> · ${esc(whenLabel(data.last_exit.ts))} — ${esc(data.last_exit.title)} <button type="button" class="jump" data-jump="${attrEsc(data.last_exit.id)}">↓</button></span>` : (data.last_seen ? `<span class="last-exit">${esc(t('last_seen_at'))} <b>${esc(data.last_seen.position)}</b> · ${esc(whenLabel(data.last_seen.ts))} <button type="button" class="jump" data-jump="${attrEsc(data.last_seen.id)}">↓</button></span>` : '')}</div>`;
   const pendingRows = stockRows.filter(row => row.pending_deletion);
   const pendingHtml = pendingRows.length ? `<div class="hint">${pendingRows.length} zero-quantity row(s) scheduled for deletion${pendingRows[0].pending_deletion ? ' on ' + esc(pendingRows[0].pending_deletion.slice(0, 10)) : ''}.</div>` : '';
@@ -850,7 +865,7 @@ function renderTrail() {
   for (const event of visible) {
     const day = (event.sort || '').slice(0, 10) || 'unknown';
     if (day !== currentDay) { currentDay = day; timelineHtml += `<div class="day">${esc(dayLabel(event.sort || event.ts))}</div>`; }
-    timelineHtml += eventHtml(event, data.family);
+    timelineHtml += eventHtml(event, hasRelated);
   }
   if (!visible.length) timelineHtml = `<div class="empty">${esc(events.length ? 'No events match this filter.' : t('no_events'))}</div>`;
 
@@ -869,11 +884,10 @@ function renderTrail() {
           <code>${esc(data.upc_display || formatUpcDisplay(data.upc))}</code>
           <button type="button" class="text-btn" data-copy="${attrEsc(data.upc)}">${esc(t('copy_upc'))}</button>
           ${identity.custom ? '<span class="chip custom">custom item</span>' : ''}
-          ${data.family ? `<span class="chip family">${esc(t('showing_related'))}</span>` : ''}
+          ${hasRelated ? `<span class="chip family">${esc(t('showing_related'))} (${relatedUpcs.length})</span>` : ''}
           ${(identity.lots || []).map(lot => `<span class="chip">LOT ${esc(lot)}</span>`).join('')}
         </div>
         ${(identity.aliases || []).length ? `<div class="upc-row" style="margin-top:4px">${esc(t('previously_matched_as'))}: ${identity.aliases.map(alias => `<span class="chip">${esc(alias)}</span>`).join('')}</div>` : ''}
-        ${trailState.notice ? `<div class="hint" style="color:var(--warn)">${esc(trailState.notice)}</div>` : ''}
         <div class="links">
           <a class="text-btn" href="/searchrack?db=searchRack&q=${encodeURIComponent(data.upc)}" target="_blank" rel="noopener">${esc(t('open_in_warehouse'))} ↗</a>
           <button type="button" class="text-btn" data-search-upc="${attrEsc(data.upc)}">${esc(t('search_warehouse'))}</button>
@@ -928,7 +942,7 @@ document.getElementById('trailContent').addEventListener('click', event => {
   if (copy) { navigator.clipboard?.writeText(copy.dataset.copy).then(() => { copy.textContent = t('copied'); setTimeout(() => { copy.textContent = t('copy_upc'); }, 1500); }).catch(() => {}); return; }
   const search = target.closest('[data-search-upc]');
   if (search) { searchWarehouse(search.dataset.searchUpc); return; }
-  if (target.closest('[data-family-toggle]')) { familyToggle.checked = !trailState.family; openTrail(trailState.upc, {family: familyToggle.checked, forced: true}); return; }
+  if (target.closest('[data-family-toggle]')) { familyToggle.checked = !trailState.family; applyFamilyChange(); return; }
   if (target.id === 'hideUndone') { trailState.hideUndone = target.checked; renderTrail(); }
 });
 
@@ -940,7 +954,7 @@ async function openTrail(upc, options = {}) {
   if (trailState.controller) trailState.controller.abort();
   trailState.controller = new AbortController();
   const changed = !sameUpc(trailState.upc, upc);
-  trailState.upc = upc; trailState.family = family; trailState.notice = '';
+  trailState.upc = upc; trailState.family = family;
   if (changed) { trailState.category = 'all'; trailState.kinds = null; trailState.focusIds = null; }
   document.getElementById('recordsSection').hidden = true;
   document.getElementById('trailEmpty').hidden = true;
@@ -953,17 +967,6 @@ async function openTrail(upc, options = {}) {
     const data = await response.json();
     if (sequence !== trailState.sequence) return;
     if (!response.ok) throw new Error(data.error || t('trail_failed'));
-    if (!family && !options.forced && !(data.events || []).length && !(data.stock || []).length && /^\d+$/.test(upc)) {
-      const related = await fetch('/api/finder/trail?' + new URLSearchParams({upc, family: '1'}), {signal: trailState.controller.signal});
-      const relatedData = await related.json();
-      if (sequence !== trailState.sequence) return;
-      if (related.ok && ((relatedData.events || []).length || (relatedData.stock || []).length)) {
-        trailState.family = true; trailState.notice = t('related_notice'); familyToggle.checked = true;
-        trailState.data = relatedData; renderTrail();
-        prepareRecords(upc);
-        return;
-      }
-    }
     trailState.data = data;
     renderTrail();
     prepareRecords(upc);
@@ -1410,7 +1413,7 @@ async function doRemove(searchrackId) {
       if (wItem) wItem.quantity = data.new_qty;
       showBanner(esc(t('removed_1_from_inventory')) + (orderId ? ' — ' + esc(t('order_marked_processed')) : '') + '. ' + esc(t('new_qty')) + ': ' + esc(String(data.new_qty))
         + '<button class="undo-btn" onclick="undoRemove()">' + esc(t('undo')) + '</button>', 'var(--danger)');
-      if (wItem && trailState.upc && sameUpc(trailState.upc, wItem.barcode)) openTrail(trailState.upc, {family: trailState.family, forced: true});
+      if (wItem && trailState.upc && sameUpc(trailState.upc, wItem.barcode)) openTrail(trailState.upc, {family: trailState.family});
     } else alert(t('remove_failed') + ': ' + (data.error || 'Unknown'));
   } catch (e) { alert(t('error_removing')); }
 }
@@ -1438,7 +1441,7 @@ async function undoRemove() {
       showBanner(esc(t('removal_undone')) + ' ' + esc(String(data.restored_qty)), 'var(--ok)');
       _lastRemoval = null;
       setTimeout(() => { document.getElementById('successBanner').style.display = 'none'; }, 3000);
-      if (wItem && trailState.upc && sameUpc(trailState.upc, wItem.barcode)) openTrail(trailState.upc, {family: trailState.family, forced: true});
+      if (wItem && trailState.upc && sameUpc(trailState.upc, wItem.barcode)) openTrail(trailState.upc, {family: trailState.family});
     } else alert(t('undo_failed') + ': ' + (data.error || 'Unknown'));
   } catch (e) { alert(t('error_undoing')); }
 }
