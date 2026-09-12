@@ -1,9 +1,10 @@
 """Warehouse receiving for Sweet Shelves."""
 
+import datetime
 import json
 import os
+import re
 import sqlite3
-from contextlib import closing
 from DBmanager import addToSearchRack
 from flask import jsonify, make_response, redirect, render_template, request, session, url_for
 from . import (
@@ -460,6 +461,90 @@ def _next_warehouse_note_suffix(cur, base_barcode, reserved_suffixes):
     return suffix
 
 
+_POSITION_FALLBACK_PATTERN = re.compile(r'^(gr[1-5]|or[1-3])s[2-6]$', re.IGNORECASE)
+_SUBMISSION_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{8,64}$')
+_RECEIVING_SUBMISSION_RETENTION_DAYS = 7
+_MAX_UNITS_PER_RECEIPT = 2000
+
+
+def _known_shelf_codes():
+    """Lower-cased codes from the shelves table, or None when there is no table to check against."""
+    conn = None
+    try:
+        conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'))
+        rows = conn.execute('SELECT shelf_name FROM shelves').fetchall()
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+    return {str(row[0] or '').strip().lower() for row in rows if row and row[0]}
+
+
+def _position_is_valid(position, known_shelves):
+    """Mirror the /position page: a configured shelf code, or the legacy garage/office pattern."""
+    code = str(position or '').strip()
+    if not code or len(code) > 64 or any(ch in code for ch in ',\n\r\t'):
+        return False
+    if known_shelves is None:
+        return True
+    if code.lower() in known_shelves:
+        return True
+    return bool(_POSITION_FALLBACK_PATTERN.match(code))
+
+
+def _load_add_item_entries(raw_value):
+    """Per-unit list from the browser ([{code, suffix, quantity, note}]) as [(barcode, note)], or None."""
+    if not raw_value:
+        return None
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return None
+    if not isinstance(parsed, list):
+        return None
+    units = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        code = str(item.get('code') or '').strip()
+        if not code or len(code) > 64 or ',' in code:
+            continue
+        try:
+            suffix = int(item.get('suffix') or 0)
+        except Exception:
+            suffix = 0
+        if suffix > 0 and '-' not in code:
+            code = f'{code}-{suffix}'
+        try:
+            quantity = int(item.get('quantity') or 1)
+        except Exception:
+            quantity = 1
+        quantity = max(1, min(quantity, 500))
+        note = _clean_warehouse_note(item.get('note') or item.get('warehouse_note'))
+        units.extend([(code, note)] * quantity)
+    return units
+
+
+def _ensure_receiving_submissions_table(conn):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS receiving_submissions (
+            submission_id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            response_json TEXT NOT NULL
+        )
+    ''')
+
+
+def _wants_json_response():
+    requested_with = str(request.headers.get('X-Requested-With') or '').strip().lower()
+    return (
+        request.headers.get('Accept') == '*/*'
+        or request.is_json
+        or requested_with in ('fetch', 'xmlhttprequest')
+    )
+
+
 def additemtrue():
     # Get values from form data (preferred) or fall back to session variables
     form_barcode = request.form.get('barcode', '').strip()
@@ -467,6 +552,10 @@ def additemtrue():
     form_pictureposition = request.form.get('pictureposition', '').strip()
     raw_title_overrides = request.form.get('title_overrides', '').strip()
     warehouse_notes = _load_add_item_warehouse_notes(request.form.get('warehouse_notes', '').strip())
+    entry_units = _load_add_item_entries(request.form.get('entries', '').strip())
+    submission_id = request.form.get('submission_id', '').strip()
+    if not _SUBMISSION_ID_PATTERN.match(submission_id):
+        submission_id = ''
 
     # Use form data if available, otherwise use session variables
     final_barcode = form_barcode or session.get('inv_barcode')
@@ -487,19 +576,35 @@ def additemtrue():
                     title_overrides[str(key)] = value[:200]
         except Exception:
             title_overrides = {}
-    
+
+    # Per-unit entries carry their own note, so a note on one unit never spreads
+    # to the other units of the same code.  The flat barcode list is the
+    # fallback for older pages.
+    if entry_units:
+        units = entry_units
+    else:
+        barcodes = [b.strip() for b in str(final_barcode or '').split(',') if b.strip()]
+        units = []
+        for barcode_item in barcodes:
+            normalized = ss_normalization._normalize_scanned_upc(barcode_item)
+            base = normalized.split('-', 1)[0] if normalized else ''
+            units.append((barcode_item, warehouse_notes.get(normalized) or warehouse_notes.get(base) or ''))
+
     # Validate that we have required data
-    if not final_barcode:
+    if not units:
         print("ERROR: No barcode provided!")
         return "Error: Barcode is required", 400
-    
+    if len(units) > _MAX_UNITS_PER_RECEIPT:
+        return f"Error: Too many items in one receipt (max {_MAX_UNITS_PER_RECEIPT})", 400
+
     if not final_position and not final_pictureposition:
         print("ERROR: No position provided!")
         return "Error: Position is required", 400
-    
-    # Handle multiple barcodes (comma-separated)
-    barcodes = [b.strip() for b in final_barcode.split(',') if b.strip()]
-    
+
+    if not final_pictureposition and not _position_is_valid(final_position, _known_shelf_codes()):
+        print(f"ERROR: Unknown shelf position {final_position!r}")
+        return f"Error: Unknown shelf position: {final_position}", 400
+
     try:
         # If a picture position was used, compress and convert to B&W
         if final_pictureposition:
@@ -514,9 +619,24 @@ def additemtrue():
         print("Flow Complete, adding to SearchRack....")
         # If picture position is set, store 'picture' in ITEM_POSITION
         item_position_to_store = 'picture' if final_pictureposition else final_position
-        
+
+        # Catalog lookups do not depend on the write lock, so resolve them
+        # before the transaction: a fresh warehouse suffix is never recycled
+        # and therefore never has catalog data of its own.
+        metadata_by_code = {}
+
+        def _metadata_for(code):
+            key = ss_normalization._normalize_scanned_upc(code)
+            if key not in metadata_by_code:
+                metadata_by_code[key] = _add_item_screening_lookup(code)
+            return metadata_by_code[key]
+
+        for barcode_item, _note in units:
+            _metadata_for(barcode_item)
+
         labels_to_print = []
         reserved_note_suffixes = {}
+        duplicate_submission = False
         # Preserve FIFO receiving dates when a removal is immediately followed
         # by an add, but never wait through the normal 30-second SQLite timeout.
         # If another worker owns the database, the post-save pass (or the next
@@ -533,62 +653,99 @@ def additemtrue():
             except Exception:
                 pass
 
-        with closing(sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'))) as rack_conn_for_suffix:
-            rack_cur_for_suffix = rack_conn_for_suffix.cursor()
-            for barcode_item in barcodes:
-                normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_item)
-                base_barcode = normalized_barcode.split('-', 1)[0] if normalized_barcode else ''
-                warehouse_note = (
-                    warehouse_notes.get(normalized_barcode)
-                    or warehouse_notes.get(base_barcode)
-                    or ''
-                )
-                barcode_to_add = barcode_item
-                if warehouse_note and normalized_barcode and '-' not in normalized_barcode:
-                    suffix_base_key = ss_normalization._strip_leading_zeros_numeric(base_barcode or normalized_barcode)
-                    reserved = reserved_note_suffixes.setdefault(suffix_base_key, set())
-                    next_suffix = _next_warehouse_note_suffix(rack_cur_for_suffix, base_barcode or normalized_barcode, reserved)
-                    reserved.add(next_suffix)
-                    barcode_to_add = f"{normalized_barcode}-{next_suffix}"
-                    normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_to_add)
-                    labels_to_print.append({
-                        'barcode': barcode_to_add,
-                        'description': title_overrides.get(base_barcode) or title_overrides.get(normalized_barcode) or 'Warehouse item',
-                        'warehouse_note': warehouse_note
-                    })
-                title_override = (
-                    title_overrides.get(normalized_barcode)
-                    or title_overrides.get(base_barcode)
-                    or None
-                )
-                metadata = _add_item_screening_lookup(barcode_to_add)
-                added = addToSearchRack(
-                    item_position_to_store, barcode_to_add, None,
-                    final_pictureposition, title_override, warehouse_note, metadata,
-                )
-                if added is False:
-                    raise RuntimeError(f'Inventory database was busy while adding {barcode_to_add}')
-                print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_to_add}, pictureposition={final_pictureposition}")
-
-
-        # Inventory is already durable at this point. Age-ledger maintenance is
-        # secondary and must not turn a successful batch into a 500 response;
-        # that made the browser retry the entire list and could duplicate stock.
+        # One transaction for the whole receipt: either every unit lands or
+        # none does, so a browser retry can never duplicate stock.  The
+        # submission id makes a retry after a lost response a no-op.
+        rack_conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
         try:
-            with ss_database.db_connection('searchRack.db') as age_conn:
-                age_conn.execute('PRAGMA busy_timeout = 2000')
-                ss_inventory_age._reconcile_inventory_age_batches(age_conn)
-        except Exception as age_err:
-            print(f"Warning: deferred inventory age reconciliation after add: {age_err}")
-        finally:
+            rack_conn.execute('BEGIN IMMEDIATE')
+            _ensure_receiving_submissions_table(rack_conn)
+            replay = None
+            if submission_id:
+                row = rack_conn.execute(
+                    'SELECT response_json FROM receiving_submissions WHERE submission_id = ?',
+                    (submission_id,),
+                ).fetchone()
+                if row:
+                    try:
+                        replay = json.loads(row[0]) or {}
+                    except Exception:
+                        replay = {}
+            if replay is not None:
+                rack_conn.rollback()
+                duplicate_submission = True
+                labels_to_print = list(replay.get('labels_to_print') or [])
+                print(f"Receipt {submission_id} was already saved; not adding again")
+            else:
+                rack_cur = rack_conn.cursor()
+                for barcode_item, warehouse_note in units:
+                    normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_item)
+                    base_barcode = normalized_barcode.split('-', 1)[0] if normalized_barcode else ''
+                    barcode_to_add = barcode_item
+                    metadata = _metadata_for(barcode_item)
+                    if warehouse_note and normalized_barcode and '-' not in normalized_barcode:
+                        suffix_base_key = ss_normalization._strip_leading_zeros_numeric(base_barcode or normalized_barcode)
+                        reserved = reserved_note_suffixes.setdefault(suffix_base_key, set())
+                        next_suffix = _next_warehouse_note_suffix(rack_cur, base_barcode or normalized_barcode, reserved)
+                        reserved.add(next_suffix)
+                        barcode_to_add = f"{normalized_barcode}-{next_suffix}"
+                        normalized_barcode = ss_normalization._normalize_scanned_upc(barcode_to_add)
+                        labels_to_print.append({
+                            'barcode': barcode_to_add,
+                            'description': title_overrides.get(base_barcode) or title_overrides.get(normalized_barcode) or 'Warehouse item',
+                            'warehouse_note': warehouse_note
+                        })
+                    title_override = (
+                        title_overrides.get(normalized_barcode)
+                        or title_overrides.get(base_barcode)
+                        or None
+                    )
+                    added = addToSearchRack(
+                        item_position_to_store, barcode_to_add, None,
+                        final_pictureposition, title_override, warehouse_note, metadata,
+                        CONN=rack_conn,
+                    )
+                    if added is not True:
+                        raise RuntimeError(f'Inventory database was busy while adding {barcode_to_add}')
+                    print(f"Added to searchRack: position={item_position_to_store}, barcode={barcode_to_add}, pictureposition={final_pictureposition}")
+
+                if submission_id:
+                    now = datetime.datetime.now()
+                    cutoff = (now - datetime.timedelta(days=_RECEIVING_SUBMISSION_RETENTION_DAYS)).isoformat()
+                    rack_conn.execute('DELETE FROM receiving_submissions WHERE created_at < ?', (cutoff,))
+                    rack_conn.execute(
+                        'INSERT INTO receiving_submissions (submission_id, created_at, response_json) VALUES (?, ?, ?)',
+                        (submission_id, now.isoformat(), json.dumps({'labels_to_print': labels_to_print})),
+                    )
+                rack_conn.commit()
+        except Exception:
             try:
-                age_conn.execute('PRAGMA busy_timeout = 30000')
+                rack_conn.rollback()
             except Exception:
                 pass
+            raise
+        finally:
+            rack_conn.close()
 
-        # SearchRack writes should be visible immediately in /searchrack.
-        ss_caching._invalidate_searchrack_cache()
-        
+        if not duplicate_submission:
+            # Inventory is already durable at this point. Age-ledger maintenance is
+            # secondary and must not turn a successful batch into a 500 response;
+            # that made the browser retry the entire list and could duplicate stock.
+            try:
+                with ss_database.db_connection('searchRack.db') as age_conn:
+                    age_conn.execute('PRAGMA busy_timeout = 2000')
+                    ss_inventory_age._reconcile_inventory_age_batches(age_conn)
+            except Exception as age_err:
+                print(f"Warning: deferred inventory age reconciliation after add: {age_err}")
+            finally:
+                try:
+                    age_conn.execute('PRAGMA busy_timeout = 30000')
+                except Exception:
+                    pass
+
+            # SearchRack writes should be visible immediately in /searchrack.
+            ss_caching._invalidate_searchrack_cache()
+
         # Clear session variables (but keep position if locked)
         if not same_position:
             session.pop('inv_position_code', None)
@@ -601,15 +758,21 @@ def additemtrue():
         ss_errors._safe_error(e)
         return "An internal error occurred", 500
     # Check if this is a fetch request (multi-scan mode) or form submission
-    if request.headers.get('Accept') == '*/*' or request.is_json or 'fetch' in request.headers.get('Sec-Fetch-Mode', ''):
+    if _wants_json_response():
         # Fetch request - return JSON success
-        return jsonify({'success': True, 'message': 'Item added successfully', 'labels_to_print': labels_to_print})
-    
+        return jsonify({
+            'success': True,
+            'message': 'Item already added' if duplicate_submission else 'Item added successfully',
+            'labels_to_print': labels_to_print,
+            'duplicate': duplicate_submission,
+        })
+
     # Traditional form submission - return HTML
     # Add script to clear sessionStorage after successful add
     clear_script = '''<script>
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('barcode_warehouse_notes');
         sessionStorage.removeItem('additem_manual_titles');
         sessionStorage.removeItem('additem_manual_title_skips');'''
     # Only clear position if not locked
@@ -626,6 +789,7 @@ def additemtrue():
         // Clear all session storage including lock state
         sessionStorage.removeItem('barcode');
         sessionStorage.removeItem('barcode_entries');
+        sessionStorage.removeItem('barcode_warehouse_notes');
         sessionStorage.removeItem('additem_manual_titles');
         sessionStorage.removeItem('additem_manual_title_skips');
         sessionStorage.removeItem('item_position');

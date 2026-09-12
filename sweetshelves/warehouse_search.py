@@ -385,12 +385,15 @@ def api_search_db(db_key):
 
                 aux_parts = []
                 aux_params = []
+                # "0719978859014-3" must find the stored "719978859014-3": strip
+                # leading zeros from the base while keeping the unit suffix.
+                barcode_needle = ss_normalization._normalize_upc_preserve_suffix_for_match(q) or q_stripped
                 for col in [barcode_col, item_id_col]:
                     if not col:
                         continue
                     col_sql = '"' + str(col).replace('"', '""') + '"'
                     aux_parts.append(f"LOWER(COALESCE({col_sql},'')) LIKE ?")
-                    aux_params.append(f"%{q_stripped.lower()}%")
+                    aux_params.append(f"%{barcode_needle.lower()}%")
 
                 location_parts = []
                 location_params = []

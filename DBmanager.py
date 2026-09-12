@@ -484,15 +484,48 @@ def createEbayStoreDB():
         except sqlite3.Error as e:
             print("something went wrong with table ", e)
 
-def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None, TITLE_OVERRIDE=None, WAREHOUSE_NOTE=None, RESOLVED_METADATA=None):
-    """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db"""
+def _searchrack_identity_variants(value):
+    """Spellings of one physical barcode that differ only in leading-zero padding; a -suffix is kept."""
+    raw = str(value or '').strip()
+    if not raw:
+        return []
+    if '-' in raw:
+        base, suffix = raw.split('-', 1)
+    else:
+        base, suffix = raw, ''
+    base = base.strip()
+    suffix = suffix.strip()
+    out = []
+
+    def add(candidate_base):
+        candidate = f'{candidate_base}-{suffix}' if suffix else candidate_base
+        if candidate and candidate not in out:
+            out.append(candidate)
+
+    add(base)
+    if base.isdigit():
+        stripped = base.lstrip('0') or '0'
+        add(stripped)
+        if len(stripped) <= 12:
+            add(stripped.zfill(12))
+            add(stripped.zfill(13))
+    return out
+
+
+def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITION=None, TITLE_OVERRIDE=None, WAREHOUSE_NOTE=None, RESOLVED_METADATA=None, CONN=None):
+    """Add item directly to searchRack.db with enrichment from ebayStore.db and bol.db.
+
+    Returns True when the row was written, False when it was not.  Pass CONN to
+    write inside a transaction the caller owns (a multi-barcode receipt commits
+    or rolls back as one unit); the caller then commits.
+    """
     # Validate barcode and position before doing any DB work
     if not BARCODE or not str(BARCODE).strip():
         print("Error: BARCODE is empty or None, skipping addToSearchRack")
-        return
+        return False
     if not ITEM_POSITION or not str(ITEM_POSITION).strip():
         print("Error: ITEM_POSITION is empty or None, skipping addToSearchRack")
-        return
+        return False
 
     # Get title and other enrichment data from other DBs
     title = None
@@ -606,8 +639,12 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
     has_picture = PICTUREPOSITION and str(PICTUREPOSITION).strip()
     has_suffix = '-' in barcode_norm
     warehouse_note = str(WAREHOUSE_NOTE or '').replace('\r\n', '\n').replace('\r', '\n').strip()[:2000]
+    # The same physical unit can arrive as 12-digit UPC-A, 13-digit EAN or a
+    # zero-stripped code; all of them must land on one stock row.
+    identity_variants = _searchrack_identity_variants(barcode_norm) or [barcode_norm]
+    identity_sql = ', '.join('?' for _ in identity_variants)
 
-    with connect_db('searchRack.db') as conn:
+    def _write_row(conn, owns_connection):
         cursor = conn.cursor()
         try:
             cursor.execute('''CREATE TABLE IF NOT EXISTS SEARCHRACK (
@@ -632,33 +669,38 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
                     cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN CUSTOM_TITLE INTEGER DEFAULT 0')
                 if 'WAREHOUSE_NOTE' not in cols:
                     cursor.execute('ALTER TABLE SEARCHRACK ADD COLUMN WAREHOUSE_NOTE TEXT DEFAULT ""')
-                conn.commit()
+                if owns_connection:
+                    conn.commit()
             except sqlite3.Error:
                 pass
 
-            # Acquire write lock before check-then-update to prevent lost increments
-            cursor.execute('BEGIN IMMEDIATE')
+            # Acquire write lock before check-then-update to prevent lost increments.
+            # A caller-owned transaction already holds it.
+            if not conn.in_transaction:
+                cursor.execute('BEGIN IMMEDIATE')
 
             existing_same_location = None
             if not has_picture:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT ID, QUANTITY FROM SEARCHRACK
-                    WHERE TRIM(BARCODE) = ? COLLATE NOCASE
+                    WHERE TRIM(BARCODE) COLLATE NOCASE IN ({identity_sql})
                     AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
                     AND (PICTUREPOSITION IS NULL OR TRIM(PICTUREPOSITION) = '')
                     AND TRIM(COALESCE(WAREHOUSE_NOTE, '')) = ?
                     AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                """, (barcode_norm, position_norm, warehouse_note))
+                    ORDER BY ID
+                """, (*identity_variants, position_norm, warehouse_note))
                 existing_same_location = cursor.fetchone()
             elif has_suffix:
-                cursor.execute("""
+                cursor.execute(f"""
                     SELECT ID, QUANTITY FROM SEARCHRACK
-                    WHERE TRIM(BARCODE) = ? COLLATE NOCASE
+                    WHERE TRIM(BARCODE) COLLATE NOCASE IN ({identity_sql})
                     AND TRIM(ITEM_POSITION) = ? COLLATE NOCASE
                     AND TRIM(COALESCE(PICTUREPOSITION, '')) = ? COLLATE NOCASE
                     AND TRIM(COALESCE(WAREHOUSE_NOTE, '')) = ?
                     AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                """, (barcode_norm, position_norm, str(PICTUREPOSITION).strip(), warehouse_note))
+                    ORDER BY ID
+                """, (*identity_variants, position_norm, str(PICTUREPOSITION).strip(), warehouse_note))
                 existing_same_location = cursor.fetchone()
 
             now_iso = datetime.datetime.now().isoformat()
@@ -701,6 +743,11 @@ def addToSearchRack(ITEM_POSITION=None, BARCODE=None, IMAGES=None, PICTUREPOSITI
         except sqlite3.Error as e:
             print("Error in addToSearchRack:", e)
             return False
+
+    if CONN is not None:
+        return _write_row(CONN, owns_connection=False)
+    with connect_db('searchRack.db') as conn:
+        return _write_row(conn, owns_connection=True)
 
 def ebayStoreDB(title, item_id, sku=None, price=None, quantity=None, image=None, List_State=None, Sold_Date=None, List_Date=None, URL=None, condition=None, description=None, condition_description=None):
     with connect_db('ebayStore.db') as conn:

@@ -138,6 +138,38 @@ def _normalize_upc_preserve_suffix_for_match(value):
     return _strip_leading_zeros_numeric(s)
 
 
+def _barcode_identity_variants(value):
+    """
+    Spellings of one physical warehouse barcode that differ only in leading-zero
+    padding. A -suffix names one specific unit, so it is always preserved and
+    the base UPC is never offered as a match for a suffixed code.
+    """
+    raw = str(value or '').strip()
+    if not raw:
+        return []
+    if '-' in raw:
+        base, suffix = raw.split('-', 1)
+    else:
+        base, suffix = raw, ''
+    base = base.strip()
+    suffix = suffix.strip()
+    out = []
+
+    def add(candidate_base):
+        candidate = f'{candidate_base}-{suffix}' if suffix else candidate_base
+        if candidate and candidate not in out:
+            out.append(candidate)
+
+    add(base)
+    if base.isdigit():
+        stripped = base.lstrip('0') or '0'
+        add(stripped)
+        if len(stripped) <= 12:
+            add(stripped.zfill(12))
+            add(stripped.zfill(13))
+    return out
+
+
 def _normalize_lot_number(value):
     return str(value or '').strip()
 

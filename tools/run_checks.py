@@ -14,11 +14,12 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = [
     'test_ebay_mapping', 'test_finder_aliases', 'test_finder_match_learning',
-    'test_finder_records', 'test_finder_search', 'test_listing_similar',
+    'test_finder_records', 'test_finder_search', 'test_finder_trail', 'test_listing_similar',
     'test_warehouse_identity', 'test_fba_inbound', 'test_fba_count_scan',
     'test_fba_pack_scan', 'test_fba_label_scanner', 'test_fba_item_label_route',
     'test_codebase_regressions', 'test_token_expiry', 'test_merge_regressions',
     'test_application_architecture', 'test_fba_attention', 'test_amazon_resolution',
+    'test_receiving_batch',
 ]
 
 

@@ -24,26 +24,30 @@ def api_lookup_location():
     item_id = data.get('item_id')
     conn = None
     try:
-        conn = sqlite3.connect('searchRack.db')
+        conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'))
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         row = None
-        if barcode:
-            cur.execute('''
-                SELECT * FROM SEARCHRACK
-                WHERE BARCODE = ? COLLATE NOCASE
-                  AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                LIMIT 1
-            ''', (barcode,))
-            row = cur.fetchone()
-        if not row and item_id:
-            cur.execute('''
-                SELECT * FROM SEARCHRACK
-                WHERE BARCODE = ? COLLATE NOCASE
-                  AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
-                LIMIT 1
-            ''', (item_id,))
-            row = cur.fetchone()
+        for candidate in (barcode, item_id):
+            if row or not candidate:
+                continue
+            # Match the stored spelling first, then leading-zero variants of the
+            # same unit (a -suffix is kept, so one unit never resolves to another).
+            variants = [str(candidate).strip()] + [
+                v for v in ss_normalization._barcode_identity_variants(candidate)
+                if v != str(candidate).strip()
+            ]
+            for variant in variants:
+                cur.execute('''
+                    SELECT * FROM SEARCHRACK
+                    WHERE TRIM(BARCODE) = ? COLLATE NOCASE
+                      AND COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0
+                    ORDER BY ID
+                    LIMIT 1
+                ''', (variant,))
+                row = cur.fetchone()
+                if row:
+                    break
         if not row:
             return jsonify({'found': False})
         r = dict(row)

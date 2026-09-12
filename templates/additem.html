@@ -354,6 +354,10 @@
         <input type="hidden" name="pictureposition" id="form_pictureposition" value="">
         <input type="hidden" name="title_overrides" id="form_title_overrides" value="">
         <input type="hidden" name="warehouse_notes" id="form_warehouse_notes" value="">
+        <!-- Per-unit list (code/suffix/quantity/note) so a note stays on the unit it was written for -->
+        <input type="hidden" name="entries" id="form_entries" value="">
+        <!-- One id per receipt: the server ignores a retry of a receipt it already saved -->
+        <input type="hidden" name="submission_id" id="form_submission_id" value="">
         <div style="display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 350px; margin: 0 auto; gap: 0;">
             <!-- Timer display -->
             <div id="autoSubmitTimer" style="font-size:1.5em; color:#1976d2; margin-bottom: 12px; display:none;"></div>
@@ -559,11 +563,36 @@
         return payload;
     }
 
+    // One id for the life of this page: a retry of the same receipt (lost
+    // response, native fallback submit) must not add the stock twice.
+    const addItemSubmissionId = (() => {
+        try {
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                return window.crypto.randomUUID();
+            }
+        } catch (_) {}
+        return 'r' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
+    })();
+
+    function getEntriesPayload() {
+        const entries = getBarcodeEntries();
+        if (!barcodeEntryState || !entries.length) return '';
+        const payload = entries.map(entry => ({
+            code: String(entry.code || '').trim(),
+            suffix: Math.max(0, parseInt(entry.suffix, 10) || 0),
+            quantity: Math.max(1, parseInt(entry.quantity, 10) || 1),
+            note: String(entry.note || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().slice(0, 2000)
+        })).filter(entry => entry.code);
+        return payload.length ? JSON.stringify(payload) : '';
+    }
+
     function syncAddItemFormFields() {
         const itemPosition = sessionStorage.getItem('item_position') || '';
         const picturePosition = sessionStorage.getItem('pictureposition_path') || '';
         const titleOverrides = pruneManualTitleOverrides(getBarcodeEntries());
         document.getElementById('form_barcode').value = getSerializedBarcode();
+        document.getElementById('form_entries').value = getEntriesPayload();
+        document.getElementById('form_submission_id').value = addItemSubmissionId;
         document.getElementById('form_position').value = itemPosition;
         document.getElementById('form_pictureposition').value = picturePosition;
         document.getElementById('form_title_overrides').value = Object.keys(titleOverrides).length
@@ -1094,8 +1123,16 @@
             const res = await fetch('/additemtrue', {
                 method: 'POST',
                 body: formData,
-                headers: { 'Accept': '*/*' }
+                headers: { 'Accept': '*/*', 'X-Requested-With': 'fetch' }
             });
+            if (res.status >= 400 && res.status < 500) {
+                // The server rejected this receipt (missing barcode, unknown
+                // shelf...). Re-posting the same form cannot fix that.
+                const message = await res.text().catch(() => '');
+                alert(message || `The server rejected this receipt (HTTP ${res.status}).`);
+                updateChecklist();
+                return;
+            }
             if (res.ok) {
                 const data = await res.json().catch(() => null);
                 if (data && data.success) {

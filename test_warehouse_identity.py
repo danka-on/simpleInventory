@@ -115,8 +115,9 @@ class WarehouseIdentityTests(unittest.TestCase):
         ns = dict(sqlite3=sqlite3, datetime=datetime, connect_db=self.connection,
                   _marketplace_upc_variants=self.ns['_marketplace_upc_lookup_variants'],
                   _log_rack_history=lambda *args: None)
-        node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'addToSearchRack')
-        exec(compile(ast.Module(body=[node], type_ignores=[]), 'DBmanager.py', 'exec'), ns)
+        nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef)
+                 and n.name in ('addToSearchRack', '_searchrack_identity_variants')]
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), 'DBmanager.py', 'exec'), ns)
         add = ns['addToSearchRack']
         add('A1', '123', TITLE_OVERRIDE='Old custom', RESOLVED_METADATA={'title': 'Old custom', 'title_source': 'custom_registry'})
         add('A1', '123', TITLE_OVERRIDE='Stale browser title', RESOLVED_METADATA={'title': 'Macy shirt', 'title_source': 'rawbol', 'image_url': '/macy.jpg'})
