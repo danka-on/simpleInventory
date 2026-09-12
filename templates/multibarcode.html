@@ -855,6 +855,18 @@
             appearance: none;
         }
 
+        .missing-title-warning {
+            margin: 0 0 10px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+            font-size: 13px;
+            font-weight: 600;
+            text-align: left;
+        }
+
         .missing-title-photo-status {
             margin-top: 8px;
             text-align: center;
@@ -1038,6 +1050,7 @@
             <div class="missing-title-icon"><i class="fas fa-wave-square"></i></div>
             <h3 class="missing-title-heading">Missing Title/Image</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
+            <div id="missingTitleScreenWarning" class="missing-title-warning" hidden>Could not check this barcode against the catalog. Name it to be safe — closing this will not add the item.</div>
             <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Brand + item + size/color (only what you can verify)" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done" data-scanner-keyboard="on">
             <p style="font-size:13px">Read the label: brand, item type, size or color. Keep uncertain details out. Saved names are remembered even after stock is removed; Macy BOL and store data take priority when available.</p>
             <button type="button" id="warehouseDictateBtn" class="missing-title-note-btn" hidden>Dictate name</button>
@@ -1342,14 +1355,12 @@
         const missingTitlePhotoBtn = document.getElementById('missingTitlePhotoBtn');
         const missingTitlePhotoStatus = document.getElementById('missingTitlePhotoStatus');
         const missingTitlePhotoPreview = document.getElementById('missingTitlePhotoPreview');
-        const missingTitleSkipBtn = document.getElementById('missingTitleSkipBtn');
         const missingTitleSaveBtn = document.getElementById('missingTitleSaveBtn');
         const warehouseNoteModal = document.getElementById('warehouseNoteModal');
         const warehouseNoteBarcode = document.getElementById('warehouseNoteBarcode');
         const warehouseNoteInput = document.getElementById('warehouseNoteInput');
         const warehouseNoteCancelBtn = document.getElementById('warehouseNoteCancelBtn');
         const warehouseNoteSaveBtn = document.getElementById('warehouseNoteSaveBtn');
-        const MANUAL_TITLE_SKIP_STORAGE_KEY = 'additem_manual_title_skips';
         let missingTitleModalOpen = false;
         let missingTitleModalResolver = null;
         let missingTitleResumeCamera = false;
@@ -1550,37 +1561,6 @@
             return next;
         }
 
-        function loadSkippedManualTitles() {
-            const raw = sessionStorage.getItem(MANUAL_TITLE_SKIP_STORAGE_KEY);
-            if (!raw) return {};
-            try {
-                const parsed = JSON.parse(raw);
-                if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-                const clean = {};
-                Object.entries(parsed).forEach(([rawKey, rawValue]) => {
-                    const key = normalizeManualTitleKey(rawKey);
-                    if (key && rawValue) clean[key] = true;
-                });
-                return clean;
-            } catch (_) {
-                return {};
-            }
-        }
-
-        function saveSkippedManualTitles(skips) {
-            const next = {};
-            Object.entries(skips || {}).forEach(([rawKey, rawValue]) => {
-                const key = normalizeManualTitleKey(rawKey);
-                if (key && rawValue) next[key] = true;
-            });
-            if (Object.keys(next).length) {
-                sessionStorage.setItem(MANUAL_TITLE_SKIP_STORAGE_KEY, JSON.stringify(next));
-            } else {
-                sessionStorage.removeItem(MANUAL_TITLE_SKIP_STORAGE_KEY);
-            }
-            return next;
-        }
-
         function clearPendingManualTitleState(code) {
             const key = normalizeManualTitleKey(code);
             if (!key) return;
@@ -1589,12 +1569,6 @@
             if (overrides[key]) {
                 delete overrides[key];
                 saveManualTitleOverrides(overrides);
-            }
-
-            const skipped = loadSkippedManualTitles();
-            if (skipped[key]) {
-                delete skipped[key];
-                saveSkippedManualTitles(skipped);
             }
 
             if (screeningCache && typeof screeningCache.delete === 'function') {
@@ -1817,7 +1791,7 @@
 
         function openMissingTitleModal(code, issue = {}) {
             if (!missingTitleModal || !missingTitleInput || !missingTitleBarcodeText) {
-                return Promise.resolve({ action: 'skip', title: '' });
+                return Promise.resolve({ action: 'unavailable', title: '' });
             }
 
             if (missingTitleModalResolver) {
@@ -1829,12 +1803,15 @@
                 existingTitle: '',
                 existingNote: '',
                 missingImage: false,
-                existingImage: ''
+                existingImage: '',
+                screenFailed: false
             }, issue || {});
             const existingTitle = String(missingTitleCurrentIssue.existingTitle || '').replace(/\s+/g, ' ').trim();
             const existingImage = String(missingTitleCurrentIssue.existingImage || missingTitleCurrentIssue.image_url || '').trim();
             const existingNote = cleanMissingTitleWarehouseNote(missingTitleCurrentIssue.existingNote || missingTitleCurrentIssue.note || '');
             missingTitleBarcodeText.textContent = formatUpcDisplay(code);
+            const screenWarning = document.getElementById('missingTitleScreenWarning');
+            if (screenWarning) screenWarning.hidden = !missingTitleCurrentIssue.screenFailed;
             missingTitleInput.value = existingTitle;
             if (window.warehouseIdentity) window.warehouseIdentity.reset();
             missingTitleInput.style.borderColor = '#f2c66d';
@@ -1888,35 +1865,45 @@
             if (!key) return true;
 
             const overrides = loadManualTitleOverrides();
-            const skipped = loadSkippedManualTitles();
-            if (skipped[key]) return true;
 
+            // Screening decides whether this barcode still needs a name. A failure
+            // here used to add the item with no prompt at all, which is one way
+            // unnamed rows reached the warehouse: retry once, then prompt anyway.
             let item = null;
-            try {
-                item = await fetchAddItemScreeningSingle(key);
-                if (!item) return true;
-                if (!item.needs_manual_title) {
-                    if (item.missing_image) await runScanFeedback('needsInfo', false, key);
-                    return true;
+            let screenFailed = false;
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try {
+                    item = await fetchAddItemScreeningSingle(key);
+                    if (!item) throw new Error('Screening returned no result for this barcode');
+                    screenFailed = false;
+                    break;
+                } catch (err) {
+                    item = null;
+                    screenFailed = true;
+                    console.error('Barcode screening attempt ' + (attempt + 1) + ' failed:', err);
+                    if (attempt === 0) await new Promise(resolve => setTimeout(resolve, 400));
                 }
-            } catch (err) {
-                console.error('Barcode screening failed; continuing without a manual-title prompt:', err);
+            }
+
+            if (!screenFailed && !item.needs_manual_title) {
+                if (item.missing_image) await runScanFeedback('needsInfo', false, key);
                 return true;
             }
 
             const modalResult = await openMissingTitleModal(code, {
                 barcode: key,
-                existingTitle: String(item.title || overrides[key] || '').trim(),
+                existingTitle: String((item && item.title) || overrides[key] || '').trim(),
                 existingNote: pendingMissingTitleNotes[key] || '',
-                missingImage: Boolean(item.missing_image)
+                missingImage: Boolean(item && item.missing_image),
+                screenFailed
             });
-            if (!modalResult || (modalResult.action !== 'skip' && modalResult.action !== 'save')) return false;
-
-            if (modalResult.action === 'skip') {
-                skipped[key] = true;
-                saveSkippedManualTitles(skipped);
+            if (modalResult && modalResult.action === 'unavailable') {
+                // The naming modal is missing from the page. Blocking every scan
+                // would strand receiving, so allow the add and make the gap loud.
+                console.error('Missing-title modal unavailable; added without a name check:', key);
                 return true;
             }
+            if (!modalResult || modalResult.action !== 'save') return false;
 
             const value = String((modalResult && modalResult.title) || '').replace(/\s+/g, ' ').trim();
             if (!value) return false;
@@ -1938,10 +1925,6 @@
 
             overrides[key] = value.slice(0, 200);
             saveManualTitleOverrides(overrides);
-            if (skipped[key]) {
-                delete skipped[key];
-                saveSkippedManualTitles(skipped);
-            }
             return true;
         }
 
@@ -2122,7 +2105,7 @@
 
         const missingTitleCloseBtn = document.getElementById('missingTitleCloseBtn');
         if (missingTitleCloseBtn) {
-            missingTitleCloseBtn.addEventListener('click', () => closeMissingTitleModal({ action: 'skip', title: '' }));
+            missingTitleCloseBtn.addEventListener('click', () => closeMissingTitleModal({ action: 'dismiss', title: '' }));
         }
 
         if (missingTitleSaveBtn) {
