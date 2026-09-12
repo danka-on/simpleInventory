@@ -450,6 +450,7 @@
                     <button id="location-duplicates-btn">📍 Location Duplicates</button>
                     <button id="rack-history-btn">📋 Rack History</button>
                     <button id="automatic-cleanup-btn">🧹 Inventory Cleanup Decisions</button>
+                    <button id="no-name-items-btn">🏷️ No-Name Items</button>
                     <button id="reset-cache-btn" style="color:#ff6b00;">🔄 Reset Cache</button>
                 </div>
             </div>
@@ -4385,6 +4386,14 @@ document.getElementById('automatic-cleanup-btn').addEventListener('click', () =>
     document.getElementById('inventory-dropdown').classList.remove('active');
     // Navigate to the strategic cleanup decision page
     window.location.href = '/inventory-cleanup';
+});
+
+// No-Name Items button
+document.getElementById('no-name-items-btn').addEventListener('click', () => {
+    // Close dropdown
+    document.getElementById('inventory-dropdown').classList.remove('active');
+    // Warehouse rows that hold nothing but a barcode
+    window.location.href = '/no-name-items';
 });
 
 // History modal event handlers

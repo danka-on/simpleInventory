@@ -1238,6 +1238,41 @@
       "subdomain": ""
     },
     {
+      "rule": "/no-name-items",
+      "endpoint": "nameless_items_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/warehouse/nameless-items",
+      "endpoint": "api_nameless_items",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/warehouse/nameless-items/name",
+      "endpoint": "api_name_nameless_item",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/inventory-age-summary",
       "endpoint": "api_inventory_age_summary",
       "methods": [

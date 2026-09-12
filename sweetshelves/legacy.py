@@ -633,6 +633,11 @@ EXPORT_GROUPS = {
         '_sold_location_key', '_sold_location_label', '_sold_order_value', '_sold_removal_barcode_key',
         '_sold_removal_barcode_variants',
     ),
+    'warehouse_nameless': (
+        '_age_days', '_base_barcode', '_group_by_barcode', '_load_untitled_rows',
+        '_manual_title_rejection', '_rows_to_name', '_searchrack_columns', '_title_is_meaningless',
+        'api_name_nameless_item', 'api_nameless_items', 'nameless_items_page',
+    ),
     'warehouse_receiving': (
         '_add_item_screening_lookup', '_clean_warehouse_note', '_ensure_custom_item_registry',
         '_load_add_item_warehouse_notes', '_next_warehouse_note_suffix',

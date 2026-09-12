@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>No-Name Items - Sweet Shelves</title>
+    <style>
+        :root{
+            --bg:#f4f6f8;--card:#fff;--border:#dfe6ed;--text:#172033;--muted:#64748b;
+            --blue:#2563eb;--green:#15803d;--amber:#a16207;--red:#dc2626;
+            --shadow:0 7px 24px rgba(15,23,42,.06);
+        }
+        *{box-sizing:border-box}
+        body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI",Arial,sans-serif}
+        .page{max-width:1200px;margin:auto;padding:22px}
+        .header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+        h1{margin:0 0 6px;font-size:clamp(1.55rem,3vw,2.2rem);letter-spacing:-.03em}
+        .subtitle{color:var(--muted);max-width:760px;line-height:1.45}
+        .actions{display:flex;gap:8px;flex-wrap:wrap}
+        .btn{border:1px solid var(--border);background:white;color:var(--text);padding:9px 13px;border-radius:8px;text-decoration:none;font-weight:750;cursor:pointer;font:inherit}
+        .btn:disabled{opacity:.55;cursor:default}
+        .btn.primary{background:var(--blue);border-color:var(--blue);color:white}
+        .btn.adopt{background:var(--green);border-color:var(--green);color:white}
+        .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+        .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:20px}
+        .tile{padding:14px;border-top:4px solid var(--tone,var(--border))}
+        .tile-name{font-size:.74rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+        .tile-value{font-size:1.7rem;font-weight:850;margin-top:6px;font-variant-numeric:tabular-nums}
+        .tile-detail{font-size:.74rem;color:var(--muted);margin-top:2px}
+        .loading{padding:70px 15px;text-align:center;color:var(--muted)}
+        .spinner{height:34px;width:34px;border:4px solid #dbeafe;border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .error{display:none;padding:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:9px;margin-bottom:14px}
+        .notice{display:none;padding:12px 14px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:9px;margin-bottom:14px;font-size:.85rem}
+        #workspace{display:none}
+        .tabs{display:flex;gap:8px;margin:6px 0 14px;flex-wrap:wrap}
+        .tab{border:1px solid var(--border);background:white;border-radius:999px;padding:8px 15px;font-weight:800;font-size:.85rem;cursor:pointer;font:inherit;font-weight:800}
+        .tab[aria-selected="true"]{background:var(--text);border-color:var(--text);color:white}
+        .section-note{color:var(--muted);font-size:.83rem;line-height:1.5;margin:0 0 12px}
+        .item{padding:14px;margin-bottom:11px;display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,380px);gap:16px;align-items:start}
+        .barcode{font-family:"SFMono-Regular",Consolas,monospace;font-size:1.12rem;font-weight:800;letter-spacing:.02em;word-break:break-all}
+        .meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+        .chip{background:#eef2f6;border-radius:999px;padding:3px 10px;font-size:.73rem;font-weight:700;color:#475569}
+        .chip.age{background:#fef3c7;color:#92400e}
+        .chip.loc{background:#e0f2fe;color:#075985}
+        .chip.none{background:#fee2e2;color:#991b1b}
+        .units-line{margin-top:9px;font-size:.78rem;color:var(--muted);line-height:1.6}
+        .units-line code{background:#f1f5f9;border-radius:4px;padding:1px 5px;font-size:.73rem}
+        .note{margin-top:8px;font-size:.78rem;color:#475569;background:#f8fafc;border-left:3px solid var(--border);padding:6px 9px;border-radius:0 6px 6px 0;white-space:pre-wrap}
+        .suggest{margin-top:9px;font-size:.82rem;color:var(--green);font-weight:700}
+        .suggest span{font-weight:400;color:var(--muted)}
+        .namer{display:flex;flex-direction:column;gap:8px}
+        .namer label{font-size:.72rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:800}
+        .namer input{width:100%;border:1px solid var(--border);background:white;border-radius:8px;padding:10px 11px;color:var(--text);font:inherit}
+        .namer-row{display:flex;gap:7px;flex-wrap:wrap}
+        .row-status{font-size:.78rem;font-weight:700;min-height:1.1em}
+        .row-status.ok{color:var(--green)}
+        .row-status.bad{color:var(--red)}
+        .thumb{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid var(--border);background:#f1f5f9;float:left;margin:0 11px 6px 0}
+        .empty{padding:52px 18px;text-align:center;color:var(--muted)}
+        .empty strong{display:block;color:var(--text);font-size:1.05rem;margin-bottom:5px}
+        @media (max-width:760px){
+            .page{padding:14px}
+            .item{grid-template-columns:minmax(0,1fr)}
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="header">
+        <div>
+            <h1>No-Name Items</h1>
+            <p class="subtitle">Warehouse stock that arrived with nothing but a barcode. Give each one a name and it
+                sticks to the rows on the shelf and to every future scan of that barcode.</p>
+        </div>
+        <div class="actions">
+            <a class="btn" href="/searchrack">← Warehouse</a>
+            <button type="button" class="btn primary" id="refreshButton">Refresh</button>
+        </div>
+    </div>
+
+    <div class="error" id="errorBox"></div>
+    <div class="notice" id="truncNotice"></div>
+
+    <div class="loading" id="loadingBox">
+        <div class="spinner"></div>
+        Checking every untitled warehouse row against the catalogs…
+    </div>
+
+    <div id="workspace">
+        <div class="tiles">
+            <div class="panel tile" style="--tone:var(--red)">
+                <div class="tile-name">Barcode only</div>
+                <div class="tile-value" id="tileNamelessUnits">0</div>
+                <div class="tile-detail" id="tileNamelessDetail">no name anywhere</div>
+            </div>
+            <div class="panel tile" style="--tone:var(--green)">
+                <div class="tile-name">Name available</div>
+                <div class="tile-value" id="tileNameableUnits">0</div>
+                <div class="tile-detail" id="tileNameableDetail">a catalog knows these</div>
+            </div>
+            <div class="panel tile" style="--tone:var(--amber)">
+                <div class="tile-name">Oldest unnamed</div>
+                <div class="tile-value" id="tileOldest">—</div>
+                <div class="tile-detail">days on the shelf</div>
+            </div>
+            <div class="panel tile" style="--tone:var(--blue)">
+                <div class="tile-name">Rows scanned</div>
+                <div class="tile-value" id="tileScanned">0</div>
+                <div class="tile-detail">untitled rows in stock</div>
+            </div>
+        </div>
+
+        <div class="tabs" role="tablist">
+            <button type="button" class="tab" id="tabNameless" role="tab" aria-selected="true">Barcode only</button>
+            <button type="button" class="tab" id="tabNameable" role="tab" aria-selected="false">Name available</button>
+        </div>
+
+        <p class="section-note" id="sectionNote"></p>
+        <div id="itemList"></div>
+    </div>
+</div>
+
+<script>
+const state = {data:null, tab:'nameless'};
+
+function esc(value){
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+    ));
+}
+
+function activeGroups(){
+    if (!state.data) return [];
+    return state.tab === 'nameless' ? state.data.barcode_only : state.data.nameable;
+}
+
+function ageChip(days){
+    if (days === null || days === undefined) return '';
+    return `<span class="chip age">${days} day${days === 1 ? '' : 's'} on shelf</span>`;
+}
+
+function renderGroup(group){
+    const suggested = state.tab === 'nameable' ? group.suggested_title : '';
+    const rows = group.rows.map(row => {
+        const where = row.location ? `<code>${esc(row.location)}</code>` : 'no location';
+        return `#${row.id} · ${where} · qty ${row.quantity}`;
+    }).join('<br>');
+    const notes = group.rows.filter(row => row.note)
+        .map(row => `<div class="note">${esc(row.note)}</div>`).join('');
+    const thumb = group.suggested_image
+        ? `<img class="thumb" src="${esc(group.suggested_image)}" alt="" loading="lazy"
+             onerror="this.remove()">`
+        : '';
+    const suggestLine = suggested
+        ? `<div class="suggest">${thumb}Catalog name: ${esc(suggested)}
+             <span>— found in ${esc(group.suggested_source || 'catalog')}</span></div>`
+        : `<div class="meta"><span class="chip none">no catalog match</span></div>`;
+
+    return `<div class="panel item" data-barcode="${esc(group.barcode)}">
+        <div>
+            <div class="barcode">${esc(group.display_barcode || group.barcode)}</div>
+            <div class="meta">
+                <span class="chip">${group.units} unit${group.units === 1 ? '' : 's'}</span>
+                <span class="chip">${group.rows.length} row${group.rows.length === 1 ? '' : 's'}</span>
+                ${ageChip(group.oldest_age_days)}
+                ${group.locations.map(loc => `<span class="chip loc">${esc(loc)}</span>`).join('')}
+            </div>
+            ${suggestLine}
+            <div class="units-line">${rows}</div>
+            ${notes}
+        </div>
+        <div class="namer">
+            <label for="name-${esc(group.barcode)}">Name this item</label>
+            <input type="text" id="name-${esc(group.barcode)}" maxlength="200"
+                   placeholder="e.g. Blue ceramic table lamp" value="${esc(suggested)}">
+            <div class="namer-row">
+                <button type="button" class="btn ${suggested ? 'adopt' : 'primary'}" data-action="save">
+                    ${suggested ? 'Adopt this name' : 'Save name'}
+                </button>
+            </div>
+            <div class="row-status"></div>
+        </div>
+    </div>`;
+}
+
+function render(){
+    const groups = activeGroups();
+    const note = document.getElementById('sectionNote');
+    if (state.tab === 'nameless') {
+        note.textContent = 'No catalog, BOL, marketplace listing or custom entry knows these barcodes. '
+            + 'Whatever you type here becomes the only name they will ever have.';
+    } else {
+        note.textContent = 'The warehouse row has no name stored, but a catalog does. '
+            + 'Adopting writes that name onto the shelf rows so searches and labels stop showing a bare barcode.';
+    }
+    const list = document.getElementById('itemList');
+    if (!groups.length) {
+        list.innerHTML = `<div class="panel empty"><strong>Nothing here.</strong>
+            ${state.tab === 'nameless'
+                ? 'Every warehouse item can be identified from its barcode.'
+                : 'No untitled row has a catalog name waiting for it.'}</div>`;
+        return;
+    }
+    list.innerHTML = groups.map(renderGroup).join('');
+}
+
+function applyTotals(data){
+    const nameless = data.totals.barcode_only;
+    const nameable = data.totals.nameable;
+    document.getElementById('tileNamelessUnits').textContent = nameless.units.toLocaleString();
+    document.getElementById('tileNamelessDetail').textContent =
+        `${nameless.groups} barcode${nameless.groups === 1 ? '' : 's'} · ${nameless.rows} row${nameless.rows === 1 ? '' : 's'}`;
+    document.getElementById('tileNameableUnits').textContent = nameable.units.toLocaleString();
+    document.getElementById('tileNameableDetail').textContent =
+        `${nameable.groups} barcode${nameable.groups === 1 ? '' : 's'} · one click each`;
+    const ages = [...data.barcode_only, ...data.nameable]
+        .map(group => group.oldest_age_days).filter(days => days !== null && days !== undefined);
+    document.getElementById('tileOldest').textContent = ages.length ? Math.max(...ages).toLocaleString() : '—';
+    document.getElementById('tileScanned').textContent = data.totals.scanned_rows.toLocaleString();
+
+    document.getElementById('tabNameless').textContent = `Barcode only (${nameless.groups})`;
+    document.getElementById('tabNameable').textContent = `Name available (${nameable.groups})`;
+
+    const notice = document.getElementById('truncNotice');
+    if (data.truncated) {
+        notice.textContent = `Showing the ${data.scan_limit} oldest unnamed barcodes. `
+            + 'Name some of these and refresh to reach the rest.';
+        notice.style.display = 'block';
+    } else {
+        notice.style.display = 'none';
+    }
+}
+
+async function load(){
+    document.getElementById('loadingBox').style.display = 'block';
+    document.getElementById('workspace').style.display = 'none';
+    document.getElementById('errorBox').style.display = 'none';
+    try {
+        const response = await fetch('/api/warehouse/nameless-items', {cache:'no-store'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Could not load no-name items');
+        state.data = data;
+        applyTotals(data);
+        render();
+        document.getElementById('loadingBox').style.display = 'none';
+        document.getElementById('workspace').style.display = 'block';
+    } catch (error) {
+        document.getElementById('loadingBox').style.display = 'none';
+        const box = document.getElementById('errorBox');
+        box.textContent = error.message;
+        box.style.display = 'block';
+    }
+}
+
+async function saveName(card){
+    const barcode = card.dataset.barcode;
+    const input = card.querySelector('input');
+    const button = card.querySelector('[data-action="save"]');
+    const status = card.querySelector('.row-status');
+    const title = input.value.trim();
+    status.className = 'row-status';
+    status.textContent = '';
+    if (!title) {
+        status.className = 'row-status bad';
+        status.textContent = 'Type a name first.';
+        return;
+    }
+    const group = activeGroups().find(entry => entry.barcode === barcode);
+    button.disabled = true;
+    button.textContent = 'Saving…';
+    try {
+        const response = await fetch('/api/warehouse/nameless-items/name', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({barcode, title, ids: group ? group.rows.map(row => row.id) : []})
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Could not save that name');
+        status.className = 'row-status ok';
+        status.textContent = `Named ${data.named_ids.length} row${data.named_ids.length === 1 ? '' : 's'}.`;
+        input.disabled = true;
+        button.textContent = 'Named';
+        setTimeout(load, 900);
+    } catch (error) {
+        status.className = 'row-status bad';
+        status.textContent = error.message;
+        button.disabled = false;
+        button.textContent = 'Save name';
+    }
+}
+
+document.getElementById('itemList').addEventListener('click', event => {
+    const button = event.target.closest('[data-action="save"]');
+    if (button) saveName(button.closest('.item'));
+});
+document.getElementById('itemList').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && event.target.matches('input')) {
+        event.preventDefault();
+        saveName(event.target.closest('.item'));
+    }
+});
+document.getElementById('tabNameless').addEventListener('click', () => {
+    state.tab = 'nameless';
+    document.getElementById('tabNameless').setAttribute('aria-selected', 'true');
+    document.getElementById('tabNameable').setAttribute('aria-selected', 'false');
+    render();
+});
+document.getElementById('tabNameable').addEventListener('click', () => {
+    state.tab = 'nameable';
+    document.getElementById('tabNameless').setAttribute('aria-selected', 'false');
+    document.getElementById('tabNameable').setAttribute('aria-selected', 'true');
+    render();
+});
+document.getElementById('refreshButton').addEventListener('click', load);
+load();
+</script>
+<script src="/static/i18n.js"></script>
+</body>
+</html>

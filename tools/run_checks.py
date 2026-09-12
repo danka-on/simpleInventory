@@ -19,7 +19,7 @@ TESTS = [
     'test_fba_pack_scan', 'test_fba_label_scanner', 'test_fba_item_label_route',
     'test_codebase_regressions', 'test_token_expiry', 'test_merge_regressions',
     'test_application_architecture', 'test_fba_attention', 'test_amazon_resolution',
-    'test_receiving_batch', 'test_custom_item_identity',
+    'test_receiving_batch', 'test_custom_item_identity', 'test_warehouse_nameless',
 ]
 
 

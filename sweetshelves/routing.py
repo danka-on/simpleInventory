@@ -64,6 +64,7 @@ from . import sync as ss_sync
 from . import telegram as ss_telegram
 from . import warehouse_locations as ss_warehouse_locations
 from . import warehouse_maps as ss_warehouse_maps
+from . import warehouse_nameless as ss_warehouse_nameless
 from . import warehouse_receiving as ss_warehouse_receiving
 from . import warehouse_search as ss_warehouse_search
 from . import web_hooks as ss_web_hooks
@@ -184,6 +185,9 @@ def register_routes():
     ss_runtime.app.route('/inventory-analytics')(ss_pages.inventory_seller_analytics)
     ss_runtime.app.route('/inventory-cleanup')(ss_pages.inventory_cleanup_decisions)
     ss_runtime.app.route('/api/inventory-cleanup', methods=['GET'])(ss_analytics.api_inventory_cleanup)
+    ss_runtime.app.route('/no-name-items')(ss_warehouse_nameless.nameless_items_page)
+    ss_runtime.app.route('/api/warehouse/nameless-items', methods=['GET'])(ss_warehouse_nameless.api_nameless_items)
+    ss_runtime.app.route('/api/warehouse/nameless-items/name', methods=['POST'])(ss_warehouse_nameless.api_name_nameless_item)
     ss_runtime.app.route('/api/inventory-age-summary', methods=['GET'])(ss_analytics.api_inventory_age_summary)
     ss_runtime.app.route('/api/inventory-age/rescan', methods=['POST'])(ss_analytics.api_inventory_age_rescan)
     ss_runtime.app.route('/api/inventory-seller-analytics', methods=['GET'])(ss_analytics.api_inventory_seller_analytics)
