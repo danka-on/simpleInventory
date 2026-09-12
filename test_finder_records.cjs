@@ -13,7 +13,7 @@ function element() {
 }
 const pending = [];
 const escape = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
-const context = {URLSearchParams, AbortController, esc: escape, attrEsc: escape,
+const context = {URLSearchParams, AbortController, esc: escape, attrEsc: escape, t: key => key,
   showPrepPopupHtml(html) {context.dialog=html;},
   document: {
     getElementById(id) { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); },

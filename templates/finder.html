@@ -5,439 +5,410 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title data-i18n="item_finder">Item Finder</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f5f7fa; padding: 20px; }
-    .container { max-width: 1000px; margin: 0 auto; }
-
-    .order-context {
-      background: #fff; padding: 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      margin-bottom: 16px; display: flex; align-items: flex-start; gap: 16px;
+    :root {
+      --bg: #f3f4f8; --panel: #ffffff; --panel-2: #f8fafc; --ink: #0f172a; --ink-2: #334155; --muted: #64748b;
+      --line: #e2e8f0; --line-2: #cbd5e1; --accent: #4f46e5; --accent-ink: #ffffff; --accent-soft: #eef2ff;
+      --danger: #dc2626; --danger-soft: #fef2f2; --ok: #059669; --ok-soft: #ecfdf5; --warn: #d97706; --warn-soft: #fffbeb;
+      --shadow: 0 1px 2px rgba(15,23,42,.06), 0 8px 24px rgba(15,23,42,.06);
+      --radius: 14px; --radius-s: 9px;
+      --k-added: #059669; --k-pulled: #dc2626; --k-moved: #d97706; --k-adjusted: #7c3aed; --k-cleared: #b45309;
+      --k-deleted: #be123c; --k-archived: #be123c; --k-undo: #64748b; --k-sold: #2563eb; --k-returned: #9333ea;
+      --k-matched: #0891b2; --k-received: #475569; --k-bol: #64748b; --k-prep: #ea580c; --k-prep_status: #ea580c;
+      --k-prep_note: #ea580c; --k-fba: #0f172a; --k-listed: #0284c7;
     }
-    .order-context img { width: 140px; height: 140px; object-fit: cover; border-radius: 10px; background: #f0f0f0; cursor: pointer; transition: transform 0.2s; }
-    .order-context img:hover { transform: scale(1.05); }
-    .order-context .info { flex: 1; }
-    .order-context .info h2 { font-size: 1.1rem; color: #2c3e50; margin-bottom: 6px; }
-    .order-context .info .meta { font-size: 0.9rem; color: #7f8c8d; }
-
-    .search-box { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px; }
-    .search-input-wrapper { display: flex; gap: 12px; }
-    .search-input { flex: 1; padding: 14px; font-size: 16px; border: 2px solid #e0e0e0; border-radius: 8px; transition: border-color 0.2s; }
-    .search-input:focus { outline: none; border-color: #3498db; }
-    .search-btn { padding: 14px 28px; background: #3498db; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
-    .search-btn:hover { background: #2980b9; }
-    .custom-items-filter {
-      display: flex; align-items: center; gap: 7px; width: fit-content; margin-top: 12px;
-      padding: 7px 12px; border: 2px solid #16a34a; border-radius: 7px;
-      background: #f0fdf4; color: #15803d; font-size: 0.9rem; font-weight: 700; cursor: pointer;
+    html.ss-theme-night {
+      --bg: #0b1220; --panel: #111a2e; --panel-2: #172238; --ink: #e2e8f0; --ink-2: #cbd5e1; --muted: #94a3b8;
+      --line: rgba(255,255,255,.08); --line-2: rgba(255,255,255,.16); --accent: #818cf8; --accent-ink: #0b1220; --accent-soft: rgba(129,140,248,.14);
+      --danger: #f87171; --danger-soft: rgba(248,113,113,.12); --ok: #34d399; --ok-soft: rgba(52,211,153,.12); --warn: #fbbf24; --warn-soft: rgba(251,191,36,.12);
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.35);
+      --k-added: #34d399; --k-pulled: #f87171; --k-moved: #fbbf24; --k-adjusted: #a78bfa; --k-cleared: #f59e0b;
+      --k-deleted: #fb7185; --k-archived: #fb7185; --k-undo: #94a3b8; --k-sold: #60a5fa; --k-returned: #c084fc;
+      --k-matched: #22d3ee; --k-received: #94a3b8; --k-bol: #94a3b8; --k-prep: #fb923c; --k-prep_status: #fb923c;
+      --k-prep_note: #fb923c; --k-fba: #e2e8f0; --k-listed: #38bdf8;
     }
-    .custom-items-filter input { width: 17px; height: 17px; accent-color: #16a34a; cursor: pointer; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif; background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.45; }
+    html.ss-theme-night body { background: var(--bg); color: var(--ink); }
+    button, input, select { font: inherit; color: inherit; }
+    button { cursor: pointer; }
+    a { color: var(--accent); }
+    .app { max-width: 1280px; margin: 0 auto; padding: 18px 18px 60px; }
 
-    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    @media (max-width: 700px) { .panels { grid-template-columns: 1fr; } }
+    /* Top bar */
+    .topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+    .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: var(--radius-s); border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); text-decoration: none; font-weight: 600; font-size: 13px; }
+    .back-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .brand h1 { margin: 0; font-size: 20px; letter-spacing: -.01em; }
+    .brand p { margin: 0; color: var(--muted); font-size: 13px; }
+    .kbd-hint { margin-left: auto; color: var(--muted); font-size: 12px; }
+    kbd { font-family: inherit; border: 1px solid var(--line-2); border-bottom-width: 2px; border-radius: 5px; padding: 0 6px; font-size: 11px; background: var(--panel); }
 
-    .panel { background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden; }
-    .panel-header { padding: 14px 16px; font-weight: 700; font-size: 0.95rem; color: #fff; display: flex; align-items: center; gap: 8px; }
-    .panel-header .count { background: rgba(255,255,255,0.3); padding: 2px 8px; border-radius: 10px; font-size: 0.8rem; }
-    .panel-warehouse .panel-header { background: #6c5ce7; }
-    .panel-rawbol .panel-header { background: #0984e3; }
-    .panel-history { grid-column: 1 / -1; }
-    .panel-history .panel-header { background: #64748b; }
-    .upc-records { margin: 16px 0; padding: 16px; background: white; border-radius: 12px; }
-    .record-nav { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0; }
-    .record-nav button { padding:10px 14px; border:1px solid #e2e8f0; border-radius:8px; background:white; color:#475569; cursor:pointer; }
-    .record-nav button[aria-pressed="true"] { background:#334155; border-color:#334155; color:white; }
-    .record-source { margin:20px 0; }
-    .record-source h4 { font-size:1rem; margin-bottom:10px; color:#334155; }
-    .record-row { padding:14px 0; border-bottom:1px solid #e2e8f0; display:flex; align-items:flex-start; gap:16px; }
-    .record-row-main { flex:1; min-width:0; }
-    .record-row strong { display:block; color:#1e293b; overflow-wrap:anywhere; }
-    .record-meta { color:#64748b; font-size:.85rem; margin-top:6px; display:flex; flex-wrap:wrap; gap:6px 16px; }
-    .record-note { margin-top:8px; color:#475569; font-size:.9rem; white-space:pre-wrap; overflow-wrap:anywhere; }
-    .record-identity { padding:16px; border-radius:8px; background:#f8fafc; }
-    .record-identity h3 { font-size:1.1rem; margin-bottom:6px; }
-    .record-empty { padding:24px 0; color:#64748b; }
-    .record-detail-link { flex-shrink:0; color:#2563eb; border:0; background:none; padding:2px; cursor:pointer; font:inherit; font-size:.85rem; }
-    .record-source, .record-nav button { --record-color:#475569; --record-tint:#f1f5f9; }
-    [data-category="Inventory"] { --record-color:#6d28d9; --record-tint:#f5f3ff; }
-    [data-category="Sales & returns"] { --record-color:#047857; --record-tint:#ecfdf5; }
-    [data-category="Prep"] { --record-color:#b45309; --record-tint:#fffbeb; }
-    [data-category="Listings"] { --record-color:#0369a1; --record-tint:#f0f9ff; }
-    [data-category="BOL & other"] { --record-color:#475569; --record-tint:#f1f5f9; }
-    .record-nav button { border-bottom:3px solid var(--record-color); }
-    .record-nav button[aria-pressed="true"] { color:var(--record-color); background:var(--record-tint); border-color:var(--record-color); }
-    .record-source h4 { border-left:3px solid var(--record-color); padding:8px 12px; background:var(--record-tint); color:var(--record-color); border-radius:0 6px 6px 0; }
-    .record-actions { display:flex; flex-direction:column; align-items:flex-end; gap:10px; flex-shrink:0; }
-    .record-original { font-size:.85rem; font-weight:600; color:var(--record-color, #2563eb); text-decoration:none; }
-    .record-original:hover { text-decoration:underline; }
-    .record-badge { display:inline-block; border-radius:5px; padding:3px 7px; font-size:.75rem; font-weight:600; color:#475569; background:#f1f5f9; }
-    .record-badge.good { color:#047857; background:#ecfdf5; }
-    .record-badge.bad { color:#b91c1c; background:#fef2f2; }
-    .record-badge.pending { color:#92400e; background:#fffbeb; }
-    .record-settings { display:flex; flex-wrap:wrap; gap:12px 24px; margin-top:12px; font-size:.8rem; color:#64748b; }
-    .record-settings label { display:flex; gap:6px; align-items:center; cursor:pointer; }
-    @media(max-width:600px) { .record-row { flex-wrap:wrap; gap:10px; } .record-actions { flex-direction:row; width:100%; } }
-    .record-fields { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 8px; font-size: .85rem; padding: 10px; }
-    .record-fields dt { color: #64748b; overflow-wrap: anywhere; }
-    .record-fields dd { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
-    .all-data-btn { padding: 6px 10px; margin-top: 8px; border: 1px solid #64748b; border-radius: 6px; background: #fff; color: #334155; cursor: pointer; }
-    .panel-body { padding: 12px; max-height: 60vh; overflow-y: auto; }
+    /* Search */
+    .search { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; margin-bottom: 14px; }
+    .search-row { display: flex; gap: 10px; }
+    .search-field { flex: 1; position: relative; display: flex; align-items: center; }
+    .search-field svg { position: absolute; left: 14px; width: 18px; height: 18px; color: var(--muted); pointer-events: none; }
+    .search-input { width: 100%; padding: 13px 40px 13px 42px; font-size: 16px; border: 1.5px solid var(--line-2); border-radius: 12px; background: var(--panel-2); color: var(--ink); transition: border-color .15s, box-shadow .15s; }
+    .search-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); background: var(--panel); }
+    .search-input::placeholder { color: var(--muted); }
+    .search-clear { position: absolute; right: 8px; width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--muted); font-size: 18px; line-height: 1; display: none; }
+    .search-clear.show { display: inline-flex; align-items: center; justify-content: center; }
+    .search-clear:hover { background: var(--panel-2); color: var(--ink); }
+    .search-btn { padding: 0 22px; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 15px; }
+    .search-btn:hover { filter: brightness(1.07); }
+    .search-options { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 10px; font-size: 13px; color: var(--ink-2); }
+    .search-options label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .search-options input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
+    .seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; overflow: hidden; }
+    .seg button { padding: 5px 10px; border: 0; background: var(--panel); color: var(--muted); font-size: 12.5px; font-weight: 600; }
+    .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+    .hint { margin-top: 8px; color: var(--muted); font-size: 12.5px; }
 
-    .result-card {
-      background: #f8f9fa; border-radius: 8px; padding: 12px; margin-bottom: 10px;
-      display: flex; align-items: flex-start; gap: 12px; transition: box-shadow 0.2s;
-    }
-    .result-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-    .result-card img { width: 50px; height: 50px; object-fit: cover; border-radius: 6px; background: #e0e0e0; flex-shrink: 0; }
-    .result-card .details { flex: 1; min-width: 0; }
-    .result-card .title { font-weight: 600; font-size: 0.85rem; color: #2c3e50; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .result-card .meta { font-size: 0.78rem; color: #7f8c8d; }
-    .result-card .meta span { margin-right: 10px; }
-    .result-card .loc-badge {
-      display: inline-block; background: #6c5ce7; color: #fff; padding: 2px 8px;
-      border-radius: 6px; font-weight: 700; font-size: 0.8rem; margin-top: 4px;
-    }
-    .result-card .loc-img { width: 80px; height: 60px; object-fit: cover; border-radius: 6px; margin-top: 6px; }
+    /* Case (order / listing context) */
+    .case { display: none; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; margin-bottom: 14px; gap: 14px; }
+    .case.show { display: flex; }
+    .case img { width: 96px; height: 96px; object-fit: cover; border-radius: 10px; background: var(--panel-2); cursor: zoom-in; flex-shrink: 0; }
+    .case .case-body { flex: 1; min-width: 0; }
+    .case .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+    .case h2 { margin: 2px 0 4px; font-size: 15px; line-height: 1.35; }
+    .case .meta { color: var(--muted); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+    .tokens { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+    .tokens .label { font-size: 12px; color: var(--muted); font-weight: 600; margin-right: 2px; }
+    .token { padding: 4px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1.5px solid var(--line-2); background: var(--panel); color: var(--ink-2); user-select: none; }
+    .token:hover { border-color: var(--accent); color: var(--accent); }
+    .token.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    .token.active:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 
-    .remove-btn {
-      padding: 6px 14px; background: #e74c3c; color: #fff; border: none; border-radius: 6px;
-      font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center;
-    }
-    .remove-btn:hover { background: #c0392b; }
+    /* Toast banner (removal / match feedback) */
+    .success-banner { display: none; position: sticky; top: 8px; z-index: 50; margin-bottom: 12px; padding: 12px 16px; border-radius: var(--radius-s); color: #fff; font-weight: 700; box-shadow: var(--shadow); }
+    .success-banner .undo-btn { margin-left: 12px; padding: 6px 16px; border-radius: 7px; border: 0; background: #fff; color: var(--danger); font-weight: 800; font-size: 13px; }
 
-    /* Image popup overlay */
-    .img-overlay {
-      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.82); z-index: 9998; align-items: center; justify-content: center; flex-direction: column; gap: 14px; padding: 20px; box-sizing: border-box;
-    }
+    /* Workspace */
+    .workspace { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: 14px; align-items: start; }
+    @media (max-width: 1000px) { .workspace { grid-template-columns: 1fr; } }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+    .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; }
+    .panel-head .count { margin-left: auto; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
+    .panel-head .sub { font-weight: 500; color: var(--muted); font-size: 12px; }
+
+    /* Result lists */
+    .results { display: grid; gap: 14px; }
+    .result-group { }
+    .result-group .panel-head { cursor: pointer; user-select: none; }
+    .result-group .panel-head .chev { color: var(--muted); font-size: 11px; transition: transform .15s; }
+    .result-group.collapsed .panel-head .chev { transform: rotate(-90deg); }
+    .result-group.collapsed .result-list { display: none; }
+    .result-list { max-height: 62vh; overflow-y: auto; padding: 8px; display: grid; gap: 6px; }
+    .result-card { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 10px; padding: 9px; border-radius: 11px; border: 1.5px solid transparent; background: var(--panel-2); cursor: pointer; transition: border-color .12s, background .12s; }
+    .result-card:hover { border-color: var(--line-2); }
+    .result-card.selected { border-color: var(--accent); background: var(--accent-soft); }
+    .result-card.removed { opacity: .55; }
+    .result-card.removed .title { text-decoration: line-through; }
+    .result-card.matched { border-color: var(--ok); background: var(--ok-soft); }
+    .result-card img { width: 46px; height: 46px; object-fit: cover; border-radius: 8px; background: var(--line); cursor: zoom-in; }
+    .result-card .details { min-width: 0; }
+    .result-card .title { font-weight: 600; font-size: 13px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .result-card .meta { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .result-card .side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+    .loc { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 12px; background: var(--accent); color: var(--accent-ink); cursor: pointer; white-space: nowrap; }
+    .loc.ghost { background: transparent; color: var(--accent); border: 1px dashed var(--accent); }
+    .qty { font-weight: 700; color: var(--ink); }
+    .mini-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .mini-btn { padding: 3px 8px; font-size: 11.5px; font-weight: 700; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); }
+    .mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .mini-btn.note { border-color: var(--warn); color: var(--warn); }
+    .mini-btn.prep { border-color: var(--k-adjusted); color: var(--k-adjusted); }
+    .remove-btn { padding: 6px 12px; border: 0; border-radius: 8px; background: var(--danger); color: #fff; font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+    .remove-btn:hover { filter: brightness(1.08); }
+    .remove-btn:disabled { opacity: .4; cursor: default; }
+    .search-rack-btn { padding: 6px 12px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 12.5px; white-space: nowrap; }
+    .search-rack-btn:disabled { background: var(--ok); color: #fff; cursor: default; }
+    .removed-badge { display: inline-block; padding: 1px 7px; border-radius: 6px; background: var(--danger); color: #fff; font-size: 10.5px; font-weight: 800; }
+    .aliases { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+    .aliases summary { cursor: pointer; font-weight: 600; }
+    .aliases div { display: flex; gap: 8px; align-items: center; margin-top: 4px; padding-left: 8px; }
+    .aliases button { font-size: 11px; padding: 1px 7px; border-radius: 5px; border: 1px solid var(--line-2); background: var(--panel); color: var(--muted); }
+    .empty { padding: 26px 14px; text-align: center; color: var(--muted); font-size: 13px; }
+    .loading { padding: 20px; text-align: center; color: var(--muted); }
+    .spinner { width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto 8px; animation: spin .9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Trail */
+    .trail { min-height: 300px; }
+    .trail-empty { padding: 60px 20px; text-align: center; color: var(--muted); }
+    .trail-empty .icon { font-size: 40px; margin-bottom: 8px; }
+    .trail-empty h3 { margin: 0 0 4px; color: var(--ink-2); font-size: 16px; }
+    .identity { display: flex; gap: 14px; padding: 16px; border-bottom: 1px solid var(--line); }
+    .identity img { width: 84px; height: 84px; object-fit: cover; border-radius: 12px; background: var(--panel-2); cursor: zoom-in; flex-shrink: 0; }
+    .identity .body { flex: 1; min-width: 0; }
+    .identity h2 { margin: 0 0 4px; font-size: 16px; line-height: 1.3; }
+    .identity .upc-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .identity .upc-row code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--ink); background: var(--panel-2); padding: 1px 6px; border-radius: 5px; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--panel-2); color: var(--ink-2); border: 1px solid var(--line); }
+    .chip.custom { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+    .chip.family { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+    .identity .links { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .text-btn { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); font-size: 12px; font-weight: 600; text-decoration: none; }
+    .text-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .text-btn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+    .now { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .section-title { margin: 0 0 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 800; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+    .stock-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .stock-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); font-size: 13px; }
+    .stock-chip .loc { font-size: 13px; }
+    .stock-chip .n { font-weight: 800; font-variant-numeric: tabular-nums; }
+    .stock-chip .warn { color: var(--warn); font-size: 11.5px; font-weight: 700; }
+    .stock-chip .mini-btn { padding: 1px 6px; }
+    .not-on-shelf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .not-on-shelf .pill { padding: 4px 10px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); font-weight: 800; font-size: 12.5px; }
+    .last-exit { color: var(--ink-2); font-size: 13px; }
+    .last-exit b { color: var(--ink); }
+    .jump { border: 0; background: none; color: var(--accent); font-weight: 700; font-size: 12.5px; padding: 0; cursor: pointer; }
+    .ledger { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .tile { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); text-align: left; }
+    .tile .n { display: block; font-size: 20px; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--ink); }
+    .tile .l { display: block; font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+    .tile.zero .n { color: var(--muted); opacity: .5; }
+    .tile.hot { border-color: var(--accent); }
+    .tile[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+    .tile:hover { border-color: var(--line-2); }
+    .ledger-foot { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+    .clues { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+    .clue { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; margin-bottom: 6px; font-size: 13px; cursor: pointer; border: 1px solid transparent; }
+    .clue:hover { border-color: var(--line-2); }
+    .clue .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+    .clue.alert { background: var(--danger-soft); } .clue.alert .dot { background: var(--danger); }
+    .clue.warn { background: var(--warn-soft); } .clue.warn .dot { background: var(--warn); }
+    .clue.info { background: var(--panel-2); } .clue.info .dot { background: var(--accent); }
+    .clue.static { cursor: default; }
+    .timeline-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 12px 16px 8px; }
+    .filters { display: flex; flex-wrap: wrap; gap: 6px; }
+    .filter { padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); font-size: 12px; font-weight: 600; }
+    .filter[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+    .filter .c { opacity: .7; font-weight: 500; margin-left: 3px; }
+    .timeline-head .right { margin-left: auto; display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+    .focus-bar { margin: 0 16px 8px; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 12.5px; font-weight: 600; display: none; align-items: center; gap: 8px; }
+    .focus-bar.show { display: flex; }
+    .timeline { padding: 4px 16px 16px; }
+    .day { position: sticky; top: 0; z-index: 2; background: var(--panel); padding: 8px 0 4px; font-size: 12px; font-weight: 700; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+    .day::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+    .ev { display: grid; grid-template-columns: 44px 18px minmax(0, 1fr) auto; gap: 8px; padding: 8px 0; position: relative; }
+    .ev + .ev::before { content: ''; position: absolute; left: 52px; top: -8px; height: 14px; width: 2px; background: var(--line); }
+    .ev .t { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 3px; text-align: right; }
+    .ev .dot { width: 12px; height: 12px; border-radius: 50%; margin: 4px auto 0; background: var(--k, var(--muted)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--k, var(--muted)) 18%, transparent); }
+    .ev .body { min-width: 0; }
+    .ev .title { font-weight: 600; font-size: 13.5px; line-height: 1.35; }
+    .ev .meta { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 4px; align-items: center; font-size: 12px; color: var(--muted); }
+    .ev .note { margin-top: 4px; font-size: 12.5px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+    .ev .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .ev .acts a, .ev .acts button { font-size: 12px; font-weight: 600; color: var(--accent); background: none; border: 0; padding: 2px 4px; text-decoration: none; white-space: nowrap; }
+    .ev .acts a:hover, .ev .acts button:hover { text-decoration: underline; }
+    .ev.undone { opacity: .5; } .ev.undone .title { text-decoration: line-through; }
+    .ev.pending .title::after { content: ' · not applied'; color: var(--danger); font-weight: 800; font-size: 11px; }
+    .ev.focus { background: var(--accent-soft); border-radius: 8px; padding-left: 4px; padding-right: 4px; }
+    .ev.dim { opacity: .35; }
+    .pill { padding: 1px 7px; border-radius: 5px; font-size: 11px; font-weight: 700; background: var(--panel-2); color: var(--ink-2); border: 1px solid var(--line); }
+    .pill.good { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+    .pill.bad { background: var(--danger-soft); color: var(--danger); border-color: transparent; }
+    .pill.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+    .pill.k { background: color-mix(in srgb, var(--k, var(--muted)) 14%, transparent); color: var(--k, var(--muted)); border-color: transparent; }
+    .pill.loc { cursor: pointer; background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+    .arrow { color: var(--muted); }
+    .records { border-top: 1px solid var(--line); }
+    .records > summary { padding: 12px 16px; cursor: pointer; font-weight: 700; font-size: 13px; color: var(--ink-2); list-style: none; display: flex; align-items: center; gap: 8px; }
+    .records > summary::-webkit-details-marker { display: none; }
+    .records > summary .chev { color: var(--muted); font-size: 11px; transition: transform .15s; }
+    .records[open] > summary .chev { transform: rotate(90deg); }
+    .records-body { padding: 0 16px 16px; }
+    .record-settings { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 4px 0 8px; font-size: 12.5px; color: var(--muted); }
+    .record-settings label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+    .record-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 14px; }
+    .record-nav button { padding: 5px 11px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+    .record-source, .record-nav button { --record-color: var(--muted); --record-tint: var(--panel-2); }
+    [data-category="Inventory"] { --record-color: #6d28d9; --record-tint: rgba(109,40,217,.1); }
+    [data-category="Sales & returns"] { --record-color: #047857; --record-tint: rgba(4,120,87,.1); }
+    [data-category="Prep"] { --record-color: #b45309; --record-tint: rgba(180,83,9,.1); }
+    [data-category="Listings"] { --record-color: #0369a1; --record-tint: rgba(3,105,161,.1); }
+    [data-category="BOL & other"] { --record-color: #475569; --record-tint: rgba(71,85,105,.1); }
+    .record-nav button { border-bottom: 3px solid var(--record-color); }
+    .record-nav button[aria-pressed="true"] { color: var(--record-color); background: var(--record-tint); border-color: var(--record-color); }
+    .record-identity { padding: 10px 12px; border-radius: 8px; background: var(--panel-2); }
+    .record-identity h3 { font-size: 14px; margin: 0 0 4px; }
+    .record-source { margin: 14px 0; }
+    .record-source h4 { font-size: 13px; margin: 0 0 6px; border-left: 3px solid var(--record-color); padding: 6px 10px; background: var(--record-tint); color: var(--record-color); border-radius: 0 6px 6px 0; }
+    .record-row { padding: 10px 0; border-bottom: 1px solid var(--line); display: flex; align-items: flex-start; gap: 14px; }
+    .record-row-main { flex: 1; min-width: 0; }
+    .record-row strong { display: block; overflow-wrap: anywhere; font-size: 13px; }
+    .record-meta { color: var(--muted); font-size: 12px; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    .record-note { margin: 6px 0 0; color: var(--ink-2); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .record-empty { padding: 16px 0; color: var(--muted); }
+    .record-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+    .record-original { font-size: 12px; font-weight: 600; color: var(--record-color, var(--accent)); text-decoration: none; }
+    .record-original:hover { text-decoration: underline; }
+    .record-detail-link { flex-shrink: 0; color: var(--accent); border: 0; background: none; padding: 2px; font-size: 12px; font-weight: 600; }
+    .record-badge { display: inline-block; border-radius: 5px; padding: 2px 6px; font-size: 11px; font-weight: 600; color: var(--ink-2); background: var(--panel-2); }
+    .record-badge.good { color: var(--ok); background: var(--ok-soft); }
+    .record-badge.bad { color: var(--danger); background: var(--danger-soft); }
+    .record-badge.pending { color: var(--warn); background: var(--warn-soft); }
+    .all-data-btn { padding: 5px 10px; margin-top: 8px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--panel); color: var(--ink-2); font-size: 12px; font-weight: 600; }
+    .record-fields { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 3fr); gap: 6px 10px; font-size: 12.5px; margin: 0; }
+    .record-fields dt { color: var(--muted); overflow-wrap: anywhere; }
+    .record-fields dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 300px; overflow: auto; }
+    @media (max-width: 600px) { .record-row { flex-wrap: wrap; gap: 8px; } .record-actions { flex-direction: row; width: 100%; } .ev { grid-template-columns: 40px 16px minmax(0, 1fr); } .ev .acts { grid-column: 3; flex-direction: row; } }
+
+    /* Overlays */
+    .overlay { display: none; position: fixed; inset: 0; background: rgba(15,23,42,.6); z-index: 9990; align-items: center; justify-content: center; padding: 18px; }
+    .overlay.show { display: flex; }
+    .dialog { background: var(--panel); color: var(--ink); border-radius: 16px; padding: 20px; width: min(460px, 96vw); box-shadow: 0 20px 60px rgba(0,0,0,.35); position: relative; }
+    .dialog h3 { margin: 0 0 8px; font-size: 16px; }
+    .dialog p { margin: 0 0 16px; color: var(--ink-2); }
+    .dialog .btn-row { display: flex; gap: 10px; justify-content: flex-end; }
+    .btn-yes { padding: 9px 18px; border: 0; border-radius: 9px; background: var(--danger); color: #fff; font-weight: 700; }
+    .btn-no { padding: 9px 18px; border: 0; border-radius: 9px; background: var(--panel-2); color: var(--ink-2); font-weight: 700; }
+    .dialog-close { position: absolute; right: 12px; top: 10px; border: 0; background: var(--panel-2); color: var(--ink); width: 32px; height: 32px; border-radius: 50%; font-size: 18px; }
+    .img-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 9998; align-items: center; justify-content: center; flex-direction: column; gap: 14px; padding: 20px; }
     .img-overlay.show { display: flex; }
-    .img-overlay img { max-width: 90vw; max-height: 72vh; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,0.4); }
-    #imgPopupName { color: #fff; font-size: 1.05rem; font-weight: 600; text-align: center; max-width: 90vw; word-break: break-word; line-height: 1.4; }
-
-    /* Position picker popup */
-    .pick-overlay {
-      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6); z-index: 9999; align-items: center; justify-content: center;
-    }
-    .pick-overlay.show { display: flex; }
-    .pick-popup {
-      background: #fff; border-radius: 14px; padding: 20px; max-width: 400px; width: 90%;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-    }
-    .pick-popup h3 { margin-bottom: 12px; color: #e74c3c; font-size: 1.1rem; }
-    .pick-option {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 10px 12px; margin-bottom: 8px; background: #f8f9fa; border-radius: 8px; cursor: pointer;
-    }
-    .pick-option:hover { background: #fee; }
-    .pick-option .pos { font-weight: 700; color: #6c5ce7; }
-    .pick-option .qty { font-size: 0.85rem; color: #7f8c8d; }
-
-    .search-rack-btn {
-      padding: 6px 14px; background: #6c5ce7; color: #fff; border: none; border-radius: 6px;
-      font-size: 0.8rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; align-self: center;
-    }
-    .search-rack-btn:hover { background: #5a4bd1; }
-
-    /* Token chips */
-    .token-bar {
-      background: #fff; padding: 14px 16px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      margin-bottom: 16px; display: none; flex-wrap: wrap; gap: 8px; align-items: center;
-    }
-    .token-bar .label { font-size: 0.8rem; color: #7f8c8d; font-weight: 600; margin-right: 4px; }
-    .token-chip {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 5px 12px; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
-      cursor: pointer; transition: all 0.15s; border: 2px solid transparent; user-select: none;
-    }
-    .token-chip.active { background: #3498db; color: #fff; border-color: #3498db; }
-    .token-chip.inactive { background: #ecf0f1; color: #7f8c8d; border-color: #dfe6e9; }
-    .token-chip.inactive:hover { border-color: #3498db; color: #3498db; }
-    .token-chip.active:hover { background: #e74c3c; border-color: #e74c3c; }
-    .token-chip .x { font-size: 0.7rem; margin-left: 2px; }
-
-    /* Location popup overlay — z above pick-overlay */
-    .loc-overlay {
-      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.6); z-index: 10001; align-items: center; justify-content: center;
-    }
-    .loc-overlay.show { display: flex; }
-    .loc-popup {
-      background: #fff; border-radius: 14px; padding: 20px; max-width: 400px; width: 90%;
-      text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-    }
-    .loc-popup h3 { margin-bottom: 12px; color: #6c5ce7; font-size: 1.2rem; }
+    .img-overlay img { max-width: 90vw; max-height: 72vh; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+    #imgPopupName { color: #fff; font-size: 15px; font-weight: 600; text-align: center; max-width: 90vw; word-break: break-word; }
+    .pick-option { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; margin-bottom: 8px; background: var(--panel-2); border-radius: 9px; }
+    .pick-option .pos { font-weight: 700; color: var(--accent); cursor: pointer; text-decoration: underline; }
+    .pick-option .q { font-size: 12.5px; color: var(--muted); }
+    .prep-popup { width: min(760px, 96vw); max-height: 86vh; overflow-y: auto; }
+    .prep-popup h3 { color: var(--k-adjusted); }
+    .loc-popup { text-align: center; }
     .loc-popup img { max-width: 100%; max-height: 50vh; border-radius: 10px; }
-    .loc-popup .close-btn {
-      margin-top: 14px; padding: 8px 24px; background: #e74c3c; color: #fff; border: none;
-      border-radius: 6px; font-size: 0.9rem; cursor: pointer; font-weight: 600;
-    }
-
-    .prep-overlay {
-      display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.72);
-      z-index: 10003; align-items: center; justify-content: center; padding: 18px;
-    }
-    .prep-overlay.show { display: flex; }
-    .prep-popup {
-      position: relative; background: #fff; border-radius: 14px; padding: 20px;
-      width: min(720px, 96vw); max-height: 84vh; overflow-y: auto;
-      box-shadow: 0 18px 50px rgba(0,0,0,0.35);
-    }
-    .prep-popup h3 { color: #5b21b6; margin-bottom: 5px; }
-    .prep-popup-close {
-      position: absolute; right: 12px; top: 10px; border: 0; background: #eef2f7;
-      width: 34px; height: 34px; border-radius: 50%; cursor: pointer; font-size: 1.2rem;
-    }
-    .prep-action-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-    .prep-open-btn, .warehouse-note-open-btn {
-      border-radius: 7px; padding: 5px 8px; font-size: .76rem; font-weight: 700; cursor: pointer;
-    }
-    .prep-open-btn { border: 1px solid #8b5cf6; background: #f5f3ff; color: #5b21b6; }
-    .warehouse-note-open-btn { border: 1px solid #f59e0b; background: #fffbeb; color: #92400e; }
-
-    .empty-state { text-align: center; padding: 30px; color: #95a5a6; font-size: 0.9rem; }
-    .loading { text-align: center; padding: 30px; color: #95a5a6; }
-    .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-
-    .success-banner {
-      background: #00b894; color: #fff; padding: 14px; border-radius: 8px; text-align: center;
-      font-weight: 700; margin-bottom: 16px; display: none;
-    }
-    .success-banner .undo-btn {
-      display: inline-block; margin-left: 12px; padding: 6px 18px;
-      background: #fff; color: #e74c3c; border: 2px solid #fff; border-radius: 6px;
-      font-weight: 700; font-size: 0.9rem; cursor: pointer; vertical-align: middle;
-    }
-    .success-banner .undo-btn:hover { background: #ffeaea; border-color: #ffeaea; }
-
-    .result-card.removed {
-      opacity: 0.5; background: #ffeaea; position: relative;
-    }
-    .result-card.removed .details .title { text-decoration: line-through; }
-    .removed-badge {
-      display: inline-block; background: #e74c3c; color: #fff; padding: 2px 8px;
-      border-radius: 6px; font-weight: 700; font-size: 0.75rem; margin-left: 6px;
-    }
-
-    /* Confirm popup */
-    .confirm-overlay {
-      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-      background: rgba(0,0,0,0.5); z-index: 10002; align-items: center; justify-content: center;
-    }
-    .confirm-overlay.show { display: flex; }
-    .confirm-box {
-      background: #fff; border-radius: 14px; padding: 24px; max-width: 360px; width: 90%;
-      text-align: center; box-shadow: 0 8px 30px rgba(0,0,0,0.3);
-    }
-    .confirm-box h3 { margin-bottom: 8px; color: #e74c3c; font-size: 1.1rem; }
-    .confirm-box p { font-size: 0.9rem; color: #555; margin-bottom: 18px; }
-    .confirm-box .btn-row { display: flex; gap: 10px; justify-content: center; }
-    .confirm-box .btn-yes {
-      padding: 10px 24px; background: #e74c3c; color: #fff; border: none; border-radius: 8px;
-      font-weight: 700; font-size: 0.95rem; cursor: pointer;
-    }
-    .confirm-box .btn-yes:hover { background: #c0392b; }
-    .confirm-box .btn-no {
-      padding: 10px 24px; background: #ecf0f1; color: #555; border: none; border-radius: 8px;
-      font-weight: 700; font-size: 0.95rem; cursor: pointer;
-    }
-    .confirm-box .btn-no:hover { background: #dfe6e9; }
-
-    /* Night mode overrides */
-    html.ss-theme-night body { background: #0f172a; color: #e2e8f0; }
-    html.ss-theme-night .order-context,
-    html.ss-theme-night .search-box,
-    html.ss-theme-night .panel,
-    html.ss-theme-night .token-bar,
-    html.ss-theme-night .pick-popup,
-    html.ss-theme-night .loc-popup,
-    html.ss-theme-night .confirm-box {
-      background: #1e293b;
-      color: #e2e8f0;
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: 0 10px 28px rgba(0,0,0,0.45);
-    }
-    html.ss-theme-night .order-context .info h2,
-    html.ss-theme-night .result-card .title,
-    html.ss-theme-night .confirm-box h3,
-    html.ss-theme-night .pick-popup h3,
-    html.ss-theme-night .loc-popup h3 {
-      color: #e2e8f0;
-    }
-    html.ss-theme-night .order-context .info .meta,
-    html.ss-theme-night .result-card .meta,
-    html.ss-theme-night .pick-option .qty,
-    html.ss-theme-night .empty-state,
-    html.ss-theme-night .loading,
-    html.ss-theme-night .token-bar .label,
-    html.ss-theme-night .confirm-box p {
-      color: #94a3b8;
-    }
-    html.ss-theme-night .order-context img,
-    html.ss-theme-night .result-card img {
-      background: #0f172a;
-      border: 1px solid rgba(255,255,255,0.08);
-    }
-    html.ss-theme-night .search-input {
-      background: #0f172a;
-      border-color: rgba(255,255,255,0.12);
-      color: #e2e8f0;
-    }
-    html.ss-theme-night .search-input::placeholder { color: #94a3b8; }
-    html.ss-theme-night .custom-items-filter { background: rgba(22,163,74,.14); color: #86efac; }
-    html.ss-theme-night .prep-popup { background: #111827; color: #e5e7eb; }
-    html.ss-theme-night .prep-popup-close { background: #334155; color: #f8fafc; }
-    html.ss-theme-night .panel-body { background: #111827; }
-    html.ss-theme-night .result-card {
-      background: #111827;
-      border: 1px solid rgba(255,255,255,0.06);
-    }
-    html.ss-theme-night .result-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,0.45); }
-    html.ss-theme-night .pick-option {
-      background: #0f172a;
-    }
-    html.ss-theme-night .pick-option:hover { background: #111827; }
-    html.ss-theme-night .token-chip.inactive {
-      background: #1f2937;
-      color: #94a3b8;
-      border-color: #334155;
-    }
-    html.ss-theme-night .token-chip.inactive:hover {
-      border-color: #60a5fa;
-      color: #60a5fa;
-    }
-    html.ss-theme-night .token-chip.active:hover {
-      background: #c0392b;
-      border-color: #c0392b;
-    }
-    html.ss-theme-night .confirm-box .btn-no {
-      background: #334155;
-      color: #e2e8f0;
-    }
-    html.ss-theme-night .confirm-box .btn-no:hover { background: #475569; }
   </style>
   <script src="/static/location-preview.js?v=20260317a"></script>
   <script src="/static/i18n.js"></script>
 </head>
 <body>
-  <div class="container">
-    <div style="margin-bottom: 15px;">
-      <a id="backLink" href="/" style="text-decoration: none;">
-        <button data-i18n="back" style="padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 600;">Back</button>
-      </a>
+<div class="app">
+  <header class="topbar">
+    <a id="backLink" class="back-btn" href="/">← <span data-i18n="back">Back</span></a>
+    <div class="brand">
+      <h1 data-i18n="item_finder">Item Finder</h1>
+      <p data-i18n="finder_tagline">Track any item and its trail through the warehouse</p>
     </div>
+    <div class="kbd-hint"><kbd>/</kbd> search · <kbd>Esc</kbd> close</div>
+  </header>
 
-    <div class="success-banner" id="successBanner">Location assigned! You can close this tab.</div>
+  <div class="success-banner" id="successBanner"></div>
 
-    <div class="order-context" id="orderContext" style="display:none;">
-      <img id="orderImg" src="" onerror="this.style.display='none'">
-      <div class="info">
-        <h2 id="orderTitle"></h2>
-        <div class="meta">
-          <span id="orderBarcode"></span>
-          <span id="orderIdDisplay"></span>
+  <section class="search" aria-label="Search">
+    <div class="search-row">
+      <div class="search-field">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input type="text" class="search-input" id="searchInput" data-i18n="finder_search_placeholder" placeholder="Scan a barcode for the full trail, or type a few words to find candidates" autofocus autocomplete="off" spellcheck="false">
+        <button type="button" class="search-clear" id="searchClear" aria-label="Clear">×</button>
+      </div>
+      <button class="search-btn" id="searchBtn" data-i18n="search">Search</button>
+    </div>
+    <div class="search-options">
+      <span class="seg" role="group" aria-label="Name matching">
+        <button type="button" data-mode="all" aria-pressed="true" data-i18n="all_words">All words</button>
+        <button type="button" data-mode="any" aria-pressed="false" data-i18n="any_words">Any words</button>
+      </span>
+      <select id="matchMode" hidden><option value="all">All words</option><option value="any">Any words</option></select>
+      <label><input type="checkbox" id="customItemsOnly"> <span data-i18n="custom_items_only">Custom items only</span></label>
+      <label><input type="checkbox" id="recordsFamily"> <span data-i18n="related_upcs">Include related UPCs (-suffix units)</span></label>
+      <label><input type="checkbox" id="includeHistory" checked> <span data-i18n="ledger_memory">Search the ledger too (removed items)</span></label>
+    </div>
+    <div class="hint" data-i18n="finder_hint">A complete barcode opens the trail straight away. Words search names; use Any words when names differ. Short numbers are sizes, not codes.</div>
+  </section>
+
+  <section class="case" id="orderContext">
+    <img id="orderImg" src="" alt="" onerror="this.style.display='none'">
+    <div class="case-body">
+      <div class="eyebrow" id="caseEyebrow">Looking for</div>
+      <h2 id="orderTitle"></h2>
+      <div class="meta"><span id="orderBarcode"></span><span id="orderIdDisplay"></span></div>
+      <div class="tokens" id="tokenBar" style="display:none"></div>
+    </div>
+  </section>
+
+  <div class="workspace">
+    <aside class="results" aria-label="Search results">
+      <div class="panel result-group" id="warehouseGroup">
+        <div class="panel-head" data-toggle="warehouseGroup"><span class="chev">▼</span><span data-i18n="warehouse">Warehouse</span><span class="sub" data-i18n="search_result_hint">Click a result to open its trail</span><span class="count" id="warehouseCount">0</span></div>
+        <div class="result-list" id="warehouseResults"><div class="empty" data-i18n="search_to_find">Search to find items</div></div>
+      </div>
+      <div class="panel result-group" id="rawbolGroup">
+        <div class="panel-head" data-toggle="rawbolGroup"><span class="chev">▼</span><span data-i18n="bol_received">BOL received</span><span class="count" id="rawbolCount">0</span></div>
+        <div class="result-list" id="rawbolResults"><div class="empty" data-i18n="search_to_find">Search to find items</div></div>
+      </div>
+      <div class="panel result-group" id="historyPanel" hidden>
+        <div class="panel-head" data-toggle="historyPanel"><span class="chev">▼</span><span data-i18n="ledger_matches">Ledger memory</span><span class="sub" data-i18n="seen_in_ledger">seen in ledger</span><span class="count" id="historyCount">0</span></div>
+        <div class="result-list" id="historyResults"></div>
+      </div>
+    </aside>
+
+    <main class="panel trail" id="trailPanel" aria-live="polite">
+      <div class="trail-empty" id="trailEmpty">
+        <div class="icon">🔎</div>
+        <h3 data-i18n="trail_empty_title">No item selected</h3>
+        <div data-i18n="trail_empty_text">Scan a barcode or pick a result to see where the item has been.</div>
+      </div>
+      <div id="trailContent" hidden></div>
+      <details class="records" id="recordsSection" hidden>
+        <summary><span class="chev">▶</span><span data-i18n="all_records">All records</span><span class="sub" style="font-weight:500;color:var(--muted)">every table that mentions this UPC</span></summary>
+        <div class="records-body">
+          <input type="hidden" id="recordsUpc">
+          <button type="button" id="recordsSearch" hidden></button>
+          <div class="record-settings">
+            <label><input type="checkbox" id="recordsSupporting"> Show supporting records (raw internal tables)</label>
+          </div>
+          <div id="recordsResults"></div>
         </div>
-      </div>
-    </div>
+      </details>
+    </main>
+  </div>
+</div>
 
-    <div class="search-box">
-      <div class="search-input-wrapper">
-        <input type="text" class="search-input" id="searchInput" data-i18n="search_by_title" placeholder="Search by title, barcode, UPC..." autofocus>
-        <button class="search-btn" id="searchBtn" data-i18n="search">Search</button>
-      </div>
-      <label class="custom-items-filter">Name matching:
-        <select id="matchMode"><option value="all">All words</option><option value="any">Any words (broader)</option></select>
-      </label>
-      <div style="color:#64748b;font-size:.85rem;margin-top:8px">Select a few distinctive words or sizes. Short numbers search names; complete barcodes search exact codes. Use Any words when names differ. Confirmed matches teach Finder alternate names; Undo reverses that learning.</div>
-      <label class="custom-items-filter">
-        <input type="checkbox" id="customItemsOnly">
-        <span>Custom Items</span>
-      </label>
-      <label class="custom-items-filter">
-        <input type="checkbox" id="includeHistory">
-        <span>Include Rack History</span>
-      </label>
-    </div>
-
-    <div class="token-bar" id="tokenBar">
-      <span class="label" data-i18n="words">Words:</span>
-    </div>
-
-    <section class="upc-records" aria-label="All UPC data">
-      <h3>Item history</h3>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <input id="recordsUpc" aria-label="UPC for all data" placeholder="Enter UPC" style="padding:8px;min-width:0">
-        <button type="button" id="recordsSearch" class="all-data-btn" style="margin:0">View item</button>
-      </div>
-      <div class="record-settings">
-        <label><input type="checkbox" id="recordsFamily"> Include related UPCs</label>
-        <label><input type="checkbox" id="recordsSupporting"> Show supporting records</label>
-      </div>
-      <div id="recordsResults" aria-live="polite" style="margin-top:16px">Enter a UPC or choose “View history” on a search result.</div>
-    </section>
-
-    <!-- Confirm removal popup -->
-    <div class="confirm-overlay" id="confirmOverlay">
-      <div class="confirm-box">
-        <h3 data-i18n="remove_from_inventory">Remove from Inventory?</h3>
-        <p id="confirmMsg" data-i18n="reduce_qty_by_1">This will reduce the quantity by 1.</p>
-        <div class="btn-row">
-          <button class="btn-no" onclick="cancelConfirm()" data-i18n="cancel">Cancel</button>
-          <button class="btn-yes" id="confirmYesBtn" data-i18n="yes_remove">Yes, Remove</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Image popup -->
-    <div class="img-overlay" id="imgOverlay" onclick="closeImgPopup()">
-      <img id="imgPopupImg" src="" onclick="event.stopPropagation()">
-      <div id="imgPopupName" onclick="event.stopPropagation()"></div>
-    </div>
-
-    <!-- Position picker popup -->
-    <div class="pick-overlay" id="pickOverlay" onclick="closePickPopup()">
-      <div class="pick-popup" onclick="event.stopPropagation()">
-        <h3 data-i18n="pick_position_to_remove">Pick position to remove from</h3>
-        <div id="pickOptions"></div>
-        <button class="close-btn" data-i18n="cancel" style="margin-top:10px;padding:8px 24px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:600;" onclick="closePickPopup()">Cancel</button>
-      </div>
-    </div>
-
-    <!-- Location image popup -->
-    <div class="loc-overlay" id="locOverlay" onclick="closeLocPopup()">
-      <div class="loc-popup" onclick="event.stopPropagation()">
-        <h3 id="locPopupTitle"></h3>
-        <img id="locPopupImg" src="">
-        <br><button class="close-btn" data-i18n="close" onclick="closeLocPopup()">Close</button>
-      </div>
-    </div>
-
-    <div class="prep-overlay" id="prepOverlay" onclick="closePrepPopup()">
-      <div class="prep-popup" onclick="event.stopPropagation()">
-        <button type="button" class="prep-popup-close" onclick="closePrepPopup()" aria-label="Close">×</button>
-        <div id="prepPopupContent"></div>
-      </div>
-    </div>
-
-    <div class="panels">
-      <div class="panel panel-history" id="historyPanel" hidden>
-        <div class="panel-header">Rack History <span class="count" id="historyCount">0</span></div>
-        <div class="panel-body" id="historyResults"></div>
-      </div>
-      <div class="panel panel-warehouse">
-        <div class="panel-header"><span data-i18n="warehouse_searchrack">Warehouse (searchRack)</span> <span class="count" id="warehouseCount">0</span></div>
-        <div class="panel-body" id="warehouseResults">
-          <div class="empty-state" data-i18n="search_to_find">Search to find items</div>
-        </div>
-      </div>
-      <div class="panel panel-rawbol">
-        <div class="panel-header"><span data-i18n="macy_bol">Macy BOL (rawbol)</span> <span class="count" id="rawbolCount">0</span></div>
-        <div class="panel-body" id="rawbolResults">
-          <div class="empty-state" data-i18n="search_to_find">Search to find items</div>
-        </div>
-      </div>
+<!-- Confirm removal -->
+<div class="overlay" id="confirmOverlay" style="z-index:10002">
+  <div class="dialog">
+    <h3 data-i18n="remove_from_inventory">Remove from Inventory?</h3>
+    <p id="confirmMsg" data-i18n="reduce_qty_by_1">This will reduce the quantity by 1.</p>
+    <div class="btn-row">
+      <button class="btn-no" onclick="cancelConfirm()" data-i18n="cancel">Cancel</button>
+      <button class="btn-yes" id="confirmYesBtn" data-i18n="yes_remove">Yes, Remove</button>
     </div>
   </div>
+</div>
+
+<!-- Image popup -->
+<div class="img-overlay" id="imgOverlay" onclick="closeImgPopup()">
+  <img id="imgPopupImg" src="" alt="" onclick="event.stopPropagation()">
+  <div id="imgPopupName" onclick="event.stopPropagation()"></div>
+</div>
+
+<!-- Position picker -->
+<div class="overlay" id="pickOverlay" onclick="closePickPopup()" style="z-index:9999">
+  <div class="dialog" onclick="event.stopPropagation()">
+    <h3 data-i18n="pick_position_to_remove">Pick position to remove from</h3>
+    <div id="pickOptions"></div>
+    <div class="btn-row"><button class="btn-no" data-i18n="cancel" onclick="closePickPopup()">Cancel</button></div>
+  </div>
+</div>
+
+<!-- Location image fallback -->
+<div class="overlay" id="locOverlay" onclick="closeLocPopup()" style="z-index:10001">
+  <div class="dialog loc-popup" onclick="event.stopPropagation()">
+    <h3 id="locPopupTitle"></h3>
+    <img id="locPopupImg" src="" alt="">
+    <div class="btn-row" style="justify-content:center;margin-top:12px"><button class="btn-no" data-i18n="close" onclick="closeLocPopup()">Close</button></div>
+  </div>
+</div>
+
+<!-- Detail drawer (prep, notes, record details) -->
+<div class="overlay" id="prepOverlay" onclick="closePrepPopup()" style="z-index:10003">
+  <div class="dialog prep-popup" onclick="event.stopPropagation()">
+    <button type="button" class="dialog-close" onclick="closePrepPopup()" aria-label="Close">×</button>
+    <div id="prepPopupContent"></div>
+  </div>
+</div>
 
 <script>
 const params = new URLSearchParams(window.location.search);
@@ -450,39 +421,45 @@ const listingStore = params.get('listing_store') || '';
 const listingKey = params.get('listing_key') || '';
 const listingId = params.get('listing_id') || '';
 const isListingMatch = !!(listingStore && listingKey);
+const initialQuery = params.get('q') || '';
 
 const backLink = document.getElementById('backLink');
-if (backLink) {
-  backLink.href = (returnTo && returnTo.startsWith('/')) ? returnTo : '/';
-}
+backLink.href = (returnTo && returnTo.startsWith('/')) ? returnTo : '/';
 
-// Token chip state: {word: string, active: boolean}
 let tokens = [];
-
 const searchInput = document.getElementById('searchInput');
 const searchBtn = document.getElementById('searchBtn');
+const searchClear = document.getElementById('searchClear');
 const customItemsOnly = document.getElementById('customItemsOnly');
 const includeHistory = document.getElementById('includeHistory');
+const familyToggle = document.getElementById('recordsFamily');
+const matchModeSelect = document.getElementById('matchMode');
 
-// Show order context if we have info
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function attrEsc(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+function formatUpcDisplay(code) {
+  const s = String(code || '').trim();
+  const [base, ...rest] = s.split('-');
+  if (/^\d+$/.test(base) && base.length <= 12) return [base.padStart(12, '0'), ...rest].join('-');
+  return s;
+}
+function isBarcodeQuery(q) { return /^\d{7,14}(?:-[\w-]+)?$/.test(String(q || '').trim()); }
+const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="100%" height="100%" fill="#e2e8f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#94a3b8" font-size="8">No img</text></svg>');
+
+// ---------------------------------------------------------------- Case (order / listing context)
 if (orderTitle) {
-  document.getElementById('orderContext').style.display = 'flex';
+  document.getElementById('orderContext').classList.add('show');
   document.getElementById('orderTitle').textContent = orderTitle;
-  if (orderBarcode) document.getElementById('orderBarcode').textContent = 'UPC: ' + formatUpcDisplay(orderBarcode);
-  if (orderId) {
-    document.getElementById('orderIdDisplay').textContent = ' | Order #' + orderId;
-  } else if (isListingMatch) {
-    document.getElementById('orderIdDisplay').textContent = ` | ${listingStore.toUpperCase()} listing`;
-  }
+  document.getElementById('caseEyebrow').textContent = orderId ? 'Match this sold order to a shelf' : (isListingMatch ? 'Match this store listing to a shelf' : 'Looking for');
+  if (orderBarcode) document.getElementById('orderBarcode').textContent = 'UPC ' + formatUpcDisplay(orderBarcode);
+  if (orderId) document.getElementById('orderIdDisplay').textContent = 'Order #' + orderId;
+  else if (isListingMatch) document.getElementById('orderIdDisplay').textContent = `${listingStore.toUpperCase()} listing`;
 
-  // Set order image if provided, otherwise try to fetch from rawbol using barcode
   const orderImgEl = document.getElementById('orderImg');
   if (orderImage) {
     orderImgEl.src = orderImage;
-    orderImgEl.style.display = 'block';
     orderImgEl.onclick = () => showImgPopup(orderImage, orderTitle);
   } else if (orderBarcode) {
-    // Try to fetch image from rawbol.db using barcode
     fetch('/api/lookup-image-by-barcode?barcode=' + encodeURIComponent(orderBarcode))
       .then(r => r.json())
       .then(data => {
@@ -490,116 +467,64 @@ if (orderTitle) {
           orderImgEl.src = data.image_url;
           orderImgEl.style.display = 'block';
           orderImgEl.onclick = () => showImgPopup(data.image_url, orderTitle);
-        } else {
-          orderImgEl.style.display = 'none';
-        }
+        } else orderImgEl.style.display = 'none';
       })
       .catch(() => { orderImgEl.style.display = 'none'; });
-  } else {
-    orderImgEl.style.display = 'none';
-  }
+  } else orderImgEl.style.display = 'none';
 
-  // Build token chips from title words (all start inactive for manual use)
-  // Keep numeric sizes; filter punctuation and filler words.
   const fillerWords = new Set(['a', 'an', 'the', 'for', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'of', 'with', 'by', 'from', 'as', 'is', 'it', 'its', 'be', 'are', 'was', 'were', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'this', 'that', 'these', 'those', 'am', 'if', 'then', 'so', 'up', 'out', 'no', 'not', 'only', 'own', 'into', 'over', 'after', 'before', 'between', 'under', 'again', 'further', 'once']);
-  const words = (orderTitle.match(/\d+(?:\.\d+)?|[^\W\d_]+/gu) || [])
-    // Split mixed terms at number/letter boundaries:
-    // "3piece", "3pc", and "3-pc" all become separate "3" + word bubbles.
-    .map(w => w.trim())
-    .filter(w => w.length > 0)
-    .filter(w => !fillerWords.has(w.toLowerCase()));
+  const words = (orderTitle.match(/\d+(?:\.\d+)?|[^\W\d_]+/gu) || []).map(w => w.trim()).filter(w => w.length > 0).filter(w => !fillerWords.has(w.toLowerCase()));
   tokens = words.filter((w, i) => words.findIndex(other => other.toLowerCase() === w.toLowerCase()) === i).map(w => ({word: w, active: false}));
   renderTokens();
 }
-
-searchBtn.addEventListener('click', () => doSearch());
-searchInput.addEventListener('keyup', (e) => { if (e.key === 'Enter') doSearch(); });
-customItemsOnly.addEventListener('change', () => doSearch());
-includeHistory.addEventListener('change', () => doSearch());
-document.getElementById('matchMode').addEventListener('change', () => doSearch());
-searchInput.addEventListener('input', () => {
-  const selected = new Set(searchInput.value.toLowerCase().split(/\s+/));
-  tokens.forEach(token => { token.active = selected.has(token.word.toLowerCase()); });
-  renderTokens();
-});
 
 function renderTokens() {
   const bar = document.getElementById('tokenBar');
   if (!tokens.length) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
-  bar.innerHTML = '<span class="label">' + t('words') + '</span>' + tokens.map((tk, i) =>
-    `<span class="token-chip ${tk.active ? 'active' : 'inactive'}" onclick="toggleToken(${i})">${esc(tk.word)}${tk.active ? ' <span class="x">&times;</span>' : ''}</span>`
+  bar.innerHTML = '<span class="label">' + esc(t('words')) + '</span>' + tokens.map((tk, i) =>
+    `<button type="button" class="token ${tk.active ? 'active' : ''}" onclick="toggleToken(${i})">${esc(tk.word)}${tk.active ? ' ×' : ''}</button>`
   ).join('');
 }
-
 function toggleToken(idx) {
   tokens[idx].active = !tokens[idx].active;
   renderTokens();
-  syncSearchFromTokens();
+  searchInput.value = tokens.filter(t => t.active).map(t => t.word).join(' ');
   doSearch();
 }
 
-function syncSearchFromTokens() {
-  searchInput.value = tokens.filter(t => t.active).map(t => t.word).join(' ');
-}
+// ---------------------------------------------------------------- Search wiring
+searchBtn.addEventListener('click', () => doSearch());
+searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); doSearch(); } });
+searchInput.addEventListener('input', () => {
+  searchClear.classList.toggle('show', !!searchInput.value);
+  const selected = new Set(searchInput.value.toLowerCase().split(/\s+/));
+  tokens.forEach(token => { token.active = selected.has(token.word.toLowerCase()); });
+  renderTokens();
+});
+searchClear.addEventListener('click', () => { searchInput.value = ''; searchClear.classList.remove('show'); searchInput.focus(); doSearch(); });
+customItemsOnly.addEventListener('change', () => doSearch());
+includeHistory.addEventListener('change', () => doSearch());
+familyToggle.addEventListener('change', () => { if (trailState.upc) openTrail(trailState.upc, {family: familyToggle.checked, forced: true}); if (recordsData) showAllUpcData(document.getElementById('recordsUpc').value); });
+document.querySelectorAll('.seg [data-mode]').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('.seg [data-mode]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
+  matchModeSelect.value = button.dataset.mode;
+  doSearch();
+}));
+document.querySelectorAll('[data-toggle]').forEach(head => head.addEventListener('click', () => document.getElementById(head.dataset.toggle).classList.toggle('collapsed')));
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeImgPopup(); closePickPopup(); closeLocPopup(); closePrepPopup(); cancelConfirm(); return; }
+  if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) { e.preventDefault(); searchInput.focus(); searchInput.select(); }
+});
 
-// Location popup
-function showLocPopup(locCode, picPos) {
-  if (window.SSLocationPreview) {
-    window.SSLocationPreview.openForLocation(locCode, picPos, `Location: ${locCode}`);
-    return;
-  }
-  document.getElementById('locPopupTitle').textContent = locCode;
-  const img = document.getElementById('locPopupImg');
-  // DEPRECATED: pictureposition field — images now live in /static/shelves/
-  // picPos kept for backwards compat; fall back to locCode as filename
-  const raw = (picPos && picPos.trim()) ? picPos.trim() : locCode;
-  // Shelf images are lowercase .png files named after the position code
-  const filename = raw ? raw.toLowerCase().replace(/\.png$/i, '') + '.png' : '';
-  if (filename) {
-    img.src = '/shelf-image/' + encodeURIComponent(filename.replace(/\.png$/i, '')) + '.png?t=' + Date.now();
-    img.style.display = 'block';
-    img.onerror = function() { this.style.display = 'none'; };
-  } else {
-    img.style.display = 'none';
-  }
-  document.getElementById('locOverlay').classList.add('show');
+function syncUrl(q) {
+  if (orderTitle || isListingMatch) return;
+  try {
+    const url = new URL(window.location.href);
+    if (q) url.searchParams.set('q', q); else url.searchParams.delete('q');
+    history.replaceState(null, '', url);
+  } catch (_) {}
 }
-function closeLocPopup() {
-  document.getElementById('locOverlay').classList.remove('show');
-}
-
-// Auto-search on load: prioritize UPC/barcode over title words
-if (orderBarcode) {
-  // Use barcode/UPC as the default search (most accurate)
-  searchInput.value = orderBarcode;
-  searchInput.style.color = '#999';
-  searchInput.addEventListener('focus', function onFocus() {
-    searchInput.style.color = '';
-    searchInput.removeEventListener('focus', onFocus);
-  }, {once: true});
-  setTimeout(() => doSearch(orderBarcode), 200);
-} else if (orderTitle && tokens.length) {
-  // Fallback to cleaned title words if no barcode available
-  const cleanedQuery = tokens.map(t => t.word).join(' ');
-  searchInput.value = cleanedQuery;
-  searchInput.style.color = '#999';
-  searchInput.addEventListener('focus', function onFocus() {
-    searchInput.style.color = '';
-    searchInput.removeEventListener('focus', onFocus);
-  }, {once: true});
-  setTimeout(() => doSearch(cleanedQuery), 200);
-}
-
-function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-function attrEsc(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-function formatUpcDisplay(code) {
-  const s = String(code || '').trim();
-  if (/^\d+$/.test(s) && s.length <= 12) return s.padStart(12, '0');
-  return s;
-}
-
-const missingImg = 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect width="100%" height="100%" fill="#f0f0f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="8">No img</text></svg>');
 
 let searchSequence = 0;
 let searchController = null;
@@ -609,26 +534,21 @@ async function doSearch(overrideQuery) {
   if (searchController) searchController.abort();
   searchController = new AbortController();
   const q = (overrideQuery || searchInput.value).trim();
-  if (/^\d{7,}(?:-\w+)?$/.test(q)) showAllUpcData(q);
+  searchClear.classList.toggle('show', !!searchInput.value);
+  syncUrl(q);
+  if (isBarcodeQuery(q)) openTrail(q, {family: familyToggle.checked});
   const customOnly = customItemsOnly.checked;
   document.getElementById('historyPanel').hidden = !includeHistory.checked;
-  renderHistory([]);
-  if (!q && !customOnly) {
-    renderWarehouse([]);
-    renderRawbol([]);
-    return;
-  }
+  if (!q && !customOnly) { renderWarehouse([]); renderRawbol([]); renderHistory([]); return; }
 
-  document.getElementById('warehouseResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
-  document.getElementById('rawbolResults').innerHTML = '<div class="loading"><div class="spinner"></div>' + t('searching') + '</div>';
-  if (includeHistory.checked) document.getElementById('historyResults').textContent = t('searching');
-
+  const loading = '<div class="loading"><div class="spinner"></div>' + esc(t('searching')) + '</div>';
+  document.getElementById('warehouseResults').innerHTML = loading;
+  document.getElementById('rawbolResults').innerHTML = loading;
+  if (includeHistory.checked) document.getElementById('historyResults').innerHTML = loading;
   try {
     const resp = await fetch('/api/finder', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      signal: searchController.signal,
-      body: JSON.stringify({q: q, custom_only: customOnly, include_history: includeHistory.checked, match_mode: document.getElementById('matchMode').value})
+      method: 'POST', headers: {'Content-Type': 'application/json'}, signal: searchController.signal,
+      body: JSON.stringify({q, custom_only: customOnly, include_history: includeHistory.checked, match_mode: matchModeSelect.value})
     });
     if (!resp.ok) throw new Error('Search failed');
     const data = await resp.json();
@@ -639,93 +559,139 @@ async function doSearch(overrideQuery) {
   } catch (e) {
     if (e.name === 'AbortError' || sequence !== searchSequence) return;
     renderHistory([], true);
-    document.getElementById('warehouseResults').innerHTML = '<div class="empty-state">' + t('error_searching') + '</div>';
-    document.getElementById('rawbolResults').innerHTML = '<div class="empty-state">' + t('error_searching') + '</div>';
+    document.getElementById('warehouseResults').innerHTML = '<div class="empty">' + esc(t('error_searching')) + '</div>';
+    document.getElementById('rawbolResults').innerHTML = '<div class="empty">' + esc(t('error_searching')) + '</div>';
   }
 }
 
-function renderHistory(items, error) {
-  document.getElementById('historyCount').textContent = items.length;
-  const el = document.getElementById('historyResults');
-  if (error || !items.length) {
-    el.innerHTML = '<div class="empty-state">' + (error ? t('error_searching') : t('no_results_found')) + '</div>';
-    return;
-  }
-  el.innerHTML = items.map(item => `<div class="result-card"><div class="details">
-    <div class="title">${esc(item.title)}</div>
-    <div class="meta">UPC: ${esc(formatUpcDisplay(item.barcode))} | Quantity: ${esc(String(item.quantity_removed ?? ''))}</div>
-    <div class="meta">${esc(item.removal_type)} | ${esc(item.removed_at)}${item.undone_at ? ' | Undone: ' + esc(item.undone_at) : ''}</div>
-    <div class="loc-badge">${esc(item.item_position || 'No location')}</div>
-    ${allDataButton(item.barcode)}
-  </div></div>`).join('');
+function locationChip(rawLoc, picPos, extraClass) {
+  if (!rawLoc) return '';
+  return `<span class="loc ${extraClass || ''}" data-loc="${attrEsc(rawLoc)}" data-pic="${attrEsc(picPos || '')}" onclick="event.stopPropagation();showLocPopup(this.dataset.loc, this.dataset.pic)">${esc(rawLoc)}</span>`;
 }
 
 function renderWarehouse(items) {
   const el = document.getElementById('warehouseResults');
   document.getElementById('warehouseCount').textContent = items.length;
-
   window._warehouseItems = items;
-  if (!items.length) {
-    el.innerHTML = '<div class="empty-state">' + t('no_results_found') + '</div>';
-    return;
-  }
-
-  // Store items for position picker logic
-  window._warehouseItems = items;
-
+  if (!items.length) { el.innerHTML = '<div class="empty">' + esc(t('no_results_found')) + '</div>'; return; }
   el.innerHTML = items.map((item, idx) => {
     const imgSrc = item.image || missingImg;
     const rawItemPosition = String(item.item_position || '').trim();
-    const picPos = String(item.pictureposition || '').trim(); // DEPRECATED: pictureposition field
-    const rawLoc = (picPos && (!rawItemPosition || rawItemPosition.toLowerCase() === 'picture'))
-      ? picPos
-      : (rawItemPosition || picPos);
-    const loc = esc(rawLoc);
+    const picPos = String(item.pictureposition || '').trim();
+    const rawLoc = (picPos && (!rawItemPosition || rawItemPosition.toLowerCase() === 'picture')) ? picPos : (rawItemPosition || picPos);
     const locAttr = attrEsc(rawLoc);
-    const picPosEsc = attrEsc(picPos);
-    const locBadgeHtml = loc
-      ? `<span class="loc-badge" style="cursor:pointer;" data-loc="${locAttr}" data-pic="${picPosEsc}" onclick="showLocPopup(this.dataset.loc, this.dataset.pic)">${loc}</span>`
-      : '';
-    // Match either a sold order or a persistent store listing; otherwise remove.
     const actionBtn = (orderId || isListingMatch)
-      ? `<button class="search-rack-btn" data-idx="${idx}" data-searchrack-id="${attrEsc(item.id)}" data-barcode="${attrEsc(item.barcode)}" data-location="${locAttr}" onclick="handleMatchFromButton(this)">${t('match') || 'Match'}</button>`
-      : `<button class="remove-btn" data-idx="${idx}" onclick="handleRemove(${item.id}, '${esc(item.barcode)}', this)">${t('remove')}</button>`;
-
+      ? `<button class="search-rack-btn" data-idx="${idx}" data-searchrack-id="${attrEsc(item.id)}" data-barcode="${attrEsc(item.barcode)}" data-location="${locAttr}" onclick="event.stopPropagation();handleMatchFromButton(this)">${esc(t('match') === 'match' ? 'Match' : t('match'))}</button>`
+      : `<button class="remove-btn" data-idx="${idx}" onclick="event.stopPropagation();handleRemove(${Number(item.id)}, this.dataset.barcode, this)" data-barcode="${attrEsc(item.barcode)}">${esc(t('remove'))}</button>`;
     const itemTitle = item.title || '';
     const uniqueAliases = [...new Map((item.aliases || []).map(alias => [alias.title, alias])).values()];
-    const aliasesHtml = uniqueAliases.length ? `<details style="margin-top:8px" ${uniqueAliases.some(alias => alias.matched) ? 'open' : ''}>
-      <summary>Previously matched as… (${uniqueAliases.length})</summary>
-      ${uniqueAliases.map(alias => `<div style="margin-top:6px;font-size:.85rem">
-        <span>${esc(alias.title)}</span> ${alias.matched ? '<strong> · Search match</strong>' : ''}
-        <button type="button" data-alias-id="${attrEsc(alias.id)}" data-alias-source="${attrEsc(alias.source)}" onclick="forgetFinderAlias(this)">Forget</button>
-      </div>`).join('')}
+    const aliasesHtml = uniqueAliases.length ? `<details class="aliases" ${uniqueAliases.some(alias => alias.matched) ? 'open' : ''} onclick="event.stopPropagation()">
+      <summary>${esc(t('previously_matched_as'))}… (${uniqueAliases.length})</summary>
+      ${uniqueAliases.map(alias => `<div><span>${esc(alias.title)}</span>${alias.matched ? '<strong>· match</strong>' : ''}<button type="button" data-alias-id="${attrEsc(alias.id)}" data-alias-source="${attrEsc(alias.source)}" onclick="forgetFinderAlias(this)">${esc(t('forget'))}</button></div>`).join('')}
     </details>` : '';
     const warehouseNote = String(item.warehouse_note || '').trim();
     const prepSummary = item.item_prep_summary || {};
     const hasPrep = String(item.barcode || '').includes('-') && !!prepSummary.has_content;
     const noteActions = (warehouseNote || hasPrep)
-      ? `<div class="prep-action-row">
-          ${warehouseNote ? `<button type="button" class="warehouse-note-open-btn" data-note="${attrEsc(warehouseNote)}" data-barcode="${attrEsc(item.barcode)}">Warehouse Note</button>` : ''}
-          ${hasPrep ? `<button type="button" class="prep-open-btn" data-barcode="${attrEsc(item.barcode)}">Item Prep</button>` : ''}
-        </div>`
-      : '';
-    return `<div class="result-card" id="wh-card-${item.id}">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${esc(itemTitle)}" style="cursor:pointer">
+      ? `<div class="mini-actions">
+          ${warehouseNote ? `<button type="button" class="mini-btn note warehouse-note-open-btn" data-note="${attrEsc(warehouseNote)}" data-barcode="${attrEsc(item.barcode)}">${esc(t('warehouse_note'))}</button>` : ''}
+          ${hasPrep ? `<button type="button" class="mini-btn prep prep-open-btn" data-barcode="${attrEsc(item.barcode)}">${esc(t('item_prep'))}</button>` : ''}
+        </div>` : '';
+    const selected = trailState.upc && sameUpc(trailState.upc, item.barcode) ? ' selected' : '';
+    return `<div class="result-card${selected}" id="wh-card-${item.id}" data-open-upc="${attrEsc(item.barcode)}" title="${esc(t('open_trail'))}">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${attrEsc(itemTitle)}" alt="">
       <div class="details">
-        <div class="title clickable-title" data-img="${esc(imgSrc)}" data-title="${esc(itemTitle)}" style="cursor:pointer">${esc(itemTitle)}</div>
+        <div class="title">${esc(itemTitle)}</div>
         <div class="meta">
-          <span>UPC: ${esc(formatUpcDisplay(item.barcode))}</span>
-          <span class="qty-display" data-id="${item.id}">Qty: ${item.quantity || '?'}</span>
+          <span>${esc(formatUpcDisplay(item.barcode))}</span>
+          <span class="qty-display" data-id="${item.id}">${esc(t('qty') === 'qty' ? 'Qty' : t('qty'))}: <span class="qty">${esc(String(item.quantity ?? '?'))}</span></span>
         </div>
-        ${locBadgeHtml}
         ${noteActions}
-        ${aliasesHtml}
-        ${allDataButton(item.barcode)}
       </div>
-      ${actionBtn}
+      <div class="side">${locationChip(rawLoc, picPos)}${actionBtn}</div>
+      ${aliasesHtml}
     </div>`;
   }).join('');
 }
+
+function renderRawbol(items) {
+  const el = document.getElementById('rawbolResults');
+  document.getElementById('rawbolCount').textContent = items.length;
+  if (!items.length) { el.innerHTML = '<div class="empty">' + esc(t('no_results_found')) + '</div>'; return; }
+  el.innerHTML = items.map(item => {
+    const imgSrc = item.image_url || missingImg;
+    const upcRaw = item.upc || '';
+    const rawTitle = item.item_description || '';
+    const lots = (item.lot_data || []).slice(0, 3).map(ld => `LOT ${esc(ld.lot_number)} × ${esc(String(ld.qty))}${ld.import_date && ld.import_date !== '(No Date)' ? ' · ' + esc(ld.import_date) : ''}`).join('<br>');
+    const selected = trailState.upc && sameUpc(trailState.upc, upcRaw) ? ' selected' : '';
+    return `<div class="result-card${selected}" data-open-upc="${attrEsc(upcRaw)}" title="${esc(t('open_trail'))}">
+      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${attrEsc(rawTitle)}" alt="">
+      <div class="details">
+        <div class="title">${esc(rawTitle)}</div>
+        <div class="meta"><span>${esc(formatUpcDisplay(upcRaw))}</span><span>${esc(t('received'))}: <span class="qty">${esc(String(item.quantity))}</span></span></div>
+        <div class="meta" style="display:block">${lots || 'LOT ' + esc(item.lot_number || '')}</div>
+      </div>
+      <div class="side"><button class="search-rack-btn" onclick="event.stopPropagation();searchWarehouse(this.dataset.upc)" data-upc="${attrEsc(upcRaw)}">${esc(t('search_warehouse'))}</button></div>
+    </div>`;
+  }).join('');
+}
+
+function groupHistory(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = String(item.barcode || '').trim() || '(no barcode)';
+    let group = groups.get(key);
+    if (!group) { group = {barcode: key, title: item.title || '', count: 0, last: item, positions: []}; groups.set(key, group); }
+    group.count += 1;
+    if (!group.title && item.title) group.title = item.title;
+    if (String(item.removed_at || '') > String(group.last.removed_at || '')) group.last = item;
+    const position = String(item.item_position || '').trim();
+    if (position && !group.positions.includes(position)) group.positions.push(position);
+  }
+  return [...groups.values()].sort((a, b) => String(b.last.removed_at || '').localeCompare(String(a.last.removed_at || '')));
+}
+
+function renderHistory(items, error) {
+  const groups = groupHistory(items || []);
+  document.getElementById('historyCount').textContent = groups.length;
+  const el = document.getElementById('historyResults');
+  if (error || !groups.length) { el.innerHTML = '<div class="empty">' + esc(error ? t('error_searching') : t('no_results_found')) + '</div>'; return; }
+  el.innerHTML = groups.map(group => {
+    const last = group.last;
+    const selected = trailState.upc && sameUpc(trailState.upc, group.barcode) ? ' selected' : '';
+    return `<div class="result-card${selected}" data-open-upc="${attrEsc(group.barcode)}" title="${esc(t('open_trail'))}" style="grid-template-columns: minmax(0,1fr) auto">
+      <div class="details">
+        <div class="title">${esc(group.title || group.barcode)}</div>
+        <div class="meta"><span>${esc(formatUpcDisplay(group.barcode))}</span><span>${group.count} ${esc(t('events'))}</span></div>
+        <div class="meta"><span>${esc(String(last.removal_type || '').replace(/_/g, ' '))} · ${esc(recordDate(last.removed_at))}${last.undone_at ? ' · undone' : ''}</span></div>
+      </div>
+      <div class="side">${group.positions.slice(0, 2).map(position => locationChip(position, '', 'ghost')).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function searchWarehouse(upc) { searchInput.value = upc; doSearch(); }
+function sameUpc(a, b) {
+  const key = value => { const [base, ...rest] = String(value || '').trim().toLowerCase().replace(/\.0$/, '').split('-'); return [(/^\d+$/.test(base) ? base.replace(/^0+(?=\d)/, '') : base), ...rest].join('-'); };
+  return key(a) === key(b);
+}
+
+// Delegated clicks: open trails, thumbnails, prep and note buttons
+document.addEventListener('click', (e) => {
+  const prepBtn = e.target.closest('.prep-open-btn');
+  if (prepBtn) { e.preventDefault(); e.stopPropagation(); showFinderItemPrep(prepBtn.dataset.barcode || ''); return; }
+  const warehouseNoteBtn = e.target.closest('.warehouse-note-open-btn');
+  if (warehouseNoteBtn) { e.preventDefault(); e.stopPropagation(); showFinderWarehouseNote(warehouseNoteBtn.dataset.note || '', warehouseNoteBtn.dataset.barcode || ''); return; }
+  const thumb = e.target.closest('.clickable-thumb');
+  if (thumb) { e.stopPropagation(); showImgPopup(thumb.src, thumb.dataset.title || ''); return; }
+  const dataBtn = e.target.closest('[data-all-upc]');
+  if (dataBtn) { openTrail(dataBtn.dataset.allUpc, {family: familyToggle.checked}); return; }
+  const card = e.target.closest('[data-open-upc]');
+  if (card && !e.target.closest('button, a, details, .loc')) {
+    openTrail(card.dataset.openUpc, {family: familyToggle.checked});
+    if (window.innerWidth <= 1000) document.getElementById('trailPanel').scrollIntoView({behavior: 'smooth', block: 'start'});
+  }
+});
 
 async function forgetFinderAlias(button) {
   button.disabled = true;
@@ -737,122 +703,291 @@ async function forgetFinderAlias(button) {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || 'Could not forget alternate name');
     await doSearch();
-  } catch (error) {
-    alert(error.message);
-    button.disabled = false;
+  } catch (error) { alert(error.message); button.disabled = false; }
+}
+
+// ===== Trail =====
+const KIND_META = {
+  added: {label: 'Added to shelf', cat: 'inventory'}, pulled: {label: 'Pulled', cat: 'inventory'}, moved: {label: 'Moved', cat: 'inventory'},
+  adjusted: {label: 'Adjusted', cat: 'inventory'}, cleared: {label: 'Cleared', cat: 'inventory'}, deleted: {label: 'Deleted', cat: 'inventory'},
+  archived: {label: 'Archived', cat: 'inventory'}, undo: {label: 'Undo', cat: 'inventory'},
+  sold: {label: 'Sold', cat: 'sales'}, returned: {label: 'Returned', cat: 'sales'}, matched: {label: 'Matched', cat: 'sales'},
+  received: {label: 'Received', cat: 'bol'}, bol: {label: 'BOL', cat: 'bol'},
+  prep: {label: 'Prep', cat: 'prep'}, prep_status: {label: 'Prep status', cat: 'prep'}, prep_note: {label: 'Prep note', cat: 'prep'},
+  fba: {label: 'FBA', cat: 'fba'}, listed: {label: 'Listing', cat: 'listings'},
+};
+const CATEGORY_LABELS = {inventory: 'Inventory', sales: 'Sales', prep: 'Prep', bol: 'BOL', fba: 'FBA', listings: 'Listings'};
+const TILE_KINDS = {received: ['received'], shelf_adds: ['added'], pulled: ['pulled'], sold_units: ['sold'], returned: ['returned'], fba_units: ['fba'], on_shelf: []};
+
+const trailState = {upc: '', family: false, data: null, category: 'all', kinds: null, focusIds: null, hideUndone: false, sequence: 0, controller: null, notice: ''};
+
+function kindMeta(kind) { return KIND_META[kind] || {label: String(kind || '').replace(/_/g, ' '), cat: 'other'}; }
+
+function eventDate(value) {
+  const raw = String(value || '').trim().replace(' ', 'T');
+  if (!raw) return null;
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw + 'T00:00:00' : raw);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function dayLabel(value, now = new Date()) {
+  const date = eventDate(value);
+  if (!date) return String(value || '').slice(0, 10) || 'Unknown date';
+  const dayText = date.toLocaleDateString('en-US', {weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'});
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((start - new Date(date.getFullYear(), date.getMonth(), date.getDate())) / 86400000);
+  if (diff === 0) return `${t('today')} · ${dayText}`;
+  if (diff === 1) return `${t('yesterday')} · ${dayText}`;
+  if (diff > 1 && diff < 30) return `${diff} days ago · ${dayText}`;
+  return dayText;
+}
+function timeLabel(value) {
+  const raw = String(value || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return '';
+  const date = eventDate(raw);
+  return date ? date.toLocaleTimeString('en-US', {hour: 'numeric', minute: '2-digit'}) : '';
+}
+function whenLabel(value) {
+  const date = eventDate(value);
+  if (!date) return String(value || '');
+  const dayPart = date.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+  const timePart = timeLabel(value);
+  return timePart ? `${dayPart}, ${timePart}` : dayPart;
+}
+
+function eventVisible(event) {
+  if (trailState.hideUndone && event.undone) return false;
+  if (trailState.focusIds) return trailState.focusIds.has(event.id);
+  if (trailState.kinds) return trailState.kinds.includes(event.kind);
+  if (trailState.category !== 'all') return event.category === trailState.category;
+  return true;
+}
+
+function eventHtml(event, family) {
+  const meta = [];
+  const positionChip = (label, pic) => `<span class="pill loc" data-loc="${attrEsc(label)}" data-pic="${attrEsc(pic || '')}" onclick="showLocPopup(this.dataset.loc, this.dataset.pic)">${esc(label)}</span>`;
+  if (event.from_position && event.to_position && event.from_position.toLowerCase() !== event.to_position.toLowerCase()) {
+    meta.push(positionChip(event.from_position) + '<span class="arrow">→</span>' + positionChip(event.to_position));
+  } else if (event.position || event.to_position) meta.push(positionChip(event.position || event.to_position));
+  if (event.delta !== null && event.delta !== undefined && event.kind !== 'moved') {
+    const record = event.record || {};
+    if (record.old_quantity !== undefined && record.new_quantity !== undefined) meta.push(`<span class="pill">${esc(String(record.old_quantity))} → ${esc(String(record.new_quantity))}</span>`);
   }
-}
-
-function closePrepPopup() {
-  document.getElementById('prepOverlay').classList.remove('show');
-}
-
-function showPrepPopupHtml(html) {
-  document.getElementById('prepPopupContent').innerHTML = html;
-  document.getElementById('prepOverlay').classList.add('show');
-}
-
-function showFinderWarehouseNote(note, barcode) {
-  showPrepPopupHtml(`<h3>Warehouse Note</h3><div style="font-size:.8rem;color:#64748b;margin-bottom:12px;">${esc(formatUpcDisplay(barcode || ''))}</div><div style="white-space:pre-wrap;line-height:1.55;background:#fffbeb;border:1px solid #fde68a;color:#78350f;border-radius:10px;padding:13px;">${esc(note || '')}</div>`);
-}
-
-function renderFinderItemPrep(data) {
-  const statusEntries = Array.isArray(data.status_entries) ? data.status_entries : [];
-  const notes = Array.isArray(data.notes) ? data.notes : [];
-  const images = Array.isArray(data.images) ? data.images : [];
-  const voiceNotes = Array.isArray(data.voice_notes) ? data.voice_notes : [];
-  const textHtml = [];
-
-  statusEntries.forEach(entry => {
-    const reason = String(entry.reason || '').trim();
-    const note = String(entry.note || '').trim();
-    if (!reason && !note) return;
-    textHtml.push(`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:10px;line-height:1.45;">
-      ${entry.status ? `<div style="font-size:.75rem;font-weight:800;text-transform:uppercase;color:#9a3412;margin-bottom:5px;">${esc(entry.status)}</div>` : ''}
-      ${reason ? `<div><strong>Reason:</strong> ${esc(reason)}</div>` : ''}
-      ${note ? `<div style="white-space:pre-wrap;margin-top:${reason ? '5px' : '0'};">${esc(note)}</div>` : ''}
-    </div>`);
-  });
-  notes.forEach(note => textHtml.push(`<div style="white-space:pre-wrap;background:#f8fafc;border:1px solid #cbd5e1;border-radius:9px;padding:10px;">${esc(note.note || '')}</div>`));
-
-  const imageHtml = images.map(image => {
-    const url = String(image.image_url || '').trim();
-    const rotation = Number(image.rotation || 0);
-    return `<img src="${esc(url)}" class="clickable-thumb" data-title="Item prep photo" style="width:132px;height:110px;object-fit:cover;border-radius:9px;border:1px solid #cbd5e1;cursor:pointer;transform:rotate(${rotation}deg);" onclick="closePrepPopup();showImgPopup(this.src,'Item prep photo')" onerror="this.style.display='none'">`;
-  }).join('');
-  const audioHtml = voiceNotes.map((voice, index) => `<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:9px;"><div style="font-size:.76rem;font-weight:800;color:#5b21b6;margin-bottom:5px;">Voice note ${index + 1}</div><audio controls preload="metadata" src="${esc(voice.audio_url || '')}" style="width:100%;"></audio></div>`).join('');
-
-  return `<h3>Item Prep</h3>
-    <div style="font-size:.8rem;color:#64748b;margin-bottom:12px;">${esc(formatUpcDisplay(data.barcode || ''))}</div>
-    ${textHtml.length ? `<div style="display:grid;gap:8px;">${textHtml.join('')}</div>` : ''}
-    ${images.length ? `<h4 style="margin:14px 0 7px;">Pictures</h4><div style="display:flex;flex-wrap:wrap;gap:9px;">${imageHtml}</div>` : ''}
-    ${voiceNotes.length ? `<h4 style="margin:14px 0 7px;">Voice Notes</h4><div style="display:grid;gap:8px;">${audioHtml}</div>` : ''}
-    ${!textHtml.length && !images.length && !voiceNotes.length ? '<div style="color:#64748b;">No item-prep content found.</div>' : ''}`;
-}
-
-async function showFinderItemPrep(barcode) {
-  showPrepPopupHtml('<div class="loading">Loading item-prep notes and media…</div>');
-  try {
-    const response = await fetch(`/api/warehouse/item-prep/${encodeURIComponent(barcode)}?_t=${Date.now()}`, {cache:'no-store'});
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load item-prep content');
-    showPrepPopupHtml(renderFinderItemPrep(data));
-  } catch (error) {
-    showPrepPopupHtml(`<h3>Item Prep</h3><div style="color:#c0392b;">${esc(error.message || 'Unable to load item-prep content')}</div>`);
+  if (event.order_id && event.kind !== 'sold' && event.kind !== 'matched' && !event.title.includes(event.order_id)) meta.push(`<span class="pill">order ${esc(event.order_id)}</span>`);
+  if (event.store && !event.title.includes(event.store)) meta.push(`<span class="pill">${esc(event.store)}</span>`);
+  if (event.price !== undefined && event.price !== null) meta.push(`<span class="pill">$${Number(event.price).toFixed(2)}</span>`);
+  if (event.status) {
+    const key = String(event.status).toLowerCase();
+    const tone = /^(good|ok|pulled|restocked|applied|listed|completed|complete|paid)$/.test(key) ? 'good' : /^(bad|failed|error|unpulled|cancelled|return|returned|not restocked)$/.test(key) ? 'bad' : /^(pending|unchecked|queued|open)$/.test(key) ? 'warn' : '';
+    if (!['applied', 'ok'].includes(key)) meta.push(`<span class="pill ${tone}">${esc(key.replace(/_/g, ' '))}</span>`);
   }
+  if (event.undone) meta.push('<span class="pill">undone</span>');
+  if (family && event.upc) meta.push(`<span class="pill">${esc(formatUpcDisplay(event.upc))}</span>`);
+  if (event.detail) meta.push(`<span>${esc(event.detail)}</span>`);
+  const source = {id: event.source_id};
+  const original = recordOriginalLink(source, event.record || {});
+  const listingUrl = event.url && /^https?:\/\//i.test(event.url) ? event.url : '';
+  const kind = kindMeta(event.kind);
+  return `<article class="ev ${event.undone ? 'undone' : ''} ${event.pending ? 'pending' : ''}" id="ev-${attrEsc(event.id)}" data-event-id="${attrEsc(event.id)}" style="--k: var(--k-${attrEsc(event.kind)})">
+    <div class="t">${esc(timeLabel(event.ts))}</div>
+    <div class="dot" title="${attrEsc(kind.label)}"></div>
+    <div class="body">
+      <div class="title">${esc(event.title)}</div>
+      <div class="meta"><span class="pill k">${esc(kind.label)}</span>${meta.join('')}</div>
+      ${event.note ? `<div class="note">${esc(String(event.note).slice(0, 400))}${String(event.note).length > 400 ? '…' : ''}</div>` : ''}
+    </div>
+    <div class="acts">
+      ${listingUrl ? `<a href="${attrEsc(listingUrl)}" target="_blank" rel="noopener noreferrer">Listing ↗</a>` : (original ? `<a href="${attrEsc(original.href)}" target="_blank" rel="noopener noreferrer">${esc(original.label)} ↗</a>` : '')}
+      <button type="button" data-event-detail="${attrEsc(event.id)}">${esc(t('details'))}</button>
+    </div>
+  </article>`;
 }
 
-function renderRawbol(items) {
-  const el = document.getElementById('rawbolResults');
-  document.getElementById('rawbolCount').textContent = items.length;
+function flagHtml(flag) {
+  const clickable = flag.event_ids && flag.event_ids.length;
+  return `<div class="clue ${esc(flag.level)} ${clickable ? '' : 'static'}" ${clickable ? `data-focus="${attrEsc(flag.event_ids.join(','))}"` : ''}><span class="dot"></span><span>${esc(flag.text)}</span></div>`;
+}
 
-  if (!items.length) {
-    el.innerHTML = '<div class="empty-state">' + t('no_results_found') + '</div>';
+function tileHtml(key, label, value, active) {
+  return `<button type="button" class="tile ${value ? '' : 'zero'} ${active ? 'hot' : ''}" data-tile="${key}" aria-pressed="${trailState.kinds && trailState.kinds === TILE_KINDS[key] ? 'true' : 'false'}"><span class="n">${esc(String(value))}</span><span class="l">${esc(label)}</span></button>`;
+}
+
+function renderTrail() {
+  const data = trailState.data;
+  const content = document.getElementById('trailContent');
+  const empty = document.getElementById('trailEmpty');
+  const records = document.getElementById('recordsSection');
+  if (!data) { content.hidden = true; empty.hidden = false; records.hidden = true; return; }
+  empty.hidden = true; content.hidden = false; records.hidden = false;
+  const identity = data.identity || {};
+  const ledger = data.ledger || {};
+  const events = data.events || [];
+  const image = identity.image || missingImg;
+  const stockRows = data.stock || [];
+  const onShelf = stockRows.filter(row => row.quantity > 0);
+  const counts = {};
+  for (const event of events) counts[event.category] = (counts[event.category] || 0) + 1;
+
+  const stockHtml = onShelf.length
+    ? `<div class="stock-chips">${onShelf.map(row => `<span class="stock-chip">${locationChip(row.position || '—', row.pictureposition)}<span class="n">× ${esc(String(row.quantity))}</span>${row.upc && data.family ? `<span class="pill">${esc(formatUpcDisplay(row.upc))}</span>` : ''}${!row.position ? `<span class="warn">no location</span>` : ''}${row.warehouse_note ? `<button type="button" class="mini-btn note warehouse-note-open-btn" data-note="${attrEsc(row.warehouse_note)}" data-barcode="${attrEsc(row.upc)}">${esc(t('warehouse_note'))}</button>` : ''}${row.custom ? '<span class="chip custom">custom</span>' : ''}</span>`).join('')}</div>`
+    : `<div class="not-on-shelf"><span class="pill">${esc(t('not_on_shelf'))}</span>${data.last_exit ? `<span class="last-exit">${esc(t('last_left'))} <b>${esc(data.last_exit.position || '?')}</b> · ${esc(whenLabel(data.last_exit.ts))} — ${esc(data.last_exit.title)} <button type="button" class="jump" data-jump="${attrEsc(data.last_exit.id)}">↓</button></span>` : (data.last_seen ? `<span class="last-exit">${esc(t('last_seen_at'))} <b>${esc(data.last_seen.position)}</b> · ${esc(whenLabel(data.last_seen.ts))} <button type="button" class="jump" data-jump="${attrEsc(data.last_seen.id)}">↓</button></span>` : '')}</div>`;
+  const pendingRows = stockRows.filter(row => row.pending_deletion);
+  const pendingHtml = pendingRows.length ? `<div class="hint">${pendingRows.length} zero-quantity row(s) scheduled for deletion${pendingRows[0].pending_deletion ? ' on ' + esc(pendingRows[0].pending_deletion.slice(0, 10)) : ''}.</div>` : '';
+
+  const tiles = [
+    tileHtml('received', t('received'), ledger.received || 0), tileHtml('shelf_adds', t('shelf_adds'), ledger.shelf_adds || 0),
+    tileHtml('pulled', t('pulled'), ledger.pulled || 0), tileHtml('sold_units', t('sold'), ledger.sold_units || 0),
+    tileHtml('returned', t('returned'), ledger.returned || 0), tileHtml('fba_units', t('fba_units'), ledger.fba_units || 0),
+    tileHtml('on_shelf', t('on_shelf'), ledger.on_shelf || 0, true),
+  ].join('');
+  const foot = [ledger.moves ? `${ledger.moves} move(s)` : '', ledger.adjustments ? `net adjustments ${ledger.adjustments > 0 ? '+' : ''}${ledger.adjustments}` : '', ledger.sold_orders ? `${ledger.sold_orders} order(s)` : '', ledger.restocked ? `${ledger.restocked} restocked` : ''].filter(Boolean).join(' · ');
+
+  const filters = ['all', ...Object.keys(CATEGORY_LABELS).filter(category => counts[category])].map(category =>
+    `<button type="button" class="filter" data-category="${category}" aria-pressed="${!trailState.kinds && !trailState.focusIds && trailState.category === category ? 'true' : 'false'}">${esc(category === 'all' ? 'All' : CATEGORY_LABELS[category])}<span class="c">${category === 'all' ? events.length : counts[category]}</span></button>`).join('');
+
+  const visible = events.filter(eventVisible);
+  let timelineHtml = '';
+  let currentDay = null;
+  for (const event of visible) {
+    const day = (event.sort || '').slice(0, 10) || 'unknown';
+    if (day !== currentDay) { currentDay = day; timelineHtml += `<div class="day">${esc(dayLabel(event.sort || event.ts))}</div>`; }
+    timelineHtml += eventHtml(event, data.family);
+  }
+  if (!visible.length) timelineHtml = `<div class="empty">${esc(events.length ? 'No events match this filter.' : t('no_events'))}</div>`;
+
+  const flags = data.flags || [];
+  const problems = flags.map(flagHtml).join('');
+  const notes = [];
+  if (data.errors?.length) notes.push(...data.errors);
+  if (data.unavailable?.length) notes.push('Not available here: ' + data.unavailable.join(', '));
+
+  content.innerHTML = `
+    <div class="identity">
+      <img src="${esc(image)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${attrEsc(identity.title || '')}" alt="">
+      <div class="body">
+        <h2>${esc(identity.title || 'Unknown item')}</h2>
+        <div class="upc-row">
+          <code>${esc(data.upc_display || formatUpcDisplay(data.upc))}</code>
+          <button type="button" class="text-btn" data-copy="${attrEsc(data.upc)}">${esc(t('copy_upc'))}</button>
+          ${identity.custom ? '<span class="chip custom">custom item</span>' : ''}
+          ${data.family ? `<span class="chip family">${esc(t('showing_related'))}</span>` : ''}
+          ${(identity.lots || []).map(lot => `<span class="chip">LOT ${esc(lot)}</span>`).join('')}
+        </div>
+        ${(identity.aliases || []).length ? `<div class="upc-row" style="margin-top:4px">${esc(t('previously_matched_as'))}: ${identity.aliases.map(alias => `<span class="chip">${esc(alias)}</span>`).join('')}</div>` : ''}
+        ${trailState.notice ? `<div class="hint" style="color:var(--warn)">${esc(trailState.notice)}</div>` : ''}
+        <div class="links">
+          <a class="text-btn" href="/searchrack?db=searchRack&q=${encodeURIComponent(data.upc)}" target="_blank" rel="noopener">${esc(t('open_in_warehouse'))} ↗</a>
+          <button type="button" class="text-btn" data-search-upc="${attrEsc(data.upc)}">${esc(t('search_warehouse'))}</button>
+          <button type="button" class="text-btn" data-family-toggle aria-pressed="${data.family ? 'true' : 'false'}">${esc(data.family ? t('exact_upc') : t('related_upcs'))}</button>
+        </div>
+      </div>
+    </div>
+    <div class="now">
+      <div class="section-title">${esc(t('right_now'))}</div>
+      ${stockHtml}${pendingHtml}
+    </div>
+    <div class="ledger">${tiles}${foot ? `<div class="ledger-foot">${esc(foot)}</div>` : ''}</div>
+    <div class="clues">
+      <div class="section-title">${esc(t('clues'))}</div>
+      ${problems || `<div class="hint">${esc(t('no_clues'))}</div>`}
+      ${notes.length ? `<div class="hint">${esc(notes.join(' · '))}</div>` : ''}
+    </div>
+    <div class="timeline-head">
+      <div class="section-title" style="margin:0">${esc(t('timeline'))}</div>
+      <div class="filters">${filters}</div>
+      <div class="right"><label><input type="checkbox" id="hideUndone" ${trailState.hideUndone ? 'checked' : ''}> ${esc(t('hide_undone'))}</label></div>
+    </div>
+    <div class="focus-bar ${trailState.focusIds || trailState.kinds ? 'show' : ''}"><span>${trailState.focusIds ? `Showing ${visible.length} related event(s)` : (trailState.kinds ? `Showing ${visible.length} ${esc(trailState.kinds.join('/'))} event(s)` : '')}</span><button type="button" class="jump" data-clear-focus>${esc(t('focus_clear'))}</button></div>
+    <div class="timeline">${timelineHtml}</div>`;
+  document.querySelectorAll('[data-open-upc]').forEach(card => card.classList.toggle('selected', sameUpc(card.dataset.openUpc, data.upc)));
+}
+
+document.getElementById('trailContent').addEventListener('click', event => {
+  const target = event.target;
+  const filter = target.closest('[data-category]');
+  if (filter && filter.classList.contains('filter')) { trailState.category = filter.dataset.category; trailState.kinds = null; trailState.focusIds = null; renderTrail(); return; }
+  const tile = target.closest('[data-tile]');
+  if (tile) {
+    const kinds = TILE_KINDS[tile.dataset.tile] || [];
+    trailState.kinds = (kinds.length && trailState.kinds !== kinds) ? kinds : null; trailState.focusIds = null; renderTrail(); return;
+  }
+  const clue = target.closest('[data-focus]');
+  if (clue) { trailState.focusIds = new Set(clue.dataset.focus.split(',')); trailState.kinds = null; renderTrail(); document.querySelector('.timeline')?.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
+  if (target.closest('[data-clear-focus]')) { trailState.focusIds = null; trailState.kinds = null; renderTrail(); return; }
+  const jump = target.closest('[data-jump]');
+  if (jump) { trailState.focusIds = null; trailState.kinds = null; trailState.category = 'all'; renderTrail(); const el = document.getElementById('ev-' + CSS.escape(jump.dataset.jump)); if (el) { el.classList.add('focus'); el.scrollIntoView({behavior: 'smooth', block: 'center'}); setTimeout(() => el.classList.remove('focus'), 2500); } return; }
+  const detail = target.closest('[data-event-detail]');
+  if (detail) {
+    const found = (trailState.data?.events || []).find(item => item.id === detail.dataset.eventDetail);
+    if (found) {
+      const original = recordOriginalLink({id: found.source_id}, found.record || {});
+      showPrepPopupHtml(`<h3>${esc(kindMeta(found.kind).label)} · ${esc(whenLabel(found.ts))}</h3><p style="margin:0 0 10px">${esc(found.title)}</p>${original ? `<p style="margin:0 0 12px"><a href="${attrEsc(original.href)}" target="_blank" rel="noopener noreferrer">${esc(original.label)} ↗</a></p>` : ''}<div class="hint" style="margin:0 0 8px">${esc(found.source_id.replace(':', ' · ').replace(/_/g, ' '))}</div>${recordDetailsHtml(found.record || {}, true)}`);
+    }
     return;
   }
-
-  el.innerHTML = items.map(item => {
-    const imgSrc = item.image_url || missingImg;
-    const upcRaw = item.upc || '';
-    const upc = esc(upcRaw);
-
-    const rawTitle = item.item_description || '';
-    return `<div class="result-card">
-      <img src="${esc(imgSrc)}" onerror="this.src='${missingImg}'" class="clickable-thumb" data-title="${esc(rawTitle)}" style="cursor:pointer">
-      <div class="details">
-        <div class="title clickable-title" data-img="${esc(imgSrc)}" data-title="${esc(rawTitle)}" style="cursor:pointer">${esc(rawTitle)}</div>
-        <div class="meta">
-          <span>UPC: ${esc(formatUpcDisplay(upcRaw))}</span>
-          <span>LOT: ${esc(item.lot_number)}</span>
-        </div>
-        ${allDataButton(upcRaw)}
-      </div>
-      <button class="search-rack-btn" onclick="searchWarehouse('${upc}')">${t('search_warehouse')}</button>
-    </div>`;
-  }).join('');
-}
-
-function searchWarehouse(upc) {
-  searchInput.value = upc;
-  doSearch();
-}
-
-// Delegated click handler for thumbnail images and truncated titles
-document.addEventListener('click', (e) => {
-  const dataBtn = e.target.closest('[data-all-upc]');
-  if (dataBtn) { showAllUpcData(dataBtn.dataset.allUpc); document.getElementById('recordsUpc').scrollIntoView({behavior: 'smooth', block: 'center'}); return; }
-  const prepBtn = e.target.closest('.prep-open-btn');
-  if (prepBtn) { e.preventDefault(); e.stopPropagation(); showFinderItemPrep(prepBtn.dataset.barcode || ''); return; }
-  const warehouseNoteBtn = e.target.closest('.warehouse-note-open-btn');
-  if (warehouseNoteBtn) { e.preventDefault(); e.stopPropagation(); showFinderWarehouseNote(warehouseNoteBtn.dataset.note || '', warehouseNoteBtn.dataset.barcode || ''); return; }
-  const thumb = e.target.closest('.clickable-thumb');
-  if (thumb) { showImgPopup(thumb.src, thumb.dataset.title || ''); return; }
-  const titleDiv = e.target.closest('.clickable-title');
-  if (titleDiv) { showImgPopup(titleDiv.dataset.img || '', titleDiv.dataset.title || ''); }
+  const copy = target.closest('[data-copy]');
+  if (copy) { navigator.clipboard?.writeText(copy.dataset.copy).then(() => { copy.textContent = t('copied'); setTimeout(() => { copy.textContent = t('copy_upc'); }, 1500); }).catch(() => {}); return; }
+  const search = target.closest('[data-search-upc]');
+  if (search) { searchWarehouse(search.dataset.searchUpc); return; }
+  if (target.closest('[data-family-toggle]')) { familyToggle.checked = !trailState.family; openTrail(trailState.upc, {family: familyToggle.checked, forced: true}); return; }
+  if (target.id === 'hideUndone') { trailState.hideUndone = target.checked; renderTrail(); }
 });
 
+async function openTrail(upc, options = {}) {
+  upc = String(upc || '').trim();
+  if (!upc) return;
+  const family = !!options.family;
+  const sequence = ++trailState.sequence;
+  if (trailState.controller) trailState.controller.abort();
+  trailState.controller = new AbortController();
+  const changed = !sameUpc(trailState.upc, upc);
+  trailState.upc = upc; trailState.family = family; trailState.notice = '';
+  if (changed) { trailState.category = 'all'; trailState.kinds = null; trailState.focusIds = null; }
+  document.getElementById('recordsSection').hidden = true;
+  document.getElementById('trailEmpty').hidden = true;
+  const content = document.getElementById('trailContent');
+  content.hidden = false;
+  if (changed || !trailState.data) content.innerHTML = `<div class="loading"><div class="spinner"></div>${esc(t('loading_trail'))}</div>`;
+  document.querySelectorAll('[data-open-upc]').forEach(card => card.classList.toggle('selected', sameUpc(card.dataset.openUpc, upc)));
+  try {
+    const response = await fetch('/api/finder/trail?' + new URLSearchParams({upc, family: family ? '1' : '0'}), {signal: trailState.controller.signal});
+    const data = await response.json();
+    if (sequence !== trailState.sequence) return;
+    if (!response.ok) throw new Error(data.error || t('trail_failed'));
+    if (!family && !options.forced && !(data.events || []).length && !(data.stock || []).length && /^\d+$/.test(upc)) {
+      const related = await fetch('/api/finder/trail?' + new URLSearchParams({upc, family: '1'}), {signal: trailState.controller.signal});
+      const relatedData = await related.json();
+      if (sequence !== trailState.sequence) return;
+      if (related.ok && ((relatedData.events || []).length || (relatedData.stock || []).length)) {
+        trailState.family = true; trailState.notice = t('related_notice'); familyToggle.checked = true;
+        trailState.data = relatedData; renderTrail();
+        prepareRecords(upc);
+        return;
+      }
+    }
+    trailState.data = data;
+    renderTrail();
+    prepareRecords(upc);
+  } catch (error) {
+    if (error.name === 'AbortError' || sequence !== trailState.sequence) return;
+    content.innerHTML = `<div class="empty">${esc(error.message || t('trail_failed'))}</div>`;
+  }
+}
+
+function prepareRecords(upc) {
+  const section = document.getElementById('recordsSection');
+  section.hidden = false;
+  document.getElementById('recordsUpc').value = upc;
+  document.getElementById('recordsResults').textContent = '';
+  recordsData = null;
+  section.open = false;
+}
+document.getElementById('recordsSection').addEventListener('toggle', event => {
+  if (event.target.open && !recordsData) showAllUpcData(document.getElementById('recordsUpc').value);
+});
+
+// ===== Records =====
 function allDataButton(upc) {
-  return upc ? `<button type="button" class="all-data-btn" data-all-upc="${attrEsc(upc)}">View history</button>` : '';
+  return upc ? `<button type="button" class="all-data-btn" data-all-upc="${attrEsc(upc)}">${esc(t('open_trail'))}</button>` : '';
 }
 
 let recordsSequence = 0;
@@ -864,7 +999,6 @@ document.getElementById('recordsSearch').addEventListener('click', () => showAll
 document.getElementById('recordsUpc').addEventListener('keydown', event => {
   if (event.key === 'Enter') showAllUpcData(event.target.value);
 });
-document.getElementById('recordsFamily').addEventListener('change', () => showAllUpcData(document.getElementById('recordsUpc').value));
 document.getElementById('recordsSupporting').addEventListener('change', () => { if (recordsData) renderRecordOverview(); });
 
 function recordValue(record, ...keys) {
@@ -888,7 +1022,9 @@ function recordSourceName(source) {
     removed_items:'Inventory changes', removed:'Earlier removals', deleted_items:'Archived items',
     raw_bol_items:'Received BOL items', bol_items:'BOL items', listing_log:'Listing activity', listing_queue:'Listing queue',
     price_changes:'Price changes', listing_meta:'Listing dates', inventory:'eBay listings', items:'Amazon listings',
-    ready_to_ship_notes:'Shipping notes', ready_to_ship_order_labels:'Shipping labels', order_removal_allocations:'Allocated stock'};
+    ready_to_ship_notes:'Shipping notes', ready_to_ship_order_labels:'Shipping labels', order_removal_allocations:'Allocated stock',
+    order_finder_matches:'Finder matches', fba_prep_items:'FBA prep items', fba_prep_batches:'FBA batches', fba_prep_sessions:'FBA sessions',
+    archived_searchrack:'Archived stock'};
   if (source.id === 'rack.db:INVENTORY') return 'Rack scans';
   return names[table] || table.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 }
@@ -909,6 +1045,7 @@ function recordOriginalLink(source, record) {
   const link = (path, params, label) => ({href:path + (params ? '?' + new URLSearchParams(params) : ''), label});
   if (id.startsWith('rackhistory.db:')) return link('/searchrack', {db:'searchRack', q:upc, open_history:'1', history_search:upc}, 'Open rack history');
   if (id === 'sold.db:orders') return link('/searchrack', {db:'sold', q:get('order_id') || upc}, 'Open sold order');
+  if (id === 'sold.db:order_finder_matches') return link('/ready_to_ship', null, 'Open Ready to Ship');
   if (id === 'sold.db:returns' || id === 'sold.db:return_lifecycle_events') return link('/searchrack', {db:'returns', q:get('barcode') || upc}, 'Open returns');
   if (/fba_/.test(id)) return link('/fba-prep', null, 'Open FBA prep');
   if (id.startsWith('preplog.db:') || id.startsWith('bol.db:items_prep')) {
@@ -927,7 +1064,7 @@ function recordOriginalLink(source, record) {
   if (id.startsWith('pricemaster.db:')) return link('/price-master', null, 'Open Price Master');
   if (id.startsWith('rawbol.db:') || id === 'bol.db:bol_items') return link('/searchrack', {db:'bol', q:upc}, 'Open BOL');
   if (id.startsWith('deleted.db:')) return link('/trash-manager', null, 'Open archive');
-  if (id === 'searchrack.db:searchrack') return link('/searchrack', {db:'searchRack', q:upc, highlight_id:get('id') || ''}, 'Open inventory');
+  if (id === 'searchrack.db:searchrack' || id === 'searchrack.db:archived_searchrack') return link('/searchrack', {db:'searchRack', q:upc, highlight_id:get('id') || ''}, 'Open inventory');
   return null;
 }
 
@@ -1059,7 +1196,7 @@ function renderRecordOverview() {
   if (recordsData.errors?.length) {
     const warning = document.createElement('p');
     warning.className = 'record-note';
-    warning.textContent = 'Some history could not be loaded. Use View item to retry.';
+    warning.textContent = 'Some history could not be loaded. Reopen the trail to retry.';
     el.appendChild(warning);
   }
 }
@@ -1136,42 +1273,99 @@ function showImgPopup(src, name) {
   imgEl.src = isMissing ? '' : src;
   imgEl.style.display = isMissing ? 'none' : 'block';
   nameEl.textContent = name || '';
-  // Always show popup if there's either an image or a name
   if (isMissing && !name) return;
   document.getElementById('imgOverlay').classList.add('show');
 }
-function closeImgPopup() {
-  document.getElementById('imgOverlay').classList.remove('show');
+function closeImgPopup() { document.getElementById('imgOverlay').classList.remove('show'); }
+
+// Location popup
+function showLocPopup(locCode, picPos) {
+  if (window.SSLocationPreview) { window.SSLocationPreview.openForLocation(locCode, picPos, `Location: ${locCode}`); return; }
+  document.getElementById('locPopupTitle').textContent = locCode;
+  const img = document.getElementById('locPopupImg');
+  const raw = (picPos && picPos.trim()) ? picPos.trim() : locCode;
+  const filename = raw ? raw.toLowerCase().replace(/\.png$/i, '') + '.png' : '';
+  if (filename) {
+    img.src = '/shelf-image/' + encodeURIComponent(filename.replace(/\.png$/i, '')) + '.png?t=' + Date.now();
+    img.style.display = 'block';
+    img.onerror = function() { this.style.display = 'none'; };
+  } else img.style.display = 'none';
+  document.getElementById('locOverlay').classList.add('show');
 }
+function closeLocPopup() { document.getElementById('locOverlay').classList.remove('show'); }
 
-// Position picker popup
-function closePickPopup() {
-  document.getElementById('pickOverlay').classList.remove('show');
+// Detail drawer (item prep, warehouse note, record details)
+function closePrepPopup() { document.getElementById('prepOverlay').classList.remove('show'); }
+function showPrepPopupHtml(html) {
+  document.getElementById('prepPopupContent').innerHTML = html;
+  document.getElementById('prepOverlay').classList.add('show');
 }
-
-// Confirm removal state
-let _pendingRemoveId = null;
-
-function handleRemove(searchrackId, barcode, btnEl) {
-  const sameBarcode = (window._warehouseItems || []).filter(i => i.barcode === barcode);
-  if (sameBarcode.length > 1) {
-    // Show position picker
-    const opts = document.getElementById('pickOptions');
-    opts.innerHTML = sameBarcode.map(i => {
-      const pos = esc(i.item_position || t('no_position'));
-      const pp = esc(i.pictureposition || ''); // DEPRECATED: pictureposition field
-      return `<div class="pick-option">
-        <span class="pos" style="cursor:pointer;text-decoration:underline;" data-loc="${pos}" data-pic="${pp}" onclick="event.stopPropagation();showLocPopup(this.dataset.loc, this.dataset.pic)">${pos}</span>
-        <span class="qty">Qty: ${i.quantity || '?'}</span>
-        <button class="remove-btn" style="padding:4px 10px;font-size:0.75rem;" onclick="confirmRemove(${i.id})">${t('remove')}</button>
-      </div>`;
-    }).join('');
-    document.getElementById('pickOverlay').classList.add('show');
-  } else {
-    confirmRemove(searchrackId);
+function showFinderWarehouseNote(note, barcode) {
+  showPrepPopupHtml(`<h3>${esc(t('warehouse_note'))}</h3><div class="hint" style="margin:0 0 12px">${esc(formatUpcDisplay(barcode || ''))}</div><div style="white-space:pre-wrap;line-height:1.55;background:var(--warn-soft);border:1px solid var(--warn);border-radius:10px;padding:13px;">${esc(note || '')}</div>`);
+}
+function renderFinderItemPrep(data) {
+  const statusEntries = Array.isArray(data.status_entries) ? data.status_entries : [];
+  const notes = Array.isArray(data.notes) ? data.notes : [];
+  const images = Array.isArray(data.images) ? data.images : [];
+  const voiceNotes = Array.isArray(data.voice_notes) ? data.voice_notes : [];
+  const textHtml = [];
+  statusEntries.forEach(entry => {
+    const reason = String(entry.reason || '').trim();
+    const note = String(entry.note || '').trim();
+    if (!reason && !note) return;
+    textHtml.push(`<div style="background:var(--warn-soft);border:1px solid var(--warn);border-radius:9px;padding:10px;line-height:1.45;">
+      ${entry.status ? `<div style="font-size:.75rem;font-weight:800;text-transform:uppercase;margin-bottom:5px;">${esc(entry.status)}</div>` : ''}
+      ${reason ? `<div><strong>Reason:</strong> ${esc(reason)}</div>` : ''}
+      ${note ? `<div style="white-space:pre-wrap;margin-top:${reason ? '5px' : '0'};">${esc(note)}</div>` : ''}
+    </div>`);
+  });
+  notes.forEach(note => textHtml.push(`<div style="white-space:pre-wrap;background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:10px;">${esc(note.note || '')}</div>`));
+  const imageHtml = images.map(image => {
+    const url = String(image.image_url || '').trim();
+    const rotation = Number(image.rotation || 0);
+    return `<img src="${esc(url)}" alt="" style="width:132px;height:110px;object-fit:cover;border-radius:9px;border:1px solid var(--line);cursor:pointer;transform:rotate(${rotation}deg);" onclick="closePrepPopup();showImgPopup(this.src,'Item prep photo')" onerror="this.style.display='none'">`;
+  }).join('');
+  const audioHtml = voiceNotes.map((voice, index) => `<div style="background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:9px;"><div style="font-size:.76rem;font-weight:800;margin-bottom:5px;">Voice note ${index + 1}</div><audio controls preload="metadata" src="${esc(voice.audio_url || '')}" style="width:100%;"></audio></div>`).join('');
+  return `<h3>${esc(t('item_prep'))}</h3>
+    <div class="hint" style="margin:0 0 12px">${esc(formatUpcDisplay(data.barcode || ''))}</div>
+    ${textHtml.length ? `<div style="display:grid;gap:8px;">${textHtml.join('')}</div>` : ''}
+    ${images.length ? `<h4 style="margin:14px 0 7px;">Pictures</h4><div style="display:flex;flex-wrap:wrap;gap:9px;">${imageHtml}</div>` : ''}
+    ${voiceNotes.length ? `<h4 style="margin:14px 0 7px;">Voice Notes</h4><div style="display:grid;gap:8px;">${audioHtml}</div>` : ''}
+    ${!textHtml.length && !images.length && !voiceNotes.length ? '<div class="hint">No item-prep content found.</div>' : ''}`;
+}
+async function showFinderItemPrep(barcode) {
+  showPrepPopupHtml('<div class="loading">Loading item-prep notes and media…</div>');
+  try {
+    const response = await fetch(`/api/warehouse/item-prep/${encodeURIComponent(barcode)}?_t=${Date.now()}`, {cache:'no-store'});
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load item-prep content');
+    showPrepPopupHtml(renderFinderItemPrep(data));
+  } catch (error) {
+    showPrepPopupHtml(`<h3>${esc(t('item_prep'))}</h3><div style="color:var(--danger);">${esc(error.message || 'Unable to load item-prep content')}</div>`);
   }
 }
 
+// Position picker
+function closePickPopup() { document.getElementById('pickOverlay').classList.remove('show'); }
+
+// ===== Removal =====
+let _pendingRemoveId = null;
+function handleRemove(searchrackId, barcode, btnEl) {
+  const sameBarcode = (window._warehouseItems || []).filter(i => i.barcode === barcode);
+  if (sameBarcode.length > 1) {
+    const opts = document.getElementById('pickOptions');
+    opts.innerHTML = sameBarcode.map(i => {
+      const pos = i.item_position || t('no_position');
+      const pp = i.pictureposition || '';
+      return `<div class="pick-option">
+        <span class="pos" data-loc="${attrEsc(pos)}" data-pic="${attrEsc(pp)}" onclick="event.stopPropagation();showLocPopup(this.dataset.loc, this.dataset.pic)">${esc(pos)}</span>
+        <span class="q">Qty: ${esc(String(i.quantity || '?'))}</span>
+        <button class="remove-btn" style="padding:4px 10px;font-size:12px;" onclick="confirmRemove(${Number(i.id)})">${esc(t('remove'))}</button>
+      </div>`;
+    }).join('');
+    document.getElementById('pickOverlay').classList.add('show');
+  } else confirmRemove(searchrackId);
+}
 function confirmRemove(searchrackId) {
   _pendingRemoveId = searchrackId;
   const item = (window._warehouseItems || []).find(i => i.id === searchrackId);
@@ -1182,179 +1376,109 @@ function confirmRemove(searchrackId) {
   document.getElementById('confirmOverlay').classList.add('show');
   document.getElementById('confirmYesBtn').onclick = () => { doRemove(searchrackId); };
 }
+function cancelConfirm() { _pendingRemoveId = null; document.getElementById('confirmOverlay').classList.remove('show'); }
 
-function cancelConfirm() {
-  _pendingRemoveId = null;
-  document.getElementById('confirmOverlay').classList.remove('show');
-}
-
-// Last removal info for undo
 let _lastRemoval = null;
-
+function showBanner(html, color) {
+  const banner = document.getElementById('successBanner');
+  banner.innerHTML = html;
+  banner.style.display = 'block';
+  banner.style.background = color;
+}
 async function doRemove(searchrackId) {
   document.getElementById('confirmOverlay').classList.remove('show');
   closePickPopup();
   try {
     const resp = await fetch('/api/finder/remove', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({searchrack_id: searchrackId, order_id: orderId || null, qty: 1})
     });
     const data = await resp.json();
     if (data.ok) {
-      // Store undo info
       _lastRemoval = {searchrack_id: data.searchrack_id, old_qty: data.old_qty, order_id: data.order_id};
-
-      // Update qty display
-      const qtyEl = document.querySelector(`.qty-display[data-id="${searchrackId}"]`);
-      if (qtyEl) qtyEl.textContent = 'Qty: ' + data.new_qty;
-
-      // Mark card as removed
+      const qtyEl = document.querySelector(`.qty-display[data-id="${searchrackId}"] .qty`);
+      if (qtyEl) qtyEl.textContent = data.new_qty;
       const card = document.getElementById('wh-card-' + searchrackId);
       if (card) {
         card.classList.add('removed');
-        // Add removed badge next to qty
-        if (qtyEl && !qtyEl.parentElement.querySelector('.removed-badge')) {
-          qtyEl.insertAdjacentHTML('afterend', '<span class="removed-badge">' + t('removed') + '</span>');
-        }
-        // Disable remove button on this card
+        const holder = card.querySelector('.qty-display');
+        if (holder && !holder.parentElement.querySelector('.removed-badge')) holder.insertAdjacentHTML('afterend', '<span class="removed-badge">' + esc(t('removed')) + '</span>');
         const btn = card.querySelector('.remove-btn');
-        if (btn) { btn.disabled = true; btn.style.opacity = 0.4; }
+        if (btn) btn.disabled = true;
       }
-
-      // Also update the cached _warehouseItems so further interactions reflect new qty
       const wItem = (window._warehouseItems || []).find(i => i.id === searchrackId);
       if (wItem) wItem.quantity = data.new_qty;
-
-      // Show banner with undo
-      const banner = document.getElementById('successBanner');
-      banner.innerHTML = t('removed_1_from_inventory') + (orderId ? ' — ' + t('order_marked_processed') : '') + '. ' + t('new_qty') + ': ' + data.new_qty
-        + '<button class="undo-btn" onclick="undoRemove()">' + t('undo') + '</button>';
-      banner.style.display = 'block';
-      banner.style.background = '#e74c3c';
-    } else {
-      alert(t('remove_failed') + ': ' + (data.error || 'Unknown'));
-    }
-  } catch (e) {
-    alert(t('error_removing'));
-  }
+      showBanner(esc(t('removed_1_from_inventory')) + (orderId ? ' — ' + esc(t('order_marked_processed')) : '') + '. ' + esc(t('new_qty')) + ': ' + esc(String(data.new_qty))
+        + '<button class="undo-btn" onclick="undoRemove()">' + esc(t('undo')) + '</button>', 'var(--danger)');
+      if (wItem && trailState.upc && sameUpc(trailState.upc, wItem.barcode)) openTrail(trailState.upc, {family: trailState.family, forced: true});
+    } else alert(t('remove_failed') + ': ' + (data.error || 'Unknown'));
+  } catch (e) { alert(t('error_removing')); }
 }
-
 async function undoRemove() {
   if (!_lastRemoval) return;
   try {
     const resp = await fetch('/api/finder/undo-remove', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(_lastRemoval)
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(_lastRemoval)
     });
     const data = await resp.json();
     if (data.ok) {
       const id = _lastRemoval.searchrack_id;
-      // Restore qty display
-      const qtyEl = document.querySelector(`.qty-display[data-id="${id}"]`);
-      if (qtyEl) qtyEl.textContent = 'Qty: ' + data.restored_qty;
-      // Remove the removed state
+      const qtyEl = document.querySelector(`.qty-display[data-id="${id}"] .qty`);
+      if (qtyEl) qtyEl.textContent = data.restored_qty;
       const card = document.getElementById('wh-card-' + id);
       if (card) {
         card.classList.remove('removed');
         const badge = card.querySelector('.removed-badge');
         if (badge) badge.remove();
         const btn = card.querySelector('.remove-btn');
-        if (btn) { btn.disabled = false; btn.style.opacity = 1; }
+        if (btn) btn.disabled = false;
       }
-      // Update cached item
       const wItem = (window._warehouseItems || []).find(i => i.id == id);
       if (wItem) wItem.quantity = data.restored_qty;
-
-      // Update banner
-      const banner = document.getElementById('successBanner');
-      banner.innerHTML = t('removal_undone') + ' ' + data.restored_qty;
-      banner.style.background = '#00b894';
+      showBanner(esc(t('removal_undone')) + ' ' + esc(String(data.restored_qty)), 'var(--ok)');
       _lastRemoval = null;
-      setTimeout(() => { banner.style.display = 'none'; }, 3000);
-    } else {
-      alert(t('undo_failed') + ': ' + (data.error || 'Unknown'));
-    }
-  } catch (e) {
-    alert(t('error_undoing'));
-  }
+      setTimeout(() => { document.getElementById('successBanner').style.display = 'none'; }, 3000);
+      if (wItem && trailState.upc && sameUpc(trailState.upc, wItem.barcode)) openTrail(trailState.upc, {family: trailState.family, forced: true});
+    } else alert(t('undo_failed') + ': ' + (data.error || 'Unknown'));
+  } catch (e) { alert(t('error_undoing')); }
 }
 
-// Last match info for undo
+// ===== Matching (sold order / store listing context) =====
 let _lastMatch = null;
-
 function handleMatchFromButton(btnEl) {
   const searchrackId = parseInt(btnEl.dataset.searchrackId || '0', 10) || 0;
   handleMatch(searchrackId, btnEl.dataset.barcode || '', btnEl.dataset.location || '', btnEl);
 }
 
-// Match barcode and location to sold order (when accessed from ready-to-ship)
 let matchInFlight = false;
 
 async function handleMatch(searchrackId, barcode, location, btnEl) {
   if (matchInFlight) return;
-  if (!orderId && !isListingMatch) {
-    alert('No order or store listing context - cannot match');
-    return;
-  }
-
+  if (!orderId && !isListingMatch) { alert('No order or store listing context - cannot match'); return; }
   matchInFlight = true;
   try {
-    const endpoint = orderId
-      ? `/api/sold/match-barcode/${orderId}`
-      : '/api/listing-helper/inventory-match';
+    const endpoint = orderId ? `/api/sold/match-barcode/${orderId}` : '/api/listing-helper/inventory-match';
     const payload = orderId
       ? {barcode: barcode, location: location, searchrack_id: searchrackId}
-      : {
-          store: listingStore,
-          listing_key: listingKey,
-          listing_id: listingId,
-          marketplace_barcode: orderBarcode,
-          listing_title: orderTitle,
-          searchrack_id: searchrackId
-        };
+      : {store: listingStore, listing_key: listingKey, listing_id: listingId, marketplace_barcode: orderBarcode, listing_title: orderTitle, searchrack_id: searchrackId};
     payload.finder_learn = true;
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
+    const resp = await fetch(endpoint, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     const data = await resp.json();
-
     if (data.success) {
       const savedMatch = data.match || {};
       const savedLocation = data.new_location || savedMatch.inventory_location || location || '';
       const savedSearchrackId = data.searchrack_id || savedMatch.searchrack_id || searchrackId;
-      // Store for undo
       _lastMatch = {
-        mode: orderId ? 'order' : 'listing',
-        finder_alias_undo: data.finder_alias_undo,
-        order_id: orderId,
-        old_match: data.old_match || null,
-        old_barcode: data.old_barcode,
-        old_location: data.old_location,
-        old_searchrack_id: data.old_searchrack_id || '',
-        new_barcode: barcode,
-        new_location: savedLocation,
-        searchrack_id: savedSearchrackId,
-        btnEl: btnEl
+        mode: orderId ? 'order' : 'listing', finder_alias_undo: data.finder_alias_undo, order_id: orderId,
+        old_match: data.old_match || null, old_barcode: data.old_barcode, old_location: data.old_location,
+        old_searchrack_id: data.old_searchrack_id || '', new_barcode: barcode, new_location: savedLocation,
+        searchrack_id: savedSearchrackId, btnEl: btnEl
       };
-
-      // Mark card as matched
       const card = document.getElementById('wh-card-' + savedSearchrackId);
       if (card) {
-        card.style.background = '#e8f5e9';
-        card.style.border = '2px solid #4caf50';
-        // Disable button and change text
-        if (btnEl) {
-          btnEl.disabled = true;
-          btnEl.textContent = t('matched') || 'Matched ✓';
-          btnEl.style.background = '#4caf50';
-        }
+        card.classList.add('matched');
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = t('matched') || 'Matched ✓'; }
       }
-
-      // Show success banner with undo button
       const banner = document.getElementById('successBanner');
       const locText = savedLocation ? ` | Loc: ${savedLocation}` : '';
       const matchLabel = isListingMatch ? 'Store listing fallback saved!' : (t('barcode_matched') || 'Matched!');
@@ -1362,126 +1486,71 @@ async function handleMatch(searchrackId, barcode, location, btnEl) {
         <span> Alternate-name learning saved with this match.</span>
         <button class="undo-btn" onclick="undoMatch()">${t('undo') || 'Undo'}</button>`;
       banner.style.display = 'block';
-      banner.style.background = '#4caf50';
-
-      // Refresh opener window (ready-to-ship) if available
+      banner.style.background = 'var(--ok)';
       refreshOpenerWindow();
-    } else {
-      alert((t('match_failed') || 'Match failed') + ': ' + (data.error || 'Unknown'));
-    }
+    } else alert((t('match_failed') || 'Match failed') + ': ' + (data.error || 'Unknown'));
   } catch (e) {
     alert(t('error_matching') || 'Error matching barcode');
-  } finally {
-    matchInFlight = false;
-  }
+  } finally { matchInFlight = false; }
 }
 
-// Undo the last match
 async function undoMatch() {
   if (!_lastMatch || matchInFlight) return;
   matchInFlight = true;
-
   try {
     const isListingUndo = _lastMatch.mode === 'listing';
     const oldListingMatch = _lastMatch.old_match || null;
-    const endpoint = isListingUndo
-      ? '/api/listing-helper/inventory-match'
-      : `/api/sold/match-barcode/${_lastMatch.order_id}`;
+    const endpoint = isListingUndo ? '/api/listing-helper/inventory-match' : `/api/sold/match-barcode/${_lastMatch.order_id}`;
     const payload = isListingUndo
       ? (oldListingMatch
-          ? {
-              store: listingStore,
-              listing_key: listingKey,
-              listing_id: oldListingMatch.listing_id || listingId,
-              marketplace_barcode: oldListingMatch.marketplace_barcode || orderBarcode,
-              listing_title: oldListingMatch.listing_title || orderTitle,
-              searchrack_id: oldListingMatch.searchrack_id
-            }
+          ? {store: listingStore, listing_key: listingKey, listing_id: oldListingMatch.listing_id || listingId, marketplace_barcode: oldListingMatch.marketplace_barcode || orderBarcode, listing_title: oldListingMatch.listing_title || orderTitle, searchrack_id: oldListingMatch.searchrack_id}
           : {store: listingStore, listing_key: listingKey, clear: true})
-      : {
-          barcode: _lastMatch.old_barcode || '',
-          location: _lastMatch.old_location || '',
-          searchrack_id: _lastMatch.old_searchrack_id || null
-        };
+      : {barcode: _lastMatch.old_barcode || '', location: _lastMatch.old_location || '', searchrack_id: _lastMatch.old_searchrack_id || null};
     payload.finder_alias_undo = _lastMatch.finder_alias_undo;
-    const resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
+    const resp = await fetch(endpoint, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
     const data = await resp.json();
-
     if (data.success) {
-      // Restore card appearance
       const card = document.getElementById('wh-card-' + _lastMatch.searchrack_id);
-      if (card) {
-        card.style.background = '';
-        card.style.border = '';
-      }
-      // Restore button
-      if (_lastMatch.btnEl) {
-        _lastMatch.btnEl.disabled = false;
-        _lastMatch.btnEl.textContent = t('match') || 'Match';
-        _lastMatch.btnEl.style.background = '';
-      }
-
-      // Update banner
+      if (card) card.classList.remove('matched');
+      if (_lastMatch.btnEl) { _lastMatch.btnEl.disabled = false; _lastMatch.btnEl.textContent = t('match') || 'Match'; }
       const banner = document.getElementById('successBanner');
       banner.innerHTML = t('match_undone') || 'Match undone';
-      banner.style.background = '#00b894';
+      banner.style.background = 'var(--ok)';
       _lastMatch = null;
       setTimeout(() => { banner.style.display = 'none'; }, 3000);
-
-      // Refresh opener window
       refreshOpenerWindow();
-    } else {
-      alert((t('undo_failed') || 'Undo failed') + ': ' + (data.error || 'Unknown'));
-    }
+    } else alert((t('undo_failed') || 'Undo failed') + ': ' + (data.error || 'Unknown'));
   } catch (e) {
     alert(t('error_undoing') || 'Error undoing match');
-  } finally {
-    matchInFlight = false;
-  }
+  } finally { matchInFlight = false; }
 }
 
 // Refresh the opener window (ready-to-ship) to show updated data
 function refreshOpenerWindow() {
-  // Method 1: BroadcastChannel (most reliable for same-origin tabs)
-  try {
-    const bc = new BroadcastChannel('sold_orders_channel');
-    bc.postMessage({type: 'refresh', ts: Date.now()});
-    bc.close();
-    console.log('Sent BroadcastChannel refresh message');
-  } catch (e) {
-    console.log('BroadcastChannel not available:', e);
-  }
-
-  // Method 2: localStorage event (fallback)
-  try {
-    const ts = Date.now().toString();
-    localStorage.setItem('sold_orders_refresh', ts);
-    console.log('Set localStorage sold_orders_refresh =', ts);
-  } catch (e) {
-    console.log('localStorage not available:', e);
-  }
-
-  // Method 3: Direct opener access (fallback)
+  try { const bc = new BroadcastChannel('sold_orders_channel'); bc.postMessage({type: 'refresh', ts: Date.now()}); bc.close(); } catch (e) {}
+  try { localStorage.setItem('sold_orders_refresh', Date.now().toString()); } catch (e) {}
   try {
     if (window.opener && !window.opener.closed) {
-      // Clear cache and re-fetch orders
-      if (window.opener.OrderManager && window.opener.OrderManager.clearCache) {
-        window.opener.OrderManager.clearCache();
-      }
-      // Click the refresh button if it exists
+      if (window.opener.OrderManager && window.opener.OrderManager.clearCache) window.opener.OrderManager.clearCache();
       const refreshBtn = window.opener.document.getElementById('refresh-orders-btn');
-      if (refreshBtn) {
-        refreshBtn.click();
-      }
-      console.log('Triggered refresh via window.opener');
+      if (refreshBtn) refreshBtn.click();
     }
-  } catch (e) {
-    console.log('Could not refresh opener window directly:', e);
-  }
+  } catch (e) {}
+}
+
+// ===== Start =====
+if (orderBarcode) {
+  searchInput.value = orderBarcode;
+  searchClear.classList.add('show');
+  setTimeout(() => doSearch(orderBarcode), 150);
+} else if (orderTitle && tokens.length) {
+  searchInput.value = tokens.map(t => t.word).join(' ');
+  searchClear.classList.add('show');
+  setTimeout(() => doSearch(), 150);
+} else if (initialQuery) {
+  searchInput.value = initialQuery;
+  searchClear.classList.add('show');
+  setTimeout(() => doSearch(initialQuery), 50);
 }
 </script>
 </body>

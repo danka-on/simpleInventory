@@ -284,6 +284,20 @@ def api_finder_records():
         return jsonify({'error': ss_errors._safe_error(e)}), 500
 
 
+def api_finder_trail():
+    """One merged, read-only timeline with ledger totals and clues for a UPC."""
+    from finder_trail import collect_trail
+    try:
+        return jsonify(collect_trail(
+            ss_config.BASE_DIR, connect_db, (request.args.get('upc') or '').strip(),
+            family=request.args.get('family') == '1',
+        ))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': ss_errors._safe_error(e)}), 500
+
+
 def api_finder_forget_alias():
     from finder_aliases import DATABASES, forget_alias, forget_name
     data = request.get_json() or {}

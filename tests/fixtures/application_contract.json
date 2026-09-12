@@ -4077,6 +4077,18 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/finder/trail",
+      "endpoint": "api_finder_trail",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/finder/aliases/forget",
       "endpoint": "api_finder_forget_alias",
       "methods": [
@@ -6469,6 +6481,7 @@
     "_finder_barcode_search_variants": "(value)",
     "api_finder": "()",
     "api_finder_records": "()",
+    "api_finder_trail": "()",
     "api_finder_forget_alias": "()",
     "api_lookup_image_by_barcode": "()",
     "api_finder_assign": "()",

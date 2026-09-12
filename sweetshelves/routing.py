@@ -432,6 +432,7 @@ def register_routes():
     ss_runtime.app.route('/finder')(ss_finder.finder_page)
     ss_runtime.app.route('/api/finder', methods=['POST'])(ss_finder.api_finder)
     ss_runtime.app.route('/api/finder/records', methods=['GET'])(ss_finder.api_finder_records)
+    ss_runtime.app.route('/api/finder/trail', methods=['GET'])(ss_finder.api_finder_trail)
     ss_runtime.app.route('/api/finder/aliases/forget', methods=['POST'])(ss_finder.api_finder_forget_alias)
     ss_runtime.app.route('/api/lookup-image-by-barcode', methods=['GET'])(ss_finder.api_lookup_image_by_barcode)
     ss_runtime.app.route('/api/finder/assign', methods=['POST'])(ss_finder.api_finder_assign)

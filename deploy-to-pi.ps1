@@ -43,7 +43,7 @@ try {
     $PythonModules = @(
         'app.py', 'DBmanager.py', 'BOLextractor.py', 'amazon_manager.py',
         'ebay_manager.py', 'ebay_mapping.py', 'enrich_sold_db.py', 'fba_inbound.py',
-        'finder_aliases.py', 'finder_records.py', 'finder_search.py', 'inventory.py',
+        'finder_aliases.py', 'finder_records.py', 'finder_search.py', 'finder_trail.py', 'inventory.py',
         'listing_mapping_routes.py', 'lot_matcher.py', 'marketplace_manager.py',
         'printer_manager.py', 'rawbol_manager.py', 'seller_analytics.py', 'token_manager.py', 'token_expiry.py',
         'organize_shelf_storage.py', 'rotating_backup.py', 'gunicorn_config.py'

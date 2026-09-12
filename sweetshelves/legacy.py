@@ -208,7 +208,7 @@ EXPORT_GROUPS = {
     ),
     'finder': (
         '_finder_barcode_search_variants', 'api_finder', 'api_finder_assign', 'api_finder_forget_alias',
-        'api_finder_records', 'api_finder_remove', 'api_finder_undo_remove', 'api_lookup_image_by_barcode',
+        'api_finder_records', 'api_finder_remove', 'api_finder_trail', 'api_finder_undo_remove', 'api_lookup_image_by_barcode',
         'finder_page',
     ),
     'health': (
