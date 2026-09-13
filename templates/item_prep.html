@@ -63,6 +63,13 @@
     .thumb-existing-media{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px;max-width:100%}
     .hero{display:block;width:100%;max-height:32vh;object-fit:contain;background:#f8f8f8;border-radius:12px;margin:10px auto 0}
     .title{font-weight:700;font-size:1.1rem}
+    .prep-fallback{margin-top:14px;border:1px solid #fde68a;background:#fffbeb;border-radius:12px;padding:12px}
+    .prep-fallback-head{font-weight:700;color:#92400e;margin-bottom:8px}
+    .prep-fallback-body{display:flex;gap:12px;align-items:flex-start}
+    .prep-fallback-body img{width:96px;height:96px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid #eee;flex-shrink:0}
+    .prep-fallback-title{font-weight:700;margin-bottom:4px}
+    .prep-fallback-tried{font-size:0.8rem;color:#6b7280;margin-top:6px}
+    .prep-fallback-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
     .muted{color:#666;font-size:0.95rem}
     #statusMsg{margin-top:10px;font-size:1rem}
     .ok{color:#2ecc71}
@@ -468,6 +475,7 @@
     </div>
     <div id="scanValidationMsg" class="scan-validation-msg hidden">not a upc code</div>
     
+    <div id="prepFallbackCard" class="prep-fallback hidden" aria-live="polite"></div>
     <div id="noBarcodeBtn" style="margin-top:48px">
       <a href="/item-prep-no-barcode" style="text-decoration:none;display:block">
         <button class="btn" style="padding:36px 64px;border-radius:12px;background:#3498db;border:none;color:#fff;font-size:1.2rem;width:100%;box-shadow:0 2px 8px rgba(52,152,219,0.3);transition:all 0.2s" onmouseover="this.style.background='#2980b9'" onmouseout="this.style.background='#3498db'">
@@ -2073,6 +2081,7 @@
       currentLookupInfo = null;
       syncItemPrepUrl('');
       resetQtyDisplay();
+      hidePrepFallback();
       setupDeviceMode();
     }
 
@@ -2157,7 +2166,78 @@
       }
     }
 
+    let prepFallbackToken = 0;
+    function hidePrepFallback(){
+      prepFallbackToken++;
+      const card = document.getElementById('prepFallbackCard');
+      if(card){ card.classList.add('hidden'); card.innerHTML = ''; }
+    }
+    function escAttr(s){ return esc(s).replace(/"/g, '&quot;'); }
+    function prepFallbackTried(list){
+      if(!Array.isArray(list) || !list.length) return '';
+      return `<div class="prep-fallback-tried">Checked: ${list.map(t => esc(t.label + ': ' + t.result)).join(' · ')}</div>`;
+    }
+    async function showPrepFallback(upc){
+      const card = document.getElementById('prepFallbackCard');
+      if(!card || !upc) return;
+      const token = ++prepFallbackToken;
+      card.innerHTML = `<div class="prep-fallback-head">Not in BOL — checking backup catalogs for ${esc(upc)}…</div>`;
+      card.classList.remove('hidden');
+      let j = {};
+      try{
+        const r = await fetch('/api/items-prep/fallback-lookup?upc=' + encodeURIComponent(upc));
+        j = await r.json().catch(()=>({}));
+      }catch(e){
+        j = {error: 'Backup lookup failed'};
+      }
+      if(token !== prepFallbackToken) return;
+      if(!j.found || !j.candidate){
+        card.innerHTML = `<div class="prep-fallback-head">Not in BOL · ${esc(upc)}</div>
+          <div>${esc(j.message || j.error || 'No backup catalog knows this barcode.')}</div>${prepFallbackTried(j.tried)}
+          <div class="prep-fallback-actions"><button class="btn btn-gray" type="button" data-fallback="dismiss">Dismiss</button></div>`;
+        return;
+      }
+      const c = j.candidate;
+      const img = c.image_url ? `<img src="${escAttr(c.image_url)}" alt="" onerror="this.remove()">` : '';
+      card.innerHTML = `<div class="prep-fallback-head">Not in BOL — found in ${esc(c.source_label)}${j.cached ? ' (saved lookup)' : ''}</div>
+        <div class="prep-fallback-body">${img}<div><div class="prep-fallback-title">${esc(c.title)}</div><div class="muted">${esc(upc)}</div></div></div>
+        ${prepFallbackTried(j.tried)}
+        <div class="prep-fallback-actions">
+          <button class="btn btn-primary" type="button" data-fallback="use">Use this item</button>
+          <button class="btn btn-gray" type="button" data-fallback="dismiss">Dismiss</button>
+        </div>`;
+      card.dataset.upc = upc;
+      card.dataset.title = c.title || '';
+      card.dataset.image = c.image_url || '';
+      card.dataset.source = c.source || '';
+    }
+    document.getElementById('prepFallbackCard').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-fallback]');
+      if(!btn) return;
+      const card = ev.currentTarget;
+      if(btn.dataset.fallback === 'dismiss'){ hidePrepFallback(); return; }
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+      try{
+        const r = await fetch('/api/items-prep/fallback-adopt', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({upc: card.dataset.upc, title: card.dataset.title, image_url: card.dataset.image, source: card.dataset.source})
+        });
+        const j = await r.json().catch(()=>({}));
+        if(!r.ok || !j.success) throw new Error(j.error || 'Could not save this item');
+        const upc = card.dataset.upc;
+        hidePrepFallback();
+        await lookup(upc);
+      }catch(e){
+        btn.disabled = false;
+        btn.textContent = 'Use this item';
+        alert(e.message);
+      }
+    });
+
     async function lookup(upc){
+      hidePrepFallback();
       const lotQ = getLotQueryString();
       const r = await fetch('/api/bol_lookup?upc='+encodeURIComponent(upc)+lotQ);
       let j = await r.json();
@@ -2180,6 +2260,7 @@
         clearQuickVoiceNote();
         // Auto-clear the input after lookup completes
         document.getElementById('manualUpc').value = '';
+        showPrepFallback(upc);
         return;
       }
       const it = j.item||{};

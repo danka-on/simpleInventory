@@ -65,6 +65,7 @@ from . import telegram as ss_telegram
 from . import warehouse_locations as ss_warehouse_locations
 from . import warehouse_maps as ss_warehouse_maps
 from . import warehouse_nameless as ss_warehouse_nameless
+from . import prep_fallback_lookup as ss_prep_fallback_lookup
 from . import warehouse_receiving as ss_warehouse_receiving
 from . import warehouse_search as ss_warehouse_search
 from . import web_hooks as ss_web_hooks
@@ -225,6 +226,8 @@ def register_routes():
     ss_runtime.app.route('/item-prep-create-item')(ss_warehouse_receiving.item_prep_create_item_page)
     ss_runtime.app.route('/api/items-prep/generate-barcode', methods=['POST'])(ss_warehouse_receiving.generate_custom_barcode)
     ss_runtime.app.route('/api/items-prep/temp-item', methods=['POST'])(ss_warehouse_receiving.save_temp_item)
+    ss_runtime.app.route('/api/items-prep/fallback-lookup', methods=['GET'])(ss_prep_fallback_lookup.api_prep_fallback_lookup)
+    ss_runtime.app.route('/api/items-prep/fallback-adopt', methods=['POST'])(ss_prep_fallback_lookup.api_prep_fallback_adopt)
     ss_runtime.app.route('/api/custom-item/identity', methods=['POST'])(ss_warehouse_receiving.save_custom_item_identity)
     ss_runtime.app.route('/api/clear_cache', methods=['GET'])(ss_caching.api_clear_cache)
     ss_runtime.app.route('/api/bol_lookup', methods=['GET'])(ss_prep_context.api_bol_lookup)

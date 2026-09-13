@@ -1697,6 +1697,29 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/items-prep/fallback-lookup",
+      "endpoint": "api_prep_fallback_lookup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items-prep/fallback-adopt",
+      "endpoint": "api_prep_fallback_adopt",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/custom-item/identity",
       "endpoint": "save_custom_item_identity",
       "methods": [
