@@ -576,3 +576,6 @@ def register_routes():
                            ss_fba_inventory._fba_session_item_payload,
                            ss_fba_shipments._fba_plan_approval_issues,
                            ss_amazon_catalog._amazon_spapi_context)
+
+    from voice_note_routes import register as register_voice_notes
+    register_voice_notes(ss_runtime.app, BASE_DIR)

@@ -2358,7 +2358,7 @@ function renderSuffixedItemPrepContext(data){
 
     const audioHtml = voiceNotes.map((voice, index) => {
         const url = String(voice.audio_url || '').trim();
-        return `<div style="text-align:left;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:9px;"><div style="font-size:.78rem;font-weight:800;color:#5b21b6;margin-bottom:5px;">Voice note ${index + 1}</div><audio controls preload="metadata" src="${esc(url)}" style="width:100%;"></audio></div>`;
+        return `<div style="text-align:left;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:9px;padding:9px;"><div style="font-size:.78rem;font-weight:800;color:#5b21b6;margin-bottom:5px;">Voice note ${index + 1}</div><audio controls preload="metadata" src="${esc(url)}" style="width:100%;"></audio>${WarehouseVoiceNotes.render(voice)}</div>`;
     }).join('');
 
     return `<div style="min-width:min(620px,84vw);max-width:760px;">
@@ -2379,6 +2379,7 @@ async function showSuffixedItemPrepModal(barcode){
         const data = await response.json();
         if(!response.ok || !data.success) throw new Error(data.error || 'Unable to load item-prep content');
         showViewModal(renderSuffixedItemPrepContext(data));
+        WarehouseVoiceNotes.hydrate(document.getElementById('viewContent'));
     }catch(error){
         showViewModal(`<div><h3>Item Prep</h3><div class="small-muted">${esc(error.message || 'Unable to load item-prep content')}</div></div>`);
     }
@@ -5293,6 +5294,7 @@ document.querySelectorAll('.modal').forEach(modal => {
 
 </script>
 <script src="/static/location-preview.js?v=20260317a"></script>
+<script src="/static/warehouse-voice-notes.js?v=20260913a"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>
