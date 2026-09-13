@@ -5345,6 +5345,54 @@
       "subdomain": ""
     },
     {
+      "rule": "/pnl",
+      "endpoint": "pnl_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/pnl",
+      "endpoint": "api_pnl",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/pnl/expenses",
+      "endpoint": "api_pnl_expenses",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/pnl/expenses/<int:expense_id>",
+      "endpoint": "api_pnl_expense_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/returns",
       "endpoint": "returns_page",
       "methods": [

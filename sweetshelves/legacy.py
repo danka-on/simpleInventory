@@ -381,6 +381,9 @@ EXPORT_GROUPS = {
     'payouts': (
         'api_get_payouts', 'api_sync_payouts', 'payouts_page',
     ),
+    'pnl': (
+        'api_pnl', 'api_pnl_expense_delete', 'api_pnl_expenses', 'pnl_page',
+    ),
     'prep_actions': (
         'api_bol_items_update_quantity', 'api_items_prep_allocate_lots', 'api_items_prep_cleanup_temp',
         'api_items_prep_create_bad_entry', 'api_items_prep_create_return_entry',

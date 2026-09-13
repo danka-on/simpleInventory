@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Profit &amp; Loss - Sweet Shelves</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #0984e3; --accent: #00b894; --danger: #e74c3c; --warning: #f39c12;
+            --bg: #f6f7f9; --card: #fff; --border: #e0e4e8; --text: #2c3e50; --muted: #6b7680;
+            --radius: 14px; --shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg); margin: 0; color: var(--text); }
+        .container { max-width: 1500px; margin: 0 auto; padding: 20px; }
+        .header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+        .header h1 { margin: 0; font-size: 1.7rem; }
+        .header .sub { color: var(--muted); font-size: 0.9rem; margin-top: 4px; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .btn { padding: 9px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--text);
+               font-size: 0.9rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+        .btn:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .btn-primary:hover { background: #0770c9; color: #fff; }
+        .btn-danger { color: var(--danger); }
+        .btn-sm { padding: 5px 9px; font-size: 0.8rem; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+        .card .label { font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+        .card .value { font-size: 1.45rem; font-weight: 700; margin-top: 4px; }
+        .card .hint { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+        .pos { color: #0a9c6c; } .neg { color: var(--danger); } .warn { color: #c77700; }
+        .section { background: var(--card); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); margin-bottom: 18px; }
+        .section h2 { margin: 0 0 4px; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
+        .section .desc { color: var(--muted); font-size: 0.86rem; margin: 0 0 12px; }
+        .table-wrap { overflow-x: auto; }
+        table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+        th, td { padding: 7px 9px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+        th:first-child, td:first-child { text-align: left; }
+        th { background: #f1f3f6; font-weight: 600; color: #44505a; }
+        tr.total td { font-weight: 700; background: #fafbfc; border-top: 2px solid var(--border); }
+        td.text { text-align: left; white-space: normal; }
+        .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 0.74rem; font-weight: 600; }
+        .tag-warn { background: #fff4e0; color: #b46200; }
+        .tag-bad { background: #fde8e8; color: #b42318; }
+        .tag-ok { background: #e6f7f0; color: #067647; }
+        .tag-info { background: #e8f1fb; color: #1b5fa8; }
+        .freight-edit { display: inline-flex; gap: 4px; align-items: center; }
+        .freight-edit input { width: 90px; padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; text-align: right; font-size: 0.85rem; }
+        .checks { list-style: none; padding: 0; margin: 0; }
+        .checks li { padding: 8px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; align-items: flex-start; }
+        .checks li:last-child { border-bottom: none; }
+        .checks i { margin-top: 3px; width: 16px; text-align: center; }
+        .form-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; margin-bottom: 12px; }
+        .form-row label { display: block; font-size: 0.78rem; color: var(--muted); margin-bottom: 3px; }
+        .form-row input, .form-row select { width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; }
+        .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+        .status { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 0.9rem; display: none; }
+        .status.error { display: block; background: #fde8e8; color: #b42318; }
+        .status.info { display: block; background: #e8f1fb; color: #1b5fa8; }
+        .methods { font-size: 0.85rem; color: #44505a; padding-left: 18px; margin: 0; }
+        .methods li { margin-bottom: 4px; }
+        .muted { color: var(--muted); }
+        @media (max-width: 700px) { .container { padding: 12px; } .card .value { font-size: 1.2rem; } }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div>
+            <h1><i class="fas fa-scale-balanced"></i> Profit &amp; Loss</h1>
+            <div class="sub" id="generatedAt">Loading...</div>
+        </div>
+        <div class="actions">
+            <button class="btn btn-primary" id="refreshBtn"><i class="fas fa-rotate"></i> Refresh</button>
+            <a class="btn" href="/payouts"><i class="fas fa-money-bill-transfer"></i> Payouts</a>
+            <a class="btn" href="/returns"><i class="fas fa-undo"></i> Returns</a>
+            <a class="btn" href="/bol-stats"><i class="fas fa-chart-bar"></i> BOL Stats</a>
+            <a class="btn" href="/tools"><i class="fas fa-arrow-left"></i> Tools</a>
+        </div>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="cards" id="cards"></div>
+
+    <div class="section">
+        <h2><i class="fas fa-money-bill-wave"></i> Cash by month</h2>
+        <p class="desc">What actually landed in the bank (closed marketplace payouts plus cash sales) against what went out (lots, freight, other expenses). The estimated columns on the right come from the sold orders and show how far the order data is from the real payouts.</p>
+        <div class="table-wrap">
+            <table id="monthsTable">
+                <thead>
+                    <tr>
+                        <th>Month</th><th>Amazon payouts</th><th>eBay payouts</th><th>Cash sales</th><th>Cash in</th>
+                        <th>Lot goods</th><th>Freight</th><th>Expenses</th><th>Cash out</th><th>Net cash</th><th>Running total</th>
+                        <th class="muted">Orders</th><th class="muted">Est. net sales</th><th class="muted">Payouts - est.</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2><i class="fas fa-pallet"></i> Lots</h2>
+        <p class="desc">Each pallet on its own. <strong>Recovered</strong> is net sales as a share of landed cost (goods + freight). <strong>Extras</strong> are sold units that were in the pallet but not on Macy's manifest. Freight can be typed in here for lots that are missing it.</p>
+        <div class="table-wrap">
+            <table id="lotsTable">
+                <thead>
+                    <tr>
+                        <th>Lot</th><th>Received</th><th>Units</th><th>Goods</th><th>Freight</th><th>Landed</th>
+                        <th>Sold units</th><th>Sell-through</th><th>On hand</th><th>Extras</th>
+                        <th>Revenue</th><th>Fees + labels</th><th>Refunds</th><th>Net sales</th><th>Recovered</th><th>Still to recover</th>
+                        <th>Margin after COGS</th><th>Flags</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="section">
+            <h2><i class="fas fa-store"></i> By store</h2>
+            <p class="desc">Estimated from sold orders. Refunds include returns that could not be matched to an order.</p>
+            <div class="table-wrap">
+                <table id="storesTable">
+                    <thead><tr><th>Store</th><th>Orders</th><th>Units</th><th>Revenue</th><th>Fees</th><th>Labels</th><th>Refunds</th><th>Net sales</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="section">
+            <h2><i class="fas fa-box-open"></i> Items not on any manifest</h2>
+            <p class="desc">Sold units whose UPC appears on no BOL. They came in a pallet, so their revenue is real, but no lot can claim them and they carry no cost.</p>
+            <div class="table-wrap">
+                <table id="bucketsTable">
+                    <thead><tr><th>Bucket</th><th>Orders</th><th>Units</th><th>Revenue</th><th>Fees + labels</th><th>Refunds</th><th>Net sales</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2><i class="fas fa-receipt"></i> Other expenses</h2>
+        <p class="desc">Anything a payout does not already cover: boxes, tape, label rolls, subscriptions, fuel, help. These count as cash out in the month entered.</p>
+        <form id="expenseForm" class="form-row">
+            <div><label>Date</label><input type="date" name="expense_date" required></div>
+            <div><label>Category</label>
+                <select name="category">
+                    {% for category in expense_categories %}<option value="{{ category }}">{{ category }}</option>{% endfor %}
+                </select>
+            </div>
+            <div><label>Amount ($)</label><input type="number" name="amount" step="0.01" min="0.01" required></div>
+            <div><label>Note</label><input type="text" name="note" placeholder="optional"></div>
+            <div><button class="btn btn-primary" type="submit"><i class="fas fa-plus"></i> Add expense</button></div>
+        </form>
+        <div class="table-wrap">
+            <table id="expensesTable">
+                <thead><tr><th>Date</th><th>Category</th><th>Amount</th><th>Note</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="section">
+            <h2><i class="fas fa-list-check"></i> Data checks</h2>
+            <p class="desc">Things that make the numbers above less certain, with what to do about them.</p>
+            <ul class="checks" id="checks"></ul>
+        </div>
+        <div class="section">
+            <h2><i class="fas fa-calculator"></i> How this is calculated</h2>
+            <ul class="methods" id="methods"></ul>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const money = (v, signed) => {
+        const n = Number(v || 0);
+        const s = '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (n < 0) return '-' + s;
+        return (signed && n > 0 ? '+' : '') + s;
+    };
+    const pct = v => (v === null || v === undefined) ? '—' : v.toFixed(0) + '%';
+    const cls = v => Number(v) > 0 ? 'pos' : (Number(v) < 0 ? 'neg' : '');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const status = document.getElementById('status');
+
+    function showStatus(kind, text) {
+        status.className = 'status ' + kind;
+        status.textContent = text;
+        if (kind === 'info') setTimeout(() => { status.className = 'status'; }, 4000);
+    }
+
+    async function load() {
+        document.getElementById('generatedAt').textContent = 'Loading...';
+        try {
+            const res = await fetch('/api/pnl', { cache: 'no-store' });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Report failed');
+            render(data);
+        } catch (err) {
+            showStatus('error', 'Could not load the report: ' + err.message);
+        }
+    }
+
+    function card(label, value, hint, klass) {
+        return `<div class="card"><div class="label">${esc(label)}</div><div class="value ${klass || ''}">${value}</div>${hint ? `<div class="hint">${esc(hint)}</div>` : ''}</div>`;
+    }
+
+    function render(data) {
+        const t = data.totals, q = data.data_quality;
+        document.getElementById('generatedAt').textContent = 'As of ' + data.generated_at +
+            (q.payouts_last_synced ? ' · payouts synced ' + q.payouts_last_synced.slice(0, 16).replace('T', ' ') : '');
+
+        document.getElementById('cards').innerHTML = [
+            card('Cash in', money(t.cash_in), `Payouts ${money(t.payouts)} + cash sales ${money(t.cash_sales)}`, 'pos'),
+            card('Cash out', money(t.cash_out), `Lots ${money(t.lot_goods)} + freight ${money(t.lot_freight)} + expenses ${money(t.expenses)}`, 'neg'),
+            card('Net cash', money(t.net, true), 'Cash in minus cash out, all time', cls(t.net)),
+            card('Stock at cost', money(t.stock_at_cost), 'Landed cost not yet sold through (estimate)'),
+            card('Est. net sales', money(t.net_sales), `Orders after fees, labels and ${money(t.refunds)} refunds`),
+            card('Margin after COGS', money(t.margin_after_cogs, true), 'Est. net sales minus cost of the units sold', cls(t.margin_after_cogs)),
+            card('Not on BOL', money(t.not_on_bol_revenue), `${q.orders_not_on_bol} orders with no manifest match`),
+            card('Retail on manifests', money(t.retail_on_manifests), 'Macy\'s retail value of everything received'),
+        ].join('');
+
+        const mb = document.querySelector('#monthsTable tbody');
+        mb.innerHTML = data.months.slice().reverse().map(m => `
+            <tr>
+                <td>${esc(m.month)}</td><td>${money(m.payouts_amazon)}</td><td>${money(m.payouts_ebay)}</td><td>${money(m.cash_sales)}</td>
+                <td class="pos">${money(m.cash_in)}</td><td>${money(m.lot_goods)}</td><td>${money(m.lot_freight)}</td><td>${money(m.expenses)}</td>
+                <td class="neg">${money(m.cash_out)}</td><td class="${cls(m.net)}">${money(m.net, true)}</td><td class="${cls(m.cumulative)}">${money(m.cumulative, true)}</td>
+                <td class="muted">${m.orders}</td><td class="muted">${money(m.net_sales)}</td><td class="muted">${money(m.payouts - m.net_sales, true)}</td>
+            </tr>`).join('') + `
+            <tr class="total">
+                <td>Total</td><td>${money(t.payouts_amazon)}</td><td>${money(t.payouts_ebay)}</td><td>${money(t.cash_sales)}</td>
+                <td class="pos">${money(t.cash_in)}</td><td>${money(t.lot_goods)}</td><td>${money(t.lot_freight)}</td><td>${money(t.expenses)}</td>
+                <td class="neg">${money(t.cash_out)}</td><td class="${cls(t.net)}">${money(t.net, true)}</td><td></td>
+                <td class="muted">${t.orders}</td><td class="muted">${money(t.net_sales)}</td><td class="muted">${money(t.payouts - t.net_sales, true)}</td>
+            </tr>`;
+
+        const lb = document.querySelector('#lotsTable tbody');
+        lb.innerHTML = data.lots.slice().reverse().map(l => {
+            const flags = [];
+            if (l.freight_missing) flags.push('<span class="tag tag-warn">freight missing</span>');
+            if (!l.goods_cost) flags.push('<span class="tag tag-bad">no goods cost</span>');
+            if (l.manifested_units === 0) flags.push('<span class="tag tag-bad">no manifest rows</span>');
+            if (!l.in_upload_logs) flags.push('<span class="tag tag-warn">not in upload log</span>');
+            if (l.inferred_orders) flags.push(`<span class="tag tag-info">${l.inferred_orders} inferred by UPC</span>`);
+            if (l.no_cost_orders) flags.push(`<span class="tag tag-info">${l.no_cost_orders} sold w/o cost</span>`);
+            const freightCell = `<span class="freight-edit"><input type="number" step="0.01" min="0" value="${l.freight === null ? '' : l.freight}" data-lot="${esc(l.lot_number)}" placeholder="0.00"><button class="btn btn-sm save-freight" data-lot="${esc(l.lot_number)}" title="Save freight"><i class="fas fa-floppy-disk"></i></button></span>`;
+            return `<tr>
+                <td><strong>${esc(l.lot_number)}</strong><div class="muted" style="font-size:0.75rem">${esc((l.filenames || []).join(', '))}</div></td>
+                <td>${esc(l.import_date || '—')}</td><td>${l.manifested_units}</td><td>${l.goods_cost ? money(l.goods_cost) : '—'}</td>
+                <td>${freightCell}</td><td>${money(l.landed_cost)}</td>
+                <td>${l.sold.units}</td><td>${pct(l.sell_through_pct)}</td><td>${l.on_hand_units}</td>
+                <td>${l.extra.units ? `${l.extra.units} <span class="muted">(${money(l.extra.revenue)})</span>` : '0'}</td>
+                <td>${money(l.sold.revenue)}</td><td>${money(l.sold.fees + l.sold.shipping)}</td><td class="${l.sold.refunds ? 'neg' : ''}">${money(l.sold.refunds)}</td>
+                <td class="${cls(l.sold.net_sales)}">${money(l.sold.net_sales)}</td>
+                <td class="${l.recovery_pct === null ? '' : (l.recovery_pct >= 100 ? 'pos' : 'warn')}">${pct(l.recovery_pct)}</td>
+                <td>${money(l.still_to_recover)}</td>
+                <td class="${cls(l.margin)}">${money(l.margin, true)}</td>
+                <td class="text">${flags.join(' ')}</td>
+            </tr>`;
+        }).join('');
+        lb.querySelectorAll('.save-freight').forEach(btn => btn.addEventListener('click', saveFreight));
+
+        document.querySelector('#storesTable tbody').innerHTML = data.stores.map(s => `
+            <tr><td>${esc(s.store)}</td><td>${s.orders}</td><td>${s.units}</td><td>${money(s.revenue)}</td><td>${money(s.fees)}</td>
+            <td>${money(s.shipping)}</td><td class="${s.refunds ? 'neg' : ''}">${money(s.refunds)}</td><td class="${cls(s.net_sales)}">${money(s.net_sales)}</td></tr>`).join('');
+
+        const b = data.buckets;
+        const bucketRow = (name, x) => `<tr><td>${name}</td><td>${x.orders}</td><td>${x.units}</td><td>${money(x.revenue)}</td><td>${money(x.fees + x.shipping)}</td><td>${money(x.refunds)}</td><td class="${cls(x.net_sales)}">${money(x.net_sales)}</td></tr>`;
+        document.querySelector('#bucketsTable tbody').innerHTML =
+            bucketRow('Not on any BOL', b.not_on_bol) +
+            bucketRow('Lot inferred from UPC (no lot on order)', b.inferred) +
+            (b.pseudo_lots || []).map(p => bucketRow(`Orders tagged "${esc(p.lot_number)}" (no manifest, no upload log)`, p)).join('') +
+            `<tr><td>Returns with no matching order</td><td>${b.unmatched_returns.count}</td><td></td><td></td><td></td><td class="neg">${money(b.unmatched_returns.amount)}</td><td class="neg">${money(-b.unmatched_returns.amount)}</td></tr>`;
+
+        renderExpenses(data.expenses);
+        renderChecks(q, data);
+        document.getElementById('methods').innerHTML = data.methods.map(m => `<li>${esc(m)}</li>`).join('');
+    }
+
+    function renderExpenses(expenses) {
+        const eb = document.querySelector('#expensesTable tbody');
+        if (!expenses.length) {
+            eb.innerHTML = '<tr><td colspan="5" class="text muted">No expenses recorded yet.</td></tr>';
+            return;
+        }
+        eb.innerHTML = expenses.map(e => `<tr><td>${esc(e.expense_date)}</td><td class="text">${esc(e.category)}</td><td>${money(e.amount)}</td><td class="text">${esc(e.note)}</td>
+            <td><button class="btn btn-sm btn-danger del-expense" data-id="${e.id}" title="Delete"><i class="fas fa-trash"></i></button></td></tr>`).join('');
+        eb.querySelectorAll('.del-expense').forEach(btn => btn.addEventListener('click', deleteExpense));
+    }
+
+    function renderChecks(q, data) {
+        const items = [];
+        const add = (level, text) => items.push({ level, text });
+        const icon = { ok: 'fa-circle-check pos', warn: 'fa-triangle-exclamation warn', bad: 'fa-circle-xmark neg' };
+        if (q.excluded_orders.length) {
+            add('bad', `${q.excluded_orders.length} order(s) excluded as data errors: ` +
+                q.excluded_orders.map(o => `#${o.id} ${o.store} ${o.paid_time.slice(0, 10)} price ${money(o.price)} (${o.reason})`).join('; ') +
+                '. Fix them on the Marketplace Sales page so they can count.');
+        } else add('ok', 'No orders excluded as data errors.');
+        if (q.lots_missing_freight.length) add('warn', `Freight missing on lots ${q.lots_missing_freight.join(', ')}. Type it into the Freight column above.`);
+        else add('ok', 'Every lot has freight recorded.');
+        if (q.lots_missing_goods_cost.length) add('bad', `No goods cost on lots ${q.lots_missing_goods_cost.join(', ')}.`);
+        if (q.lots_without_manifest_rows.length) add('warn', `Lots with no manifest rows (upload log only): ${q.lots_without_manifest_rows.join(', ')}. Delete them on BOL Stats if they were test uploads.`);
+        if (q.lots_not_in_upload_logs.length) add('warn', `Lots referenced by orders or manifest rows but missing from the upload log: ${q.lots_not_in_upload_logs.join(', ')}.`);
+        if (q.returns_table === false) add('bad', 'No returns table found; refunds are not counted.');
+        else if (q.returns_days_stale === null) add('warn', 'No returns synced yet; refunds are not counted in the estimates (payouts already include them).');
+        else if (q.returns_days_stale > 21) add('bad', `Returns were last synced ${q.returns_days_stale} days ago (last return ${q.returns_last_date}). Run the Amazon and eBay return sync on the Returns page so refunds since then are counted.`);
+        else add('ok', `Returns synced through ${q.returns_last_date}.`);
+        if (q.returns_unmatched) add('warn', `${q.returns_unmatched} return(s) worth ${money(q.returns_unmatched_amount)} could not be tied to an order; they are charged to the store only.`);
+        if (q.orders_first_month && q.payouts_first_month && q.orders_first_month < q.payouts_first_month) add('warn', `Payouts are synced from ${q.payouts_first_month} but marketplace orders start in ${q.orders_first_month}; cash in before ${q.payouts_first_month} is not counted, so the running total is understated by those early payouts.`);
+        if (q.open_settlements.length) add('warn', `${q.open_settlements.length} settlement(s) still open (${q.open_settlements.map(s => s.store + ' ' + money(s.amount)).join(', ')}); they are not counted until closed.`);
+        if (q.zero_closed_settlements.length) add('warn', `${q.zero_closed_settlements.length} closed settlement(s) show $0 (${q.zero_closed_settlements.map(s => s.store + ' ' + s.date).join(', ')}). Compare with Seller Central / Seller Hub; if they were real payouts the sync missed the amount.`);
+        add(q.orders_not_on_bol ? 'warn' : 'ok', `${q.orders_not_on_bol} sold order(s) are not on any manifest (${money(data.buckets.not_on_bol.revenue)} revenue). They stay in their own bucket.`);
+        add(q.orders_inferred ? 'warn' : 'ok', `${q.orders_inferred} sold order(s) had no lot on the order and were attributed by UPC match.`);
+        add(q.orders_no_cost ? 'warn' : 'ok', `${q.orders_no_cost} sold order(s) (${money(q.revenue_no_cost)} revenue) have no manifest cost, so margin after COGS treats them as free stock.`);
+        if (q.orders_missing_fee) add('warn', `${q.orders_missing_fee} Amazon/eBay order(s) have no seller fee recorded; estimates run high by that amount (payouts are unaffected).`);
+        if (q.orders_missing_shipping) add('warn', `${q.orders_missing_shipping} Amazon/eBay order(s) have no shipping label cost recorded.`);
+        if (q.orders_no_barcode) add('warn', `${q.orders_no_barcode} sold order(s) have no barcode at all and can only be attributed by the lot number on the order.`);
+        if (q.on_hand_units_not_on_any_manifest) add('warn', `${q.on_hand_units_not_on_any_manifest} unit(s) on shelves match no manifest UPC; they are not counted in any lot's on-hand figure.`);
+        document.getElementById('checks').innerHTML = items.map(i => `<li><i class="fas ${icon[i.level]}"></i><span>${esc(i.text)}</span></li>`).join('');
+    }
+
+    async function saveFreight(evt) {
+        const lot = evt.currentTarget.dataset.lot;
+        const input = document.querySelector(`.freight-edit input[data-lot="${CSS.escape(lot)}"]`);
+        const value = input.value.trim();
+        if (value === '') { showStatus('error', 'Enter a freight amount first.'); return; }
+        try {
+            const res = await fetch('/api/rawbol/update/' + encodeURIComponent(lot), {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shipping_cost: value })
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Save failed');
+            showStatus('info', `Freight for lot ${lot} saved.`);
+            load();
+        } catch (err) {
+            showStatus('error', 'Could not save freight: ' + err.message);
+        }
+    }
+
+    document.getElementById('expenseForm').addEventListener('submit', async evt => {
+        evt.preventDefault();
+        const form = evt.currentTarget;
+        const payload = Object.fromEntries(new FormData(form).entries());
+        try {
+            const res = await fetch('/api/pnl/expenses', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Save failed');
+            form.reset();
+            form.querySelector('[name=expense_date]').value = new Date().toISOString().slice(0, 10);
+            showStatus('info', 'Expense added.');
+            load();
+        } catch (err) {
+            showStatus('error', 'Could not add expense: ' + err.message);
+        }
+    });
+
+    async function deleteExpense(evt) {
+        const id = evt.currentTarget.dataset.id;
+        if (!confirm('Delete this expense?')) return;
+        try {
+            const res = await fetch('/api/pnl/expenses/' + id, { method: 'DELETE' });
+            const data = await res.json();
+            if (!data.success) throw new Error(data.error || 'Delete failed');
+            load();
+        } catch (err) {
+            showStatus('error', 'Could not delete expense: ' + err.message);
+        }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', load);
+    document.querySelector('#expenseForm [name=expense_date]').value = new Date().toISOString().slice(0, 10);
+    load();
+})();
+</script>
+</body>
+</html>

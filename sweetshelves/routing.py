@@ -40,6 +40,7 @@ from . import mail_center as ss_mail_center
 from . import marketplace_sales as ss_marketplace_sales
 from . import pages as ss_pages
 from . import payouts as ss_payouts
+from . import pnl as ss_pnl
 from . import prep_actions as ss_prep_actions
 from . import prep_context as ss_prep_context
 from . import prep_diagnostics as ss_prep_diagnostics
@@ -544,6 +545,10 @@ def register_routes():
     ss_runtime.app.route('/payouts')(ss_payouts.payouts_page)
     ss_runtime.app.route('/api/payouts', methods=['GET'])(ss_payouts.api_get_payouts)
     ss_runtime.app.route('/api/payouts/sync', methods=['POST'])(ss_payouts.api_sync_payouts)
+    ss_runtime.app.route('/pnl')(ss_pnl.pnl_page)
+    ss_runtime.app.route('/api/pnl', methods=['GET'])(ss_pnl.api_pnl)
+    ss_runtime.app.route('/api/pnl/expenses', methods=['GET', 'POST'])(ss_pnl.api_pnl_expenses)
+    ss_runtime.app.route('/api/pnl/expenses/<int:expense_id>', methods=['DELETE'])(ss_pnl.api_pnl_expense_delete)
     ss_runtime.app.route('/returns')(ss_returns.returns_page)
     ss_runtime.app.route('/api/returns', methods=['GET'])(ss_returns.api_get_returns)
     ss_runtime.app.route('/api/returns', methods=['POST'])(ss_returns.api_create_return)
