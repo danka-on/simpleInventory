@@ -406,7 +406,7 @@
         <span class="badge badge-red" id="badgeActive" style="display:none">0</span>
       </button>
       <button class="tab" data-tab="marked">
-        <i class="fas fa-check-circle"></i> <span data-i18n="marked_fixed">Fixed</span>
+        <i class="fas fa-check-circle"></i> <span>Reviewed</span>
         <span class="badge badge-gray" id="badgeMarked" style="display:none">0</span>
       </button>
     </div>
@@ -427,7 +427,7 @@
     <div class="panel" id="panel-marked">
       <div id="markedEmpty" class="empty" style="display:none">
         <span class="empty-icon"><i class="fas fa-clipboard-check"></i></span>
-        <span data-i18n="no_marked_fixed">No marked fixed items</span>
+        <span>No reviewed alerts</span>
       </div>
       <div id="markedList" class="list" style="display:none"></div>
     </div>
@@ -584,15 +584,15 @@
 
       if (noWarehouseAlerts.length) {
         cards.push(`
-          <div class="alert-group-card no-warehouse" data-href="/store-listing-helper?tab=no_warehouse">
+          <div class="alert-group-card no-warehouse" data-href="/store-listing-helper?tab=out_of_stock">
             <div class="alert-group-inner">
               <div class="alert-group-icon"><i class="fas fa-warehouse"></i></div>
               <div class="alert-group-info">
                 <div class="alert-group-count-big">${noWarehouseAlerts.length}</div>
-                <div class="alert-group-label">${esc(t('no_stock_in_warehouse_alert'))}</div>
+                <div class="alert-group-label">Listings out of stock</div>
               </div>
               <div class="alert-group-actions">
-                <button class="btn-mark btn-mark-group" data-alert-type="no_warehouse">${esc(t('mark_fixed'))}</button>
+                <button class="btn-mark btn-mark-group" data-alert-type="no_warehouse">Mark reviewed</button>
                 <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
               </div>
             </div>
@@ -602,15 +602,15 @@
 
       if (quantityAlerts.length) {
         cards.push(`
-          <div class="alert-group-card quantity-alert" data-href="/store-listing-helper?tab=quantity_alert">
+          <div class="alert-group-card quantity-alert" data-href="/store-listing-helper?tab=short_stock">
             <div class="alert-group-inner">
               <div class="alert-group-icon"><i class="fas fa-balance-scale-right"></i></div>
               <div class="alert-group-info">
                 <div class="alert-group-count-big">${quantityAlerts.length}</div>
-                <div class="alert-group-label">${esc(t('listing_quantity_exceeds_warehouse_alert'))}</div>
+                <div class="alert-group-label">Listings without enough stock</div>
               </div>
               <div class="alert-group-actions">
-                <button class="btn-mark btn-mark-group" data-alert-type="quantity_alert">${esc(t('mark_fixed'))}</button>
+                <button class="btn-mark btn-mark-group" data-alert-type="quantity_alert">Mark reviewed</button>
                 <span class="alert-group-arrow"><i class="fas fa-chevron-right"></i></span>
               </div>
             </div>

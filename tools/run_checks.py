@@ -22,7 +22,7 @@ TESTS = [
     'test_receiving_batch', 'test_custom_item_identity', 'test_warehouse_nameless',
     'test_ready_to_ship_suffix_matching',
     'test_prep_fallback_lookup', 'test_pnl_report',
-    'test_voice_notes',
+    'test_listing_reconciliation', 'test_reconciliation_ai', 'test_voice_notes',
 ]
 
 

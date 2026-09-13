@@ -1273,6 +1273,31 @@
       "subdomain": ""
     },
     {
+      "rule": "/listing-reconciliation",
+      "endpoint": "listing_reconciliation_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listing-reconciliation",
+      "endpoint": "api_listing_reconciliation",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/inventory-age-summary",
       "endpoint": "api_inventory_age_summary",
       "methods": [

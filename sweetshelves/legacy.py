@@ -645,6 +645,12 @@ EXPORT_GROUPS = {
         '_gtin_for', '_is_valid_gtin', '_local_candidate', '_lookup_external', '_store_lookup',
         '_upcitemdb_candidate', 'api_prep_fallback_adopt', 'api_prep_fallback_lookup',
     ),
+    'listing_reconciliation': (
+        '_base', '_canon', '_columns', '_digit_runs', '_ensure_alert_tables', '_listing_codes',
+        '_load_catalog', '_load_listings', '_load_rack', '_load_user_decisions', '_maker_prefix',
+        '_rack_summary', '_safe_int', '_title_key', '_tokens', 'api_listing_reconciliation',
+        'build_reconciliation', 'listing_hash', 'listing_reconciliation_page',
+    ),
     'warehouse_nameless': (
         '_age_days', '_base_barcode', '_group_by_barcode', '_load_untitled_rows',
         '_manual_title_rejection', '_rows_to_name', '_searchrack_columns', '_title_is_meaningless',

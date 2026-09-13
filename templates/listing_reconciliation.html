@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Listings &amp; Stock - Sweet Shelves</title>
+    <style>
+        :root{
+            --bg:#f4f6f8;--card:#fff;--border:#dfe6ed;--text:#172033;--muted:#64748b;
+            --blue:#2563eb;--green:#15803d;--amber:#a16207;--red:#dc2626;--purple:#6d28d9;
+            --shadow:0 7px 24px rgba(15,23,42,.06);
+        }
+        *{box-sizing:border-box}
+        body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI",Arial,sans-serif}
+        .page{max-width:1240px;margin:auto;padding:22px}
+        .header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+        h1{margin:0 0 6px;font-size:clamp(1.55rem,3vw,2.2rem);letter-spacing:-.03em}
+        .actions{display:flex;gap:8px;flex-wrap:wrap}
+        .btn{border:1px solid var(--border);background:white;color:var(--text);padding:9px 13px;border-radius:8px;text-decoration:none;font-weight:750;cursor:pointer;font:inherit;font-size:.86rem}
+        .btn:disabled{opacity:.55;cursor:default}
+        .btn.primary{background:var(--blue);border-color:var(--blue);color:white}
+        .btn.link{background:var(--green);border-color:var(--green);color:white}
+        .btn.quiet{color:var(--muted)}
+        .btn.danger{color:var(--red)}
+        .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
+        .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+        .tile{padding:14px;border-top:4px solid var(--tone,var(--border))}
+        .tile-name{font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+        .tile-value{font-size:1.65rem;font-weight:850;margin-top:6px;font-variant-numeric:tabular-nums}
+        .tile-detail{font-size:.74rem;color:var(--muted);margin-top:2px}
+        .loading{padding:70px 15px;text-align:center;color:var(--muted)}
+        .spinner{height:34px;width:34px;border:4px solid #dbeafe;border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .error{display:none;padding:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:9px;margin-bottom:14px}
+        #workspace{display:none}
+        .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
+        .controls input,.controls select{border:1px solid var(--border);background:white;border-radius:8px;padding:9px 11px;font:inherit;color:var(--text)}
+        .controls input{flex:1 1 240px;min-width:180px}
+        .tabs{display:flex;gap:8px;margin:6px 0 14px;flex-wrap:wrap}
+        .tab{border:1px solid var(--border);background:white;border-radius:999px;padding:8px 15px;font-weight:800;font-size:.85rem;cursor:pointer;font:inherit}
+        .tab[aria-selected="true"]{background:var(--text);border-color:var(--text);color:white}
+        .section-note{color:var(--muted);font-size:.83rem;line-height:1.5;margin:0 0 12px}
+        .bulk{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+        .bulk[hidden]{display:none}
+        .link-bulk{position:sticky;top:8px;z-index:5;padding:12px;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)}
+        .pick-link{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem;font-weight:700}
+        .pick-link input{width:20px;height:20px;accent-color:var(--green)}
+        .suggestion-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+        .bulk-status{font-size:.82rem;font-weight:700;color:var(--muted)}
+        .bulk-status.bad{color:var(--red)}
+        .item{padding:14px;margin-bottom:11px;display:grid;grid-template-columns:64px minmax(0,1fr);gap:14px;align-items:start}
+        .thumb{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);background:#f1f5f9}
+        .title{font-weight:800;font-size:1rem;line-height:1.3}
+        .title a{color:inherit;text-decoration:none}
+        .title a:hover{text-decoration:underline}
+        .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+        .chip{background:#eef2f6;border-radius:999px;padding:3px 10px;font-size:.72rem;font-weight:700;color:#475569}
+        .chip.store-ebay{background:#fee2e2;color:#991b1b}
+        .chip.store-amazon{background:#fef3c7;color:#92400e}
+        .chip.code{font-family:"SFMono-Regular",Consolas,monospace}
+        .chip.loc{background:#e0f2fe;color:#075985}
+        .chip.hint{background:#ede9fe;color:#5b21b6}
+        .chip.bad{background:#fee2e2;color:#991b1b}
+        .chip.ok{background:#dcfce7;color:#166534}
+        .chip.warn{background:#fef3c7;color:#92400e}
+        .rack{margin-top:9px;font-size:.8rem;color:var(--muted);line-height:1.6}
+        .rack code{background:#f1f5f9;border-radius:4px;padding:1px 5px;font-size:.74rem}
+        .suggestion{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;margin-top:9px;padding:8px 10px;border:1px dashed var(--border);border-radius:9px;background:#f8fafc}
+        .suggestion img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:#f1f5f9}
+        .suggestion .why{font-size:.74rem;color:var(--muted);margin-top:2px}
+        .suggestion .name{font-weight:700;font-size:.86rem}
+        .row-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
+        .row-status{font-size:.78rem;font-weight:700;margin-top:6px;min-height:1.1em}
+        .row-status.ok{color:var(--green)}
+        .row-status.bad{color:var(--red)}
+        .empty{padding:52px 18px;text-align:center;color:var(--muted)}
+        .empty strong{display:block;color:var(--text);font-size:1.05rem;margin-bottom:5px}
+        .thumb,.suggestion img{cursor:zoom-in}
+        .image-preview{border:0;border-radius:12px;padding:48px 12px 12px;background:#111827;color:white;max-width:96vw;max-height:96vh;overflow:auto}
+        .image-preview::backdrop{background:rgba(0,0,0,.8)}
+        .image-preview img{display:block;width:90vw;height:82vh;object-fit:contain;margin:auto}
+        .image-preview .close-preview{position:absolute;right:10px;top:8px}
+        .more{display:block;margin:6px auto 18px}
+        @media (max-width:760px){
+            .page{padding:14px}
+            .item{grid-template-columns:52px minmax(0,1fr)}
+            .thumb{width:52px;height:52px}
+            .suggestion{grid-template-columns:44px minmax(0,1fr)}
+            .suggestion-actions{grid-column:2 / -1}
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="header">
+        <div>
+            <h1>Listings &amp; Stock</h1>
+
+        </div>
+        <div class="actions">
+            <a class="btn" href="/store-manager">← Store Manager</a>
+            <a class="btn" href="/sync">Sync stores</a>
+            <button type="button" class="btn primary" id="refreshButton">Refresh</button>
+        </div>
+    </div>
+
+    <div class="error" id="errorBox"></div>
+
+    <div class="loading" id="loadingBox">
+        <div class="spinner"></div>
+        Matching every active listing against the warehouse…
+    </div>
+
+    <div id="workspace">
+        <div class="tiles">
+            <div class="panel tile" style="--tone:var(--blue)">
+                <div class="tile-name">Active listings</div>
+                <div class="tile-value" id="tileLive">0</div>
+                <div class="tile-detail" id="tileLiveDetail"></div>
+            </div>
+            <div class="panel tile" style="--tone:var(--green)">
+                <div class="tile-name">Enough stock</div>
+                <div class="tile-value" id="tileCoverage">0%</div>
+                <div class="tile-detail" id="tileCoverageDetail"></div>
+            </div>
+            <div class="panel tile" style="--tone:var(--purple)">
+                <div class="tile-name">Needs matching</div>
+                <div class="tile-value" id="tileSuggested">0</div>
+                <div class="tile-detail">confirm the warehouse item</div>
+            </div>
+            <div class="panel tile" style="--tone:var(--amber)">
+                <div class="tile-name">Out of stock</div>
+                <div class="tile-value" id="tileSoldOut">0</div>
+                <div class="tile-detail">no available units</div>
+            </div>
+            <div class="panel tile" style="--tone:var(--red)">
+                <div class="tile-name">Warehouse without listings</div>
+                <div class="tile-value" id="tileUnaccounted">0</div>
+                <div class="tile-detail">stock with no saved listing</div>
+            </div>
+            <div class="panel tile" style="--tone:var(--border)">
+                <div class="tile-name">Not enough stock</div>
+                <div class="tile-value" id="tileShort">0</div>
+                <div class="tile-detail">available units below listed quantity</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <select id="storeFilter" aria-label="Store">
+                <option value="">Both stores</option>
+                <option value="ebay">eBay only</option>
+                <option value="amazon">Amazon only</option>
+            </select>
+            <select id="brandFilter" aria-label="Brand"><option value="">All brands</option></select>
+            <input type="search" id="searchBox" placeholder="Search names, UPC, ASIN, SKU, shelf or paste a listing link" aria-label="Search listings and warehouse">
+        </div>
+
+        <div class="bulk">
+            <label><input type="checkbox" id="searchAllTabs" checked> Search all views</label>
+            <button type="button" class="btn quiet" id="clearSearchButton">Clear search</button>
+            <span id="searchSummary" class="bulk-status" role="status"></span>
+        </div>
+        <div class="tabs" role="tablist" id="tabs">
+            <button type="button" class="tab" role="tab" data-tab="all" aria-selected="false">All active listings</button>
+            <button type="button" class="tab" role="tab" data-tab="needs_matching" aria-selected="true">Needs matching</button>
+            <button type="button" class="tab" role="tab" data-tab="out_of_stock" aria-selected="false">Out of stock</button>
+            <button type="button" class="tab" role="tab" data-tab="short_stock" aria-selected="false">Not enough stock</button>
+            <button type="button" class="tab" role="tab" data-tab="in_stock" aria-selected="false">Enough stock</button>
+            <button type="button" class="tab" role="tab" data-tab="unlisted" aria-selected="false">Warehouse without listings</button>
+            <button type="button" class="tab" role="tab" data-tab="reviewed" aria-selected="false">Reviewed</button>
+        </div>
+
+        <p class="section-note" id="sectionNote"></p>
+        <div class="bulk" id="bulkBar" hidden>
+            <button type="button" class="btn" id="bulkHandledButton">Mark all as handled</button>
+            <span class="bulk-status" id="bulkStatus"></span>
+        </div>
+        <div class="bulk link-bulk" id="linkBulkBar" hidden>
+            <button type="button" class="btn link" id="linkSelectedButton">Link selected</button>
+            <button type="button" class="btn quiet" id="clearSelectedButton">Clear selection</button>
+            <span class="bulk-status" id="linkBulkStatus" role="status" aria-live="polite"></span>
+        </div>
+        <div id="itemList"></div>
+        <div id="reviewHistory" class="panel" hidden></div>
+        <button type="button" class="btn more" id="moreButton" hidden>Show more</button>
+    </div>
+</div>
+
+<dialog id="imagePreview" class="image-preview" aria-label="Enlarged product photo">
+    <button type="button" class="btn close-preview" id="closeImagePreview" aria-label="Close image preview">Close ×</button>
+    <img id="previewImage" alt="">
+</dialog>
+<script>
+const PAGE_SIZE = 150;
+const LABELS = {all:'All active listings',needs_matching:'Needs matching',out_of_stock:'Out of stock',short_stock:'Not enough stock',in_stock:'Enough stock',unlisted:'Warehouse without listings',reviewed:'Reviewed'};
+const NOTES = {
+    all:'Active eBay and merchant-fulfilled Amazon listings. Available stock subtracts sales from the last 7 days awaiting warehouse removal. Shared stock is not reserved separately for each store.',
+    needs_matching:'Confirm which warehouse item belongs to each listing. Suggestions do not count as stock until linked.',
+    out_of_stock:'No units remain available for these listings. Check the item before adjusting a store listing; receiving history alone does not prove a sale.',
+    short_stock:'Some stock is available, but less than the quantity offered on this listing.',
+    in_stock:'Matched warehouse stock covers the listed quantity after recent pending sales. Stock shared between stores is not reserved twice.',
+    unlisted:'Stock with no saved active eBay/Amazon listing or Facebook listing record. Unconfirmed name suggestions do not count as a listing link.',
+    reviewed:'Issues you marked reviewed. Changed stock or listing quantities can bring an issue back. Reviewing does not change inventory or marketplace listings.'
+};
+const state = {data:null, tab:'needs_matching', store:'', query:'', brand:'', shown:PAGE_SIZE, busy:false, selected:new Map()};
+function stockStatus(l){return l.stock_status || ({suggested:'needs_matching',unaccounted:'needs_matching',sold_out:'out_of_stock',accounted:l.short_by?'short_stock':'in_stock',handled:'reviewed',warehouse_unlisted:'unlisted'}[l.state]);}
+function allItems(){return [...(state.data?.listings || []),...(state.data?.unlisted || [])];}
+
+function esc(value){
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => (
+        {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+    ));
+}
+function plural(n, word){ return `${n} ${word}${n === 1 ? '' : 's'}`; }
+function storeName(store){ return store === 'ebay' ? 'eBay' : store === 'amazon' ? 'Amazon' : store; }
+function missingImg(){
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="#f1f5f9" rx="8"/></svg>');
+}
+function finderUrl(l){
+    const params = new URLSearchParams({
+        listing_store: l.store, listing_key: l.listing_key, listing_id: l.listing_id,
+        title: l.title || '', barcode: l.upc || '', image: l.image || '',
+        q: l.upc || l.title || '',
+        return: window.location.pathname + '?tab=' + encodeURIComponent(state.tab),
+    });
+    return `/finder?${params.toString()}`;
+}
+
+function searchText(value){
+    return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+        .replace(/[^a-z0-9.]+/g, ' ').trim();
+}
+function oneLetterApart(a, b){
+    if (Math.abs(a.length-b.length)>1) return false;
+    let i=0, j=0, edits=0;
+    while (i<a.length && j<b.length) {
+        if (a[i]===b[j]) {i++;j++;continue;}
+        if (++edits>1) return false;
+        if (a.length<=b.length) j++;
+        if (a.length>=b.length) i++;
+    }
+    return edits + (i<a.length || j<b.length ? 1 : 0) <= 1;
+}
+function searchRank(l){
+    let query=state.query.trim();
+    if (!query) return 1;
+    // Accept product links as well as their ASIN or item ID.
+    query=query.match(/\/(?:dp|gp\/product)\/([a-z0-9]{10})(?:[/?]|$)/i)?.[1]
+        || query.match(/\/itm\/(?:[^/]+\/)?(\d+)(?:[/?]|$)/i)?.[1] || query;
+    const stock=[...(l.warehouse || []), ...(l.suggestions || [])];
+    const identifiers=[l.upc,l.sku,l.item_id,l.listing_key,...(l.codes || []),l.link?.barcode,...stock.map(w=>w.barcode)].filter(Boolean);
+    if (/^\d{7,14}(?:-\d+)?$/.test(query)) {
+        const key=value=>String(value).replace(/^0+(?=\d)/,'');
+        const needle=key(query);
+        return identifiers.some(value=>key(value)===needle || (!query.includes('-') && key(value).split('-')[0]===needle)) ? 1000 : 0;
+    }
+    const compact=query.toLowerCase().replace(/[^a-z0-9]/g,'');
+    if (compact.length>=5 && identifiers.some(value=>String(value).toLowerCase().replace(/[^a-z0-9]/g,'')===compact)) return 1000;
+    const brandAliases=(l.attributes?.brands || []).flatMap(brand=>[brand,...(state.data?.brand_names?.[brand] || [])]);
+    const fields=[...brandAliases,l.title,l.upc,l.sku,l.hint,l.item_id,l.listing_key,l.received_lot,l.link?.barcode,l.link?.location,
+        ...stock.flatMap(w=>[w.title,w.barcode,w.location,w.note,...(w.alternate_titles || [])])];
+    const texts=fields.map(searchText);
+    const words=new Set(texts.flatMap(t=>t.split(/\s+/)));
+    const terms=searchText(query).split(/\s+/).filter(Boolean);
+    const brandWords=new Set(Object.values(state.data?.brand_names || {}).flatMap(aliases=>aliases.flatMap(alias=>searchText(alias).split(' '))));
+    const typeWords=new Set(Object.values(state.data?.type_names || {}).flat());
+    const colorWords=new Set(state.data?.color_names || []);
+    let score=0;
+    for (const term of terms) {
+        const weight=brandWords.has(term)?100:typeWords.has(term)?60:colorWords.has(term)?30:/^\d+$/.test(term)?15:20;
+        if (words.has(term)) {score+=weight;continue;}
+        if (/^[a-z]+$/.test(term) && term.length>=3 && [...words].some(w=>w.startsWith(term))) {score+=weight*.5;continue;}
+        if (/^[a-z]+$/.test(term) && term.length>=5 && [...words].some(w=>/^[a-z]+$/.test(w) && oneLetterApart(term,w))) {score+=weight*.25;continue;}
+        return 0;
+    }
+    return score + (texts.some(t=>t===searchText(query)) ? 100 : 0);
+}
+function visibleListings(){
+    if (!state.data) return [];
+    const allTabs=state.query.trim() && document.getElementById('searchAllTabs').checked;
+    return allItems().filter(l=>(allTabs || (state.tab==='all' ? l.store!=='warehouse' : stockStatus(l)===state.tab)) && (!state.store || l.store==='warehouse' || l.store===state.store) && (!state.brand || (l.attributes?.brands || []).includes(state.brand)))
+        .map(l=>({listing:l,score:searchRank(l)})).filter(result=>result.score>0)
+        .sort((a,b)=>b.score-a.score).map(result=>result.listing);
+}
+
+function chips(l){
+    const out = [`<span class="chip">${esc(LABELS[stockStatus(l)] || l.state)}</span>`, `<span class="chip store-${esc(l.store)}">${esc(l.store==='warehouse'?'Warehouse':storeName(l.store))}</span>`];
+    if(l.store!=='warehouse') out.push(`<span class="chip">Listed: ${l.qty}</span>`);
+    if (l.upc) out.push(`<span class="chip code">${esc(l.upc)}</span>`);
+    else out.push(`<span class="chip bad">no UPC on listing</span>`);
+    if (l.sku && l.sku !== l.upc && !l.hint) out.push(`<span class="chip code">SKU ${esc(l.sku)}</span>`);
+    if (l.hint) out.push(`<span class="chip hint">note: ${esc(l.hint)}</span>`);
+    if (l.match_kind === 'linked') out.push(`<span class="chip ok">linked by hand${l.link && l.link.stale ? ' · row gone' : ''}</span>`);
+    else if (l.match_kind === 'suffix') out.push(`<span class="chip ok">matched a -suffix unit</span>`);
+    else if (l.match_kind === 'zero-pad') out.push(`<span class="chip ok">matched (leading zeros differ)</span>`);
+    else if (l.match_kind === 'exact') out.push(`<span class="chip ok">barcode on rack</span>`);
+    if (l.link && l.link.stale) out.push('<span class="chip bad">Previous link unavailable — check warehouse</span>');
+    if (l.available_short_by || l.short_by) out.push(`<span class="chip bad">short by ${l.available_short_by ?? l.short_by}</span>`);
+    if (l.state !== 'accounted' && l.received) {
+        out.push(`<span class="chip warn">received${l.received_lot ? ' · lot ' + esc(l.received_lot) : ''}, not on rack</span>`);
+    }
+    return out.join('');
+}
+
+function rackLines(l){
+    if (!l.warehouse.length) return l.state === 'accounted' ? '<div class="rack">The linked rack row has no stock left.</div>' : '';
+    return '<div class="rack">' + l.warehouse.map(w =>
+        `#${w.searchrack_id} · <code>${esc(w.barcode)}</code> · ${w.location ? esc(w.location) : 'no location'} · qty ${w.quantity}`
+        + (w.note ? ` · <em>${esc(w.note)}</em>` : '')).join('<br>') + '</div>';
+}
+
+function suggestionBlocks(l){
+    return l.suggestions.map(s => `
+        <div class="suggestion">
+            <img src="${esc(s.image || '') || missingImg()}" alt="" loading="lazy" onerror="this.src='${missingImg()}'">
+            <div>
+                <div class="name">${esc(s.title || '(untitled rack row)')}</div>
+                <div class="why"><code>${esc(s.barcode)}</code> · ${s.location ? esc(s.location) : 'no location'} · qty ${s.quantity} · ${esc(s.reason)}</div>
+                ${s.ai_verdict ? `<div class="why"><strong>${s.ai_verdict === 'likely' ? 'Claude: likely match' : 'Claude: possible match'}</strong> · Confirm against the item.</div>` : ''}
+                ${s.alternate_titles?.length ? `<div class="why">Saved names: ${s.alternate_titles.map(esc).join(' · ')}</div>` : ''}
+            </div>
+            <div class="suggestion-actions">
+                <label class="pick-link"><input type="checkbox" data-select-link data-searchrack-id="${s.searchrack_id}"
+                    aria-label="Select match ${esc(s.barcode)} for ${esc(l.title || l.listing_key)}"
+                    ${state.selected.get(selectionKey(l))?.searchrack_id === s.searchrack_id ? 'checked' : ''}>Select</label>
+                <button type="button" class="btn link" data-action="link" data-searchrack-id="${s.searchrack_id}">Link</button>
+            </div>
+        </div>`).join('');
+}
+
+function actionButtons(l){
+    const buttons = [];
+    if (stockStatus(l) === 'reviewed') {
+        buttons.push('<button type="button" class="btn" data-action="undo">Reopen issue</button>');
+    } else if (l.store==='warehouse') {
+        buttons.push(`<a class="btn" href="/all-search?q=${encodeURIComponent(l.upc)}">View warehouse item</a>`);
+        buttons.push(`<a class="btn" href="/listingagent?upc=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">Create listing</a>`);
+        buttons.push('<button type="button" class="btn quiet" data-action="handled">Mark reviewed</button>');
+    } else {
+        buttons.push(`<a class="btn" href="${esc(finderUrl(l))}">Find in warehouse</a>`);
+        if (state.data?.claude_search_available && l.state !== 'accounted') buttons.push(`<button type="button" class="btn" data-action="search_warehouse">${l.ai_search ? 'View cached Claude search' : 'Search whole warehouse with Claude'}</button>`);
+        if (l.link) buttons.push('<button type="button" class="btn danger" data-action="unlink">Unlink</button>');
+        if (stockStatus(l) !== 'in_stock') buttons.push('<button type="button" class="btn quiet" data-action="handled">Mark reviewed</button>');
+    }
+    if (l.url) buttons.push(`<a class="btn quiet" href="${esc(l.url)}" target="_blank" rel="noopener">Open listing</a>`);
+    return `<div class="row-actions">${buttons.join('')}</div>`;
+}
+
+function renderListing(l){
+    const title = l.title || '(untitled listing)';
+    return `<div class="panel item" data-store="${esc(l.store)}" data-key="${esc(l.listing_key)}">
+        <img class="thumb" src="${esc(l.image || '') || missingImg()}" alt="" loading="lazy" onerror="this.src='${missingImg()}'">
+        <div>
+            <div class="title">${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</div>
+            <div class="meta">${chips(l)}</div>
+            <div class="rack"><strong>Physical:</strong> ${l.physical_qty ?? (l.state==='accounted'?l.warehouse_qty:'not linked')} · <strong>Pending sales:</strong> ${l.pending_sale_qty || 0} · <strong>Available:</strong> ${l.available_qty ?? (l.state==='accounted'?l.warehouse_qty:'not confirmed')}</div>
+            ${rackLines(l)}
+            ${!['accounted','handled'].includes(l.state) && stockStatus(l)!=='reviewed' && l.suggestions && l.suggestions.length ? suggestionBlocks(l) : ''}
+            ${!['accounted','handled'].includes(l.state) && stockStatus(l)!=='reviewed' ? (l.has_more_suggestions
+                ? '<div class="row-actions"><button type="button" class="btn" data-action="more_matches">Show 3 more matches</button><span class="why">Local search · no API cost</span></div>'
+                : l.more_matches_loaded ? '<div class="why">No more matching products found locally.</div>' : '') : ''}
+            ${!['accounted','handled','warehouse_unlisted'].includes(l.state) && stockStatus(l)!=='reviewed' && state.data?.claude_search_available ? `<div class="why">${l.ai_search
+                ? `Claude searched ${l.ai_search.catalog_rows.toLocaleString()} stocked rows. ${l.ai_search.match_count ? 'Suggestions require your confirmation.' : 'No suitable match found; existing suggestions remain.'} Saved result · original search ≈$${Number(l.ai_search.estimated_cost_usd).toFixed(3)}.`
+                : `Search all ${(state.data.claude_catalog?.rows || 0).toLocaleString()} stocked rows and saved names · estimated $${Number(state.data.claude_catalog?.estimated_usd_low || 0).toFixed(2)}–$${Number(state.data.claude_catalog?.estimated_usd_high || 0).toFixed(2)} per new search. Text only; results cached.`}</div>` : ''}
+            ${actionButtons(l)}
+            <div class="row-status"></div>
+        </div>
+    </div>`;
+}
+
+const imagePreview = document.getElementById('imagePreview');
+function openImagePreview(thumbnail){
+    const src = thumbnail.currentSrc || thumbnail.src;
+    if (!src || src.startsWith('data:')) return;
+    const preview = document.getElementById('previewImage');
+    preview.src = src;
+    preview.alt = thumbnail.closest('.suggestion')?.querySelector('.name')?.textContent
+        || thumbnail.closest('.item')?.querySelector('.title')?.textContent || 'Product photo';
+    imagePreview.showModal();
+}
+document.getElementById('closeImagePreview').addEventListener('click', () => imagePreview.close());
+imagePreview.addEventListener('click', event => {
+    if (event.target === imagePreview) imagePreview.close();
+});
+imagePreview.addEventListener('close', () => document.getElementById('previewImage').removeAttribute('src'));
+document.getElementById('itemList').addEventListener('click', event => {
+    const thumbnail = event.target.closest('.thumb, .suggestion img');
+    if (thumbnail) openImagePreview(thumbnail);
+});
+document.getElementById('itemList').addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.thumb, .suggestion img')) {
+        event.preventDefault();
+        openImagePreview(event.target);
+    }
+});
+
+function render(){
+    updateLinkSelection();
+    const rows = visibleListings();
+    document.getElementById('searchSummary').textContent = `${rows.length} results${state.query.trim() && document.getElementById('searchAllTabs').checked ? ' across all tabs' : ' in this tab'}`;
+    const note = document.getElementById('sectionNote');
+    note.textContent = NOTES[state.tab] || '';
+    const bulkBar = document.getElementById('bulkBar');
+    const soldOutCount=rows.filter(l=>stockStatus(l)==='out_of_stock').length;
+    bulkBar.hidden = !(state.tab === 'out_of_stock' && soldOutCount);
+    if (!state.busy) document.getElementById('bulkHandledButton').textContent = `Mark ${soldOutCount} reviewed`;
+    const list = document.getElementById('itemList');
+    const history = state.data?.review_history || [];
+    const historyBox = document.getElementById('reviewHistory');
+    historyBox.hidden = state.tab!=='reviewed' || !history.length;
+    if(!historyBox.hidden) historyBox.innerHTML = `<details><summary>Earlier review history (${history.length})</summary><p>Saved reviews from earlier stock conditions or alert rules. These records do not change current stock.</p>${history.map(r=>`<p>${esc(r.dismissed_at)} · ${esc(r.upc || 'Listing issue')} · ${esc(r.store || 'all stores')}</p>`).join('')}</details>`;
+    if (!rows.length) {
+        list.innerHTML = `<div class="panel empty"><strong>Nothing here.</strong>${state.query || state.store ? 'No listing on this tab matches the filter.' : 'This tab is clear.'}</div>`;
+        document.getElementById('moreButton').hidden = true;
+        return;
+    }
+    list.innerHTML = rows.slice(0, state.shown).map(renderListing).join('');
+    list.querySelectorAll('.thumb, .suggestion img').forEach(img => {
+        img.tabIndex = 0;
+        img.setAttribute('role', 'button');
+        img.setAttribute('aria-label', 'Enlarge photo');
+    });
+    const more = document.getElementById('moreButton');
+    more.hidden = rows.length <= state.shown;
+    more.textContent = `Show more (${rows.length - state.shown} left)`;
+}
+
+function applyTotals(data){
+    const t = data.totals;
+    const by = data.stock_counts || allItems().reduce((out,l)=>{const key=stockStatus(l);out[key]=(out[key]||0)+1;return out;},{});
+    const count = key => key==='all' ? t.listings : by[key] || 0;
+    document.getElementById('tileLive').textContent = t.listings.toLocaleString();
+    document.getElementById('tileLiveDetail').textContent = `eBay + merchant-fulfilled Amazon · ${t.rack_rows} stocked rows`;
+    document.getElementById('tileCoverage').textContent = `${t.listings ? Math.round(100*count('in_stock')/t.listings) : 100}%`;
+    document.getElementById('tileCoverageDetail').textContent = `${count('in_stock')} of ${t.listings} active listings`;
+    document.getElementById('tileSuggested').textContent = count('needs_matching').toLocaleString();
+    document.getElementById('tileSoldOut').textContent = count('out_of_stock').toLocaleString();
+    document.getElementById('tileUnaccounted').textContent = count('unlisted').toLocaleString();
+    document.getElementById('tileShort').textContent = count('short_stock').toLocaleString();
+    document.querySelectorAll('#tabs .tab').forEach(tab => {
+        const key = tab.dataset.tab;
+        const label = LABELS[key];
+        tab.textContent = `${label} (${count(key)})`;
+    });
+}
+
+async function load(refresh){
+    document.getElementById('loadingBox').style.display = 'block';
+    document.getElementById('workspace').style.display = 'none';
+    document.getElementById('errorBox').style.display = 'none';
+    try {
+        const response = await fetch('/api/listing-reconciliation' + (refresh ? '?refresh=1' : ''), {cache:'no-store'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || 'Could not load the reconciliation');
+        state.data = data;
+        const brandCounts=new Map();
+        allItems().forEach(l=>(l.attributes?.brands || []).forEach(brand=>brandCounts.set(brand,(brandCounts.get(brand)||0)+1)));
+        const brandFilter=document.getElementById('brandFilter');
+        brandFilter.innerHTML='<option value="">All brands</option>'+[...brandCounts].sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0]))
+            .map(([brand,count])=>`<option value="${esc(brand)}">${esc(brand)} (${count})</option>`).join('');
+        if (state.brand && !brandCounts.has(state.brand)) state.brand='';
+        brandFilter.value=state.brand;
+        state.shown = PAGE_SIZE;
+        applyTotals(data);
+        render();
+        document.getElementById('loadingBox').style.display = 'none';
+        document.getElementById('workspace').style.display = 'block';
+    } catch (error) {
+        document.getElementById('loadingBox').style.display = 'none';
+        const box = document.getElementById('errorBox');
+        box.textContent = error.message;
+        box.style.display = 'block';
+    }
+}
+
+async function post(url, body){
+    const response = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
+    return data;
+}
+
+function listingFor(card){
+    return allItems().find(l => l.store === card.dataset.store && l.listing_key === card.dataset.key);
+}
+
+async function act(card, action, button){
+    const l = listingFor(card);
+    if (!l || state.busy) return;
+    setBusy(true);
+    const status = card.querySelector('.row-status');
+    status.className = 'row-status';
+    status.textContent = '';
+    card.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    try {
+        if (action === 'more_matches') {
+            status.textContent = 'Finding the next matching products…';
+            const data = await post('/api/listing-reconciliation', {action:'more_matches', store:l.store, listing_key:l.listing_key,
+                seen_ids:l.suggestions.map(s=>s.searchrack_id), seen_barcodes:l.suggestions.map(s=>s.barcode)});
+            const seen = new Set(l.suggestions.map(s=>s.searchrack_id));
+            l.suggestions.push(...data.suggestions.filter(s=>!seen.has(s.searchrack_id)));
+            l.has_more_suggestions = data.has_more_suggestions;
+            l.more_matches_loaded = true;
+            render();
+            return;
+        } else if (action === 'search_warehouse') {
+            status.textContent = 'Claude is searching the entire stocked warehouse catalog and saved names…';
+            const data = await post('/api/listing-reconciliation', {action:'search_warehouse', store:l.store, listing_key:l.listing_key});
+            const returned = new Set(data.suggestions.map(s=>s.searchrack_id));
+            l.suggestions = [...data.suggestions, ...l.suggestions.filter(s=>!returned.has(s.searchrack_id))];
+            l.ai_search = data.ai_search;
+            render();
+            return;
+        } else if (action === 'link') {
+            await post('/api/listing-helper/inventory-match', {
+                store: l.store, listing_key: l.listing_key, listing_id: l.listing_id,
+                marketplace_barcode: l.upc || '', listing_title: l.title || '',
+                searchrack_id: parseInt(button.dataset.searchrackId, 10) || 0, finder_learn: true,
+            });
+            status.textContent = 'Linked.';
+        } else if (action === 'unlink') {
+            await post('/api/listing-helper/inventory-match', {store: l.store, listing_key: l.listing_key, clear: true});
+            status.textContent = 'Unlinked.';
+        } else if (action === 'handled') {
+            await post('/api/listing-helper/dismiss', {alert_type: 'stock_review', hash: l.review_hash || l.hash, upc: l.upc || '', store: l.store, listing_ids: [l.listing_key]});
+            status.textContent = 'Marked reviewed.';
+        } else if (action === 'undo') {
+            await post('/api/listing-helper/undismiss', {hash: l.review_hash || l.hash});
+            status.textContent = 'Back on the list.';
+        }
+        state.selected.delete(selectionKey(l));
+        status.className = 'row-status ok';
+        await load(true);
+    } catch (error) {
+        status.className = 'row-status bad';
+        status.textContent = error.message;
+        card.querySelectorAll('button').forEach(b => { b.disabled = false; });
+    } finally {
+        setBusy(false);
+    }
+}
+
+function selectionKey(l){ return JSON.stringify([l.store, l.listing_key]); }
+
+function updateLinkSelection(){
+    const count = state.selected.size;
+    document.getElementById('linkBulkBar').hidden = !count && !document.getElementById('linkBulkStatus').textContent;
+    const button = document.getElementById('linkSelectedButton');
+    button.textContent = `Link selected (${count})`;
+    button.disabled = state.busy || !count;
+    document.getElementById('clearSelectedButton').disabled = state.busy || !count;
+}
+
+function setBusy(busy){
+    state.busy = busy;
+    document.querySelectorAll('button, input, select').forEach(control => { control.disabled = busy; });
+    updateLinkSelection();
+}
+
+async function linkSelected(){
+    if (state.busy || !state.selected.size) return;
+    const selected = [...state.selected.entries()];
+    const status = document.getElementById('linkBulkStatus');
+    setBusy(true);
+    status.className = 'bulk-status';
+    let done = 0;
+    const failures = [];
+    try {
+        for (const [index, [key, selection]] of selected.entries()) {
+            status.textContent = `Linking ${index + 1} of ${selected.length}…`;
+            const l = selection.listing;
+            try {
+                await post('/api/listing-helper/inventory-match', {
+                    store:l.store, listing_key:l.listing_key, listing_id:l.listing_id,
+                    marketplace_barcode:l.upc || '', listing_title:l.title || '',
+                    searchrack_id:selection.searchrack_id, finder_learn:true,
+                });
+                state.selected.delete(key);
+                done++;
+            } catch (error) {
+                failures.push(`${l.title || l.listing_key}: ${error.message}`);
+            }
+        }
+        status.className = failures.length ? 'bulk-status bad' : 'bulk-status';
+        status.textContent = failures.length
+            ? `Linked ${done}; ${failures.length} failed and remain selected. ${failures.join(' · ')}`
+            : `Linked all ${done}.`;
+        // Refresh the expensive reconciliation only once, after the entire batch.
+        await load(true);
+    } finally {
+        setBusy(false);
+    }
+}
+
+document.getElementById('itemList').addEventListener('change', event => {
+    const input = event.target.closest('[data-select-link]');
+    if (!input || state.busy) return;
+    const card = input.closest('.item');
+    const l = listingFor(card);
+    if (!l) return;
+    const key = selectionKey(l);
+    if (input.checked) {
+        state.selected.set(key, {listing:l, searchrack_id:Number(input.dataset.searchrackId)});
+        card.querySelectorAll('[data-select-link]').forEach(other => { other.checked = other === input; });
+    } else state.selected.delete(key);
+    document.getElementById('linkBulkStatus').textContent = '';
+    updateLinkSelection();
+});
+document.getElementById('linkSelectedButton').addEventListener('click', linkSelected);
+document.getElementById('clearSelectedButton').addEventListener('click', () => {
+    if (state.busy) return;
+    state.selected.clear();
+    document.getElementById('linkBulkStatus').textContent = '';
+    render();
+});
+
+async function bulkHandled(){
+    const rows = visibleListings().filter(l=>stockStatus(l) === 'out_of_stock');
+    if (!rows.length || state.busy) return;
+    if (!confirm(`Mark all ${rows.length} listings on this view as reviewed?`)) return;
+    const button = document.getElementById('bulkHandledButton');
+    const status = document.getElementById('bulkStatus');
+    setBusy(true);
+    button.disabled = true;
+    status.className = 'bulk-status';
+    let done = 0;
+    const failures = [];
+    for (const [index, l] of rows.entries()) {
+        status.textContent = `Marking ${index + 1} of ${rows.length}…`;
+        try {
+            await post('/api/listing-helper/dismiss', {alert_type: 'stock_review', hash: l.review_hash || l.hash, upc: l.upc || '', store: l.store, listing_ids: [l.listing_key]});
+            done += 1;
+        } catch (error) {
+            failures.push(`${l.title || l.listing_key}: ${error.message}`);
+        }
+    }
+    status.className = failures.length ? 'bulk-status bad' : 'bulk-status';
+    status.textContent = failures.length ? `Marked ${done}; ${failures.length} failed — ${failures.join(' · ')}` : `Marked all ${done}.`;
+    await load(true);
+    setBusy(false);
+}
+
+document.getElementById('itemList').addEventListener('click', event => {
+    const button = event.target.closest('[data-action]');
+    if (button) act(button.closest('.item'), button.dataset.action, button);
+});
+document.getElementById('tabs').addEventListener('click', event => {
+    const tab = event.target.closest('.tab');
+    if (!tab) return;
+    state.tab = tab.dataset.tab;
+    state.shown = PAGE_SIZE;
+    document.querySelectorAll('#tabs .tab').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+    render();
+});
+document.getElementById('storeFilter').addEventListener('change', event => { state.store = event.target.value; state.shown = PAGE_SIZE; render(); });
+document.getElementById('brandFilter').addEventListener('change', event=>{state.brand=event.target.value;state.shown=PAGE_SIZE;render();});
+document.getElementById('searchAllTabs').addEventListener('change', () => {state.shown=PAGE_SIZE;render();});
+document.getElementById('clearSearchButton').addEventListener('click', () => {state.query='';document.getElementById('searchBox').value='';state.shown=PAGE_SIZE;render();});
+document.getElementById('searchBox').addEventListener('input', event => { state.query = event.target.value; state.shown = PAGE_SIZE; render(); });
+document.getElementById('moreButton').addEventListener('click', () => { state.shown += PAGE_SIZE; render(); });
+document.getElementById('bulkHandledButton').addEventListener('click', bulkHandled);
+document.getElementById('refreshButton').addEventListener('click', () => load(true));
+
+(function init(){
+    const previous = new URLSearchParams(window.location.search).get('tab');
+    const requested = ({suggested:'needs_matching',unaccounted:'needs_matching',listing_matches:'needs_matching',sold_out:'out_of_stock',no_warehouse:'out_of_stock',quantity_alert:'short_stock',accounted:'in_stock',no_listings:'unlisted',handled:'reviewed',dismissed:'reviewed'}[previous]) || previous;
+    if (requested && NOTES[requested]) {
+        state.tab = requested;
+        document.querySelectorAll('#tabs .tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === requested ? 'true' : 'false'));
+    }
+    // Coming back from the Finder means a link was probably just saved.
+    load(true);
+})();
+window.addEventListener('pageshow', event => { if (event.persisted) load(true); });
+</script>
+<script src="/static/i18n.js"></script>
+</body>
+</html>
