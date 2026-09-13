@@ -222,10 +222,159 @@ def _ready_to_ship_suffix_inventory_matches(cur, barcode, schema=None):
     return matches
 
 
-def _ready_to_ship_condition_is_new(order):
+# Marketplace condition labels that promise the buyer a pristine unit. eBay
+# sends words ("New with tags"), Amazon sends codes (11) or normalized keys
+# ("new_new"); every label is compared after squashing to snake_case.
+_READY_TO_SHIP_NEW_CONDITIONS = {
+    '11', '1000', 'new', 'new_new', 'brand_new', 'brand_new_sealed', 'new_sealed',
+    'new_with_tags', 'new_without_tags', 'new_with_box', 'new_without_box', 'new_in_box',
+    'nwt', 'nwot', 'nib',
+}
+# Words in a condition label that mean the buyer was told the unit is not the
+# standard one: "New other (see details)", "Open box", "Used - Mint", ...
+_READY_TO_SHIP_IMPERFECT_WORDS = (
+    'other', 'open', 'defect', 'imperfect', 'used', 'pre_owned', 'preowned', 'refurbish',
+    'parts', 'not_working', 'collectible', 'acceptable', 'good', 'like_new', 'mint',
+    'damage', 'club', 'excellent', 'fair', 'poor', 'see_details',
+)
+# eBay condition ids below "New" (1000) and Amazon's used/collectible codes.
+_READY_TO_SHIP_IMPERFECT_CODES = {
+    '1', '2', '3', '4', '5', '6', '7', '8', '10',
+    '1500', '1750', '2000', '2010', '2020', '2030', '2500', '2750', '3000', '4000', '5000', '6000', '7000',
+}
+# Words a warehouse note or listing note uses for a unit that is short something.
+_READY_TO_SHIP_MISSING_WORDS = {'missing', 'minus', 'less', 'short', 'without', 'lacks', 'lacking'}
+# Note words that mark a rack unit as damaged or incomplete.
+_READY_TO_SHIP_DEFECT_WORDS = {
+    'missing', 'broken', 'damage', 'damaged', 'torn', 'chip', 'chipped', 'crack', 'cracked',
+    'scratch', 'scratched', 'dent', 'dented', 'defect', 'bent', 'stain', 'stained', 'worn',
+    'repair', 'repaired', 'incomplete', 'partial',
+}
+_READY_TO_SHIP_STOP_WORDS = {
+    'the', 'and', 'for', 'with', 'this', 'that', 'set', 'new', 'item', 'of', 'in', 'on', 'see',
+    'details', 'other', 'sale', 'only', 'from', 'are', 'has', 'have', 'been', 'but', 'not',
+    'condition', 'piece', 'pieces', 'size',
+}
+
+
+def _ready_to_ship_condition_key(order):
     raw = str((order or {}).get('item_condition') or (order or {}).get('condition') or '').strip()
-    normalized = re.sub(r'[^a-z0-9]+', '_', raw.lower()).strip('_')
-    return normalized in {'11', '1000', 'new_new', 'new', 'brand_new'}
+    return re.sub(r'[^a-z0-9]+', '_', raw.lower()).strip('_')
+
+
+def _ready_to_ship_condition_class(order):
+    """'new', 'imperfect', or 'unknown': what the marketplace promised the buyer."""
+    key = _ready_to_ship_condition_key(order)
+    if not key:
+        return 'unknown'
+    if key in _READY_TO_SHIP_NEW_CONDITIONS:
+        return 'new'
+    if key in _READY_TO_SHIP_IMPERFECT_CODES:
+        return 'imperfect'
+    if any(word in key for word in _READY_TO_SHIP_IMPERFECT_WORDS):
+        return 'imperfect'
+    return 'unknown'
+
+
+def _ready_to_ship_condition_is_new(order):
+    return _ready_to_ship_condition_class(order) == 'new'
+
+
+def _ready_to_ship_condition_tokens(text):
+    """Comparable words from a condition note: counts, defect words, and nouns.
+
+    "-1 Salad Plate", "MISSING 1 SALAD PLATE" and "1 Plate Damage" all yield
+    tokens that overlap on "missing" / "1" / "plate", so a listing sold short a
+    piece can be matched to the rack unit carrying the same shortfall.
+    """
+    raw = str(text or '').lower()
+    # A note written as "-1 Plate" or "- 2 cups" means the unit is missing that many.
+    raw = re.sub(r'(^|[\s,;/(])-\s*(\d+)', r'\1 missing \2 ', raw)
+    # "5x Cups" is a count, not a word.
+    raw = re.sub(r'(\d+)\s*x\b', r'\1 ', raw)
+    tokens = set()
+    for word in re.findall(r'[a-z]+|\d+', raw):
+        if word.isdigit():
+            tokens.add(word.lstrip('0') or '0')
+            continue
+        if word in _READY_TO_SHIP_MISSING_WORDS:
+            tokens.add('missing')
+            continue
+        if len(word) < 3 or word in _READY_TO_SHIP_STOP_WORDS:
+            continue
+        if word.endswith('sses'):
+            word = word[:-2]
+        elif word.endswith('ies') and len(word) > 4:
+            word = word[:-3] + 'y'
+        elif word.endswith('s') and not word.endswith('ss'):
+            word = word[:-1]
+        tokens.add(word)
+    return tokens
+
+
+def _ready_to_ship_note_marks_defect(note):
+    """True when a warehouse note says the unit is damaged or short a piece."""
+    return bool(_ready_to_ship_condition_tokens(note) & _READY_TO_SHIP_DEFECT_WORDS)
+
+
+def _ready_to_ship_condition_match_score(order, match):
+    """How well a rack unit's warehouse note explains what the buyer was sold.
+
+    The order side is the listing's condition note plus its title, since eBay
+    sellers write the shortfall into the title ("... (MISSING 1 PLATE)"); the
+    rack side is the unit's warehouse note. Shared words score one each, and a
+    shared "missing N" scores extra because it names the exact shortfall.
+    """
+    order_text = ' '.join(
+        str((order or {}).get(key) or '')
+        for key in ('item_condition_description', 'condition_description', 'item_condition', 'condition', 'title')
+    )
+    order_tokens = _ready_to_ship_condition_tokens(order_text)
+    note_tokens = _ready_to_ship_condition_tokens((match or {}).get('warehouse_note'))
+    if not order_tokens or not note_tokens:
+        return 0
+    shared = order_tokens & note_tokens
+    score = len(shared)
+    if 'missing' in shared and any(token.isdigit() for token in shared):
+        score += 2
+    return score
+
+
+def _ready_to_ship_select_inventory_rows(order, exact_rows, suffix_rows):
+    """Pick the rack rows a Ready to Ship order points at: (rows, suggested, reason).
+
+    A listing sold as anything but plain New is the marketplace saying the buyer
+    expects the odd unit, so the suffixed rows win whenever they exist. A New or
+    unknown-condition listing sticks to the plain barcode and only borrows a
+    suffixed unit when nothing else is in stock. An order that already names a
+    suffixed unit is one identity and never gets re-routed.
+    """
+    order_barcode = str((order or {}).get('barcode') or '').strip()
+    sold_has_suffix = '-' in _sold_removal_barcode_key(order_barcode)
+    exact_rows = list(exact_rows or [])
+    suffix_rows = list(suffix_rows or [])
+    if suffix_rows and not sold_has_suffix and _ready_to_ship_condition_class(order) == 'imperfect':
+        return suffix_rows, True, 'condition'
+    if exact_rows:
+        return exact_rows, False, ''
+    if suffix_rows:
+        return suffix_rows, True, 'only_stock'
+    return [], False, ''
+
+
+def _ready_to_ship_match_reason(order, match, reason):
+    """Short human explanation of why a suffixed unit was suggested, or ''."""
+    condition = str((order or {}).get('item_condition') or (order or {}).get('condition') or '').strip()
+    note = str((match or {}).get('warehouse_note') or '').strip()
+    if reason == 'condition':
+        text = f'Sold as {condition}' if condition else 'Sold as not-new'
+    elif reason == 'only_stock':
+        text = 'Only suffixed units in stock'
+    else:
+        return ''
+    if note:
+        text += f' · unit note: {note}'
+    return text
 
 
 def _ready_to_ship_valid_suffix_suggestion(order_barcode, suggested_barcode):
@@ -261,12 +410,16 @@ def _ready_to_ship_suffix_alternatives(matches, selected_barcode=''):
         bucket = grouped.setdefault(barcode_key, {
             'barcode': barcode,
             'quantity': 0,
-            'locations': []
+            'locations': [],
+            'notes': []
         })
         bucket['quantity'] += max(0, ss_normalization._coerce_int((match or {}).get('quantity'), 0))
         location = _ready_to_ship_match_display_location(match)
         if location and location not in bucket['locations']:
             bucket['locations'].append(location)
+        note = str((match or {}).get('warehouse_note') or '').strip()
+        if note and note not in bucket['notes']:
+            bucket['notes'].append(note)
     return sorted(grouped.values(), key=lambda item: _sold_removal_barcode_key(item.get('barcode')))
 
 
@@ -417,15 +570,31 @@ def _ready_to_ship_searchrack_match_from_row(row, schema):
 
 
 def _ready_to_ship_rank_inventory_matches(matches, order):
-    """Prefer the same-barcode warehouse row whose custom identity matches the sold item."""
+    """Prefer the warehouse row whose identity and condition match the sold item.
+
+    An exact title-and-image match is one physical identity and always wins.
+    After that the marketplace condition decides: a not-new sale prefers the
+    unit whose warehouse note describes the same shortfall (and any noted unit
+    over an unnoted one), while a New sale avoids units whose note says they are
+    damaged or short a piece. Title, image, and custom-title ties follow.
+    """
     order_title = ' '.join(str((order or {}).get('title') or '').casefold().split())
     order_image = str((order or {}).get('image') or (order or {}).get('image_url') or '').strip().casefold()
+    condition_class = _ready_to_ship_condition_class(order)
 
     def _image_key(value):
         raw = str(value or '').strip().casefold().split('?', 1)[0].rstrip('/')
         return raw.rsplit('/', 1)[-1] if raw else ''
 
     order_image_key = _image_key(order_image)
+
+    def _condition_keys(match):
+        note = str((match or {}).get('warehouse_note') or '').strip()
+        if condition_class == 'imperfect':
+            return (_ready_to_ship_condition_match_score(order, match), 1 if note else 0)
+        if condition_class == 'new':
+            return (0 if _ready_to_ship_note_marks_defect(note) else 1, 0)
+        return (0, 0)
 
     def _score(match):
         match_title = ' '.join(str((match or {}).get('title') or '').casefold().split())
@@ -439,6 +608,7 @@ def _ready_to_ship_rank_inventory_matches(matches, order):
         custom = bool((match or {}).get('custom_title'))
         return (
             1 if title_exact and image_exact else 0,
+        ) + _condition_keys(match) + (
             1 if title_exact else 0,
             1 if image_exact else 0,
             1 if custom and (title_exact or image_exact) else 0,

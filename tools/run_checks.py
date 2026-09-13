@@ -20,6 +20,8 @@ TESTS = [
     'test_codebase_regressions', 'test_token_expiry', 'test_merge_regressions',
     'test_application_architecture', 'test_fba_attention', 'test_amazon_resolution',
     'test_receiving_batch', 'test_custom_item_identity', 'test_warehouse_nameless',
+    'test_ready_to_ship_suffix_matching',
+    'test_prep_fallback_lookup',
 ]
 
 

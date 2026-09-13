@@ -916,17 +916,23 @@ def ready_to_ship_location_options(order_id):
         if raw_stored_barcode and raw_stored_barcode != barcode:
             fallback_barcodes.append(raw_stored_barcode)
 
-        matches = ss_warehouse_matching._searchrack_matches_for_removal_context(
-            rack_cur,
-            barcode,
-            fallback_barcodes=fallback_barcodes,
-            preferred_location=str(order['location'] or '').strip()
-        )
-        if not matches and valid_fallback_barcode:
-            barcode = valid_fallback_barcode
+        # The page already showed the operator a specific suffixed unit for this
+        # order; offer that unit's locations before falling back to the plain
+        # barcode, otherwise a base-UPC row in stock would silently win.
+        matches = []
+        if valid_fallback_barcode:
+            matches = ss_warehouse_matching._searchrack_matches_for_removal_context(
+                rack_cur,
+                valid_fallback_barcode,
+                preferred_location=str(order['location'] or '').strip()
+            )
+            if matches:
+                barcode = valid_fallback_barcode
+        if not matches:
             matches = ss_warehouse_matching._searchrack_matches_for_removal_context(
                 rack_cur,
                 barcode,
+                fallback_barcodes=fallback_barcodes,
                 preferred_location=str(order['location'] or '').strip()
             )
 

@@ -348,35 +348,30 @@ def sold_orders():
                     suffix_rack_rows = ss_warehouse_matching._ready_to_ship_suffix_inventory_matches(
                         rack_cur, order_dict['barcode'], schema=rack_schema
                     )
-                    sold_barcode_key = ss_warehouse_matching._sold_removal_barcode_key(order_dict['barcode'])
-                    sold_barcode_has_suffix = '-' in sold_barcode_key
-                    condition_is_new = ss_warehouse_matching._ready_to_ship_condition_is_new(order_dict)
-                    suggestion_match = False
+                    rack_rows, suggestion_match, match_reason = ss_warehouse_matching._ready_to_ship_select_inventory_rows(
+                        order_dict, exact_rack_rows, suffix_rack_rows
+                    )
 
-                    if not condition_is_new and not sold_barcode_has_suffix and suffix_rack_rows:
-                        rack_rows = suffix_rack_rows
-                        suggestion_match = True
-                    else:
-                        rack_rows = exact_rack_rows
-
-                    if not rack_rows and not suffix_rack_rows:
+                    if not rack_rows:
                         base_barcode = ss_shipping_identity._barcode_base_without_suffix(order_dict['barcode'])
                         if base_barcode and ss_normalization._normalize_upc_preserve_suffix_for_match(base_barcode) != ss_normalization._normalize_upc_preserve_suffix_for_match(order_dict['barcode']):
                             rack_rows = ss_warehouse_matching._searchrack_matches_for_barcode(
                                 rack_cur, base_barcode, schema=rack_schema, include_zero=False
                             )
-                    if not rack_rows and suffix_rack_rows:
-                        rack_rows = suffix_rack_rows
-                        suggestion_match = True
-                    
+
                     if rack_rows:
                         rack_rows = ss_warehouse_matching._ready_to_ship_rank_inventory_matches(rack_rows, order_dict)
                         preferred_match = rack_rows[0]
                         preferred_barcode = preferred_match.get('barcode') or order_dict.get('barcode') or ''
                         order_dict['location_match_suggested'] = bool(suggestion_match)
                         order_dict['location_match_barcode'] = preferred_barcode
+                        order_dict['location_match_reason'] = ss_warehouse_matching._ready_to_ship_match_reason(
+                            order_dict, preferred_match, match_reason
+                        )
+                        # Every other unit of this product is a pickable alternative,
+                        # the plain-barcode row included when a suffixed unit was chosen.
                         order_dict['suffix_variations'] = ss_warehouse_matching._ready_to_ship_suffix_alternatives(
-                            suffix_rack_rows, preferred_barcode
+                            list(suffix_rack_rows) + list(exact_rack_rows), preferred_barcode
                         )
                         preferred_barcode_key = ss_warehouse_matching._sold_removal_barcode_key(preferred_barcode)
                         rack_rows = [

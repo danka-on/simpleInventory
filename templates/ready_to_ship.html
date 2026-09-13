@@ -2501,14 +2501,19 @@ function readyToShipSuffixMatchHtml(order) {
             ? 'STORE MATCH'
             : 'SUGGESTED';
         html += `<div style="margin-top:4px;color:#c4b5fd;font-size:0.66rem;font-weight:800;line-height:1.2;">${suggestionLabel} · ${esc(formatUpcDisplay(matchedBarcode))}</div>`;
+        const reason = String(order.location_match_reason || '').trim();
+        if (reason) {
+            html += `<div style="margin-top:2px;color:#a5b4fc;font-size:0.62rem;font-weight:600;line-height:1.2;">${esc(reason)}</div>`;
+        }
     }
     if (variations.length) {
         const rows = variations.map(item => {
             const locations = Array.isArray(item.locations) ? item.locations.filter(Boolean).join(', ') : '';
+            const notes = Array.isArray(item.notes) ? item.notes.filter(Boolean).join(' / ') : '';
             const quantity = Number.parseInt(item.quantity || 0, 10) || 0;
-            return `<div style="padding:3px 0;border-top:1px solid rgba(148,163,184,0.14);"><strong>${esc(formatUpcDisplay(item.barcode || ''))}</strong>${quantity ? ` · ${quantity} available` : ''}${locations ? `<br><span style="color:#94a3b8;">${esc(locations)}</span>` : ''}</div>`;
+            return `<div style="padding:3px 0;border-top:1px solid rgba(148,163,184,0.14);"><strong>${esc(formatUpcDisplay(item.barcode || ''))}</strong>${quantity ? ` · ${quantity} available` : ''}${notes ? ` · <em>${esc(notes)}</em>` : ''}${locations ? `<br><span style="color:#94a3b8;">${esc(locations)}</span>` : ''}</div>`;
         }).join('');
-        html += `<details style="margin-top:3px;font-size:0.64rem;color:#a5b4fc;line-height:1.25;"><summary style="cursor:pointer;white-space:nowrap;">${variations.length} other suffix ${variations.length === 1 ? 'option' : 'options'}</summary><div style="margin-top:3px;text-align:left;min-width:145px;">${rows}</div></details>`;
+        html += `<details style="margin-top:3px;font-size:0.64rem;color:#a5b4fc;line-height:1.25;"><summary style="cursor:pointer;white-space:nowrap;">${variations.length} other unit ${variations.length === 1 ? 'option' : 'options'}</summary><div style="margin-top:3px;text-align:left;min-width:145px;">${rows}</div></details>`;
     }
     return html;
 }

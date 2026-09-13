@@ -138,19 +138,28 @@ def mark_order_handled():
         if raw_stored_barcode and raw_stored_barcode != barcode:
             fallback_barcodes.append(raw_stored_barcode)
 
-        plan = ss_marketplace_removal._build_marketplace_removal_plan(
-            barcode,
-            sold_qty,
-            allocations=normalized_allocations if incoming_allocations is not None else None,
-            fallback_barcodes=fallback_barcodes,
-            preferred_location=str(order['location'] or '').strip()
-        )
-        if plan.get('success', True) and not plan.get('can_fulfill') and valid_fallback_barcode:
-            barcode = valid_fallback_barcode
+        # Remove the suffixed unit the page showed for this order when it can
+        # cover the sale; only then fall back to the plain barcode. The old
+        # order of these two steps pulled a base-UPC unit off the shelf while
+        # the page was pointing at "UPC-1".
+        plan = None
+        if valid_fallback_barcode:
+            plan = ss_marketplace_removal._build_marketplace_removal_plan(
+                valid_fallback_barcode,
+                sold_qty,
+                allocations=normalized_allocations if incoming_allocations is not None else None,
+                preferred_location=str(order['location'] or '').strip()
+            )
+            if plan.get('success', True) and plan.get('can_fulfill'):
+                barcode = valid_fallback_barcode
+            else:
+                plan = None
+        if plan is None:
             plan = ss_marketplace_removal._build_marketplace_removal_plan(
                 barcode,
                 sold_qty,
                 allocations=normalized_allocations if incoming_allocations is not None else None,
+                fallback_barcodes=fallback_barcodes,
                 preferred_location=str(order['location'] or '').strip()
             )
         if not plan.get('success', True):
