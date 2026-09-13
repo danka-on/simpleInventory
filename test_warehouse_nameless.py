@@ -66,9 +66,21 @@ class WarehouseNamelessTests(unittest.TestCase):
             return conn.execute(
                 'SELECT upc, item_description, title_override FROM custom_item_registry ORDER BY upc').fetchall()
 
+    def test_a_blank_title_the_warehouse_fills_from_a_catalog_is_not_no_name(self):
+        # The warehouse list paints the eBay/Amazon/BOL title over a blank TITLE,
+        # so offering to "adopt" that same name would be noise.
+        self.rack(1, '', '025398215393')
+        self.rack(2, '', '222222222222')
+        self.sql('rawbol.db', "INSERT INTO raw_bol_items VALUES ('25398215393', 'Lifetime Blake 16 Pc', '')")
+        self.sql('ebayStore.db', "INSERT INTO INVENTORY (UPC, Title) VALUES ('222222222222', 'Moen faucet')")
+        payload = self.scan()
+        self.assertEqual(payload['barcode_only'], [])
+        self.assertEqual(payload['nameable'], [])
+        self.assertEqual(payload['totals']['scanned_rows'], 0)
+
     def test_only_barcode_rows_no_source_can_name_are_barcode_only(self):
         self.rack(1, '', '111111111111')
-        self.rack(2, '', '222222222222')
+        self.rack(2, 'No barcode item', '222222222222')
         self.sql('rawbol.db', "INSERT INTO raw_bol_items VALUES ('222222222222', 'Wicker basket', '/b.jpg')")
         payload = self.scan()
         self.assertEqual(self.barcodes(payload, 'barcode_only'), ['111111111111'])

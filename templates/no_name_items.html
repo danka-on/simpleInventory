@@ -37,6 +37,10 @@
         .tab{border:1px solid var(--border);background:white;border-radius:999px;padding:8px 15px;font-weight:800;font-size:.85rem;cursor:pointer;font:inherit;font-weight:800}
         .tab[aria-selected="true"]{background:var(--text);border-color:var(--text);color:white}
         .section-note{color:var(--muted);font-size:.83rem;line-height:1.5;margin:0 0 12px}
+        .bulk{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+        .bulk[hidden]{display:none}
+        .bulk-status{font-size:.82rem;font-weight:700;color:var(--muted)}
+        .bulk-status.bad{color:var(--red)}
         .item{padding:14px;margin-bottom:11px;display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,380px);gap:16px;align-items:start}
         .barcode{font-family:"SFMono-Regular",Consolas,monospace;font-size:1.12rem;font-weight:800;letter-spacing:.02em;word-break:break-all}
         .meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
@@ -117,6 +121,10 @@
         </div>
 
         <p class="section-note" id="sectionNote"></p>
+        <div class="bulk" id="bulkBar" hidden>
+            <button type="button" class="btn adopt" id="adoptAllButton">Adopt all catalog names</button>
+            <span class="bulk-status" id="bulkStatus"></span>
+        </div>
         <div id="itemList"></div>
     </div>
 </div>
@@ -186,13 +194,19 @@ function renderGroup(group){
 
 function render(){
     const groups = activeGroups();
+    const bulkBar = document.getElementById('bulkBar');
+    bulkBar.hidden = !(state.tab === 'nameable' && groups.length);
+    if (!state.bulkRunning) {
+        document.getElementById('adoptAllButton').textContent =
+            `Adopt all ${groups.length} catalog name${groups.length === 1 ? '' : 's'}`;
+    }
     const note = document.getElementById('sectionNote');
     if (state.tab === 'nameless') {
         note.textContent = 'No catalog, BOL, marketplace listing or custom entry knows these barcodes. '
             + 'Whatever you type here becomes the only name they will ever have.';
     } else {
-        note.textContent = 'The warehouse row has no name stored, but a catalog does. '
-            + 'Adopting writes that name onto the shelf rows so searches and labels stop showing a bare barcode.';
+        note.textContent = 'The warehouse shows a placeholder or a bare number for these, but a catalog knows the real name. '
+            + 'Adopting writes that name onto the shelf rows so searches and labels show it.';
     }
     const list = document.getElementById('itemList');
     if (!groups.length) {
@@ -300,6 +314,48 @@ document.getElementById('itemList').addEventListener('keydown', event => {
         saveName(event.target.closest('.item'));
     }
 });
+async function adoptAll(){
+    const groups = state.data ? [...state.data.nameable] : [];
+    if (!groups.length || state.bulkRunning) return;
+    if (!confirm(`Write the catalog name onto all ${groups.length} items on this tab?`)) return;
+    const button = document.getElementById('adoptAllButton');
+    const status = document.getElementById('bulkStatus');
+    state.bulkRunning = true;
+    button.disabled = true;
+    status.className = 'bulk-status';
+    let named = 0;
+    const failures = [];
+    for (const [index, group] of groups.entries()) {
+        status.textContent = `Adopting ${index + 1} of ${groups.length}…`;
+        try {
+            const response = await fetch('/api/warehouse/nameless-items/name', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify({
+                    barcode: group.barcode,
+                    title: group.suggested_title,
+                    ids: group.rows.map(row => row.id)
+                })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || 'failed');
+            named += 1;
+        } catch (error) {
+            failures.push(`${group.display_barcode || group.barcode}: ${error.message}`);
+        }
+    }
+    state.bulkRunning = false;
+    button.disabled = false;
+    if (failures.length) {
+        status.className = 'bulk-status bad';
+        status.textContent = `Named ${named}; ${failures.length} failed — ${failures.join(' · ')}`;
+    } else {
+        status.textContent = `Named all ${named}.`;
+    }
+    await load();
+}
+
+document.getElementById('adoptAllButton').addEventListener('click', adoptAll);
 document.getElementById('tabNameless').addEventListener('click', () => {
     state.tab = 'nameless';
     document.getElementById('tabNameless').setAttribute('aria-selected', 'true');

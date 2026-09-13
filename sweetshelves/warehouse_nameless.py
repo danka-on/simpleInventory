@@ -222,12 +222,57 @@ def _resolve_suggestions(groups):
                 break
 
 
+def _warehouse_display_titles(rows):
+    """The catalog title the warehouse list paints over each blank-titled row.
+
+    Mirrors the searchRack batch enrichment in warehouse_search.api_search_db:
+    lookups on the zero-stripped base barcode, eBay first (last row wins), then
+    Amazon, raw BOL and BOL only where nothing earlier filled the key.
+    """
+    bases = sorted({_base_barcode(row['barcode']) for row in rows if not row['stored_title']} - {''})
+    titles = {}
+    sources = (
+        ('ebayStore.db', 'SELECT UPC AS upc, Title AS title FROM INVENTORY', True),
+        ('amazonStore.db', 'SELECT UPC AS upc, TITLE AS title FROM ITEMS', False),
+        ('rawbol.db', 'SELECT upc, item_description AS title FROM raw_bol_items', False),
+        ('bol.db', 'SELECT upc, item_description AS title FROM bol_items', False),
+    )
+    for database, select, overwrite in sources:
+        try:
+            with ss_database.db_connection(database) as conn:
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                column = 'UPC' if database in ('ebayStore.db', 'amazonStore.db') else 'upc'
+                for start in range(0, len(bases), _QUERY_CHUNK):
+                    chunk = bases[start:start + _QUERY_CHUNK]
+                    placeholders = ','.join('?' for _ in chunk)
+                    sql = f'{select} WHERE {column} IN ({placeholders}) COLLATE NOCASE'
+                    for record in cur.execute(sql, tuple(chunk)):
+                        key = ss_normalization._strip_leading_zeros_numeric(record['upc'] or '')
+                        if overwrite or key not in titles:
+                            titles[key] = record['title']
+        except sqlite3.Error:
+            pass
+    return {key: ' '.join(str(title or '').split()) for key, title in titles.items()}
+
+
+def _shows_a_name_in_warehouse(row, display_titles):
+    """True when the warehouse list already shows this row a real name."""
+    if row['stored_title']:
+        return False
+    return not _title_is_meaningless(display_titles.get(_base_barcode(row['barcode']), ''))
+
+
 def api_nameless_items():
     """Split untitled warehouse stock into barcode-only items and nameable ones."""
     try:
         with ss_database.db_connection('searchRack.db') as conn:
             conn.row_factory = sqlite3.Row
             rows = _load_untitled_rows(conn.cursor())
+        # A blank TITLE is not a no-name item when the warehouse list fills in a
+        # catalog name at display time; only what the user actually sees counts.
+        display_titles = _warehouse_display_titles(rows)
+        rows = [row for row in rows if not _shows_a_name_in_warehouse(row, display_titles)]
 
         groups = _group_by_barcode(rows)
         ordered = sorted(groups.values(), key=lambda group: (-(group['oldest_age_days'] or 0), group['barcode']))
