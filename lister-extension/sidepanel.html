@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sweet Shelves Lister</title>
+<link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+<header class="top">
+  <img src="icons/icon48.png" alt="" width="22" height="22">
+  <div class="brand">Sweet Shelves Lister</div>
+  <button id="connStatus" class="chip" type="button" title="Connection">…</button>
+  <button id="settingsBtn" class="icon" type="button" title="Settings" aria-label="Settings">⚙</button>
+</header>
+
+<section id="settings" class="card" hidden>
+  <h2>Settings</h2>
+  <label>Sweet Shelves server<input id="setServer" type="url" placeholder="https://pi.nexuscentralhq.org"></label>
+  <label>Your name (shown on the proposal timeline)<input id="setActor" type="text" placeholder="e.g. Dan"></label>
+  <label class="check"><input id="setAutoFill" type="checkbox"> Fill automatically when a listing form opens</label>
+  <div class="row">
+    <button id="saveSettings" class="primary" type="button">Save</button>
+    <button id="openServer" type="button">Open Sweet Shelves</button>
+    <button id="openUpdates" type="button">Update extension</button>
+  </div>
+  <p class="muted" id="versionLine"></p>
+</section>
+
+<section id="signin" class="card warn" hidden>
+  <strong>Sign in to Sweet Shelves</strong>
+  <p>The server needs your Cloudflare sign-in. Open it once in this browser, then come back.</p>
+  <button id="signinBtn" class="primary" type="button">Open sign-in page</button>
+</section>
+
+<section id="pageCard" class="card page"></section>
+
+<section id="pickCard" class="card pick" hidden></section>
+
+<section class="card items">
+  <div class="tabs">
+    <button id="scopeSelected" class="tab active" type="button">Selected</button>
+    <button id="scopeOpen" class="tab" type="button">All open</button>
+    <input id="filter" type="search" placeholder="Filter by title or UPC">
+    <button id="reload" class="icon" type="button" title="Reload" aria-label="Reload">↻</button>
+  </div>
+  <div id="itemList" class="list"></div>
+</section>
+
+<section id="detail" class="card detail" hidden></section>
+
+<section id="confirm" class="card confirm" hidden></section>
+
+<footer class="foot"><span id="toast" role="status"></span></footer>
+
+<script src="matcher.js"></script>
+<script src="sidepanel.js"></script>
+</body>
+</html>

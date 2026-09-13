@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "Sweet Shelves Lister",
+  "version": "0.1.0",
+  "description": "Fill eBay and Amazon listing pages from Sweet Shelves proposals, then link the live listing back to the warehouse.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Open Sweet Shelves Lister",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://pi.nexuscentralhq.org/*",
+    "https://debby.taila97a84.ts.net/*",
+    "https://*.ebay.com/*",
+    "https://sellercentral.amazon.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://pi.nexuscentralhq.org/lister/*",
+        "https://debby.taila97a84.ts.net/lister/*"
+      ],
+      "js": ["update-bridge.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L"
+      },
+      "description": "Open Sweet Shelves Lister"
+    }
+  }
+}
