@@ -365,6 +365,9 @@ def _ready_to_ship_select_inventory_rows(order, exact_rows, suffix_rows):
 def _ready_to_ship_match_reason(order, match, reason):
     """Short human explanation of why a suffixed unit was suggested, or ''."""
     condition = str((order or {}).get('item_condition') or (order or {}).get('condition') or '').strip()
+    if '_' in condition and ' ' not in condition:
+        # Amazon conditions arrive as keys like "used_good"; say "Used Good".
+        condition = condition.replace('_', ' ').title()
     note = str((match or {}).get('warehouse_note') or '').strip()
     if reason == 'condition':
         text = f'Sold as {condition}' if condition else 'Sold as not-new'

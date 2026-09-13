@@ -148,6 +148,10 @@ class SelectionTests(unittest.TestCase):
             wm._ready_to_ship_match_reason({'item_condition': 'New'}, _match(3, 'x-1'), 'only_stock'),
             'Only suffixed units in stock',
         )
+        self.assertEqual(
+            wm._ready_to_ship_match_reason({'item_condition': 'used_good'}, _match(4, 'x-1'), 'condition'),
+            'Sold as Used Good',
+        )
         self.assertEqual(wm._ready_to_ship_match_reason(SALAD_PLATES, self.suffixed[0], ''), '')
 
     def test_alternatives_list_the_plain_row_and_carry_notes(self):
