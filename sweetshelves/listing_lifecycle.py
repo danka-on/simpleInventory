@@ -3,10 +3,16 @@
 import datetime
 import os
 import sqlite3
+from contextlib import closing
 from . import errors as ss_errors, normalization as ss_normalization
 
 
+STORE_SCAN_SOURCE = 'store_scan'
+
+
 def _listing_source_label(value):
+    if str(value or '').strip().lower() == STORE_SCAN_SOURCE:
+        return 'Store scan'
     norm = ss_normalization._normalize_listing_source(value, default='system')
     if norm == 'listing_center':
         return 'Listing Agent'
@@ -353,6 +359,168 @@ def _apply_marketplace_status_overlay(rows):
                 source = 'system'
             row[source_key] = source
             row[source_label_key] = _listing_source_label(source) if listed else ''
+
+
+def _store_scan_upc_keys(raw_upc):
+    """
+    Spellings one barcode can take in the store tables. A suffixed unit
+    ("719978859014-3") keeps its suffix, so it only matches a listing of that
+    exact unit and never inherits the base product's listing.
+    """
+    upc = str(ss_normalization._normalize_upc(raw_upc) or '').strip().lower()
+    if not upc:
+        return set()
+    base, sep, suffix = upc.partition('-')
+    base = base.strip()
+    bases = {base, ss_normalization._strip_leading_zeros_numeric(base) or base}
+    for value in list(bases):
+        if value.isdigit() and len(value) <= 12:
+            bases.update((value.zfill(12), value.zfill(13)))
+    return {f'{value}-{suffix.strip()}' if sep else value for value in bases if value}
+
+
+def _store_scan_live_listings():
+    """
+    Active listings from the synced eBay/Amazon store tables, keyed by barcode
+    spelling. Amazon FBA offers count as live even with no merchant quantity.
+    """
+    live = {'ebay': {}, 'amazon': {}, 'ebay_checked': False, 'amazon_checked': False}
+
+    def remember(platform, raw_upc, listing_id):
+        for key in _store_scan_upc_keys(raw_upc):
+            live[platform].setdefault(key, str(listing_id or '').strip())
+
+    try:
+        with closing(sqlite3.connect('ebayStore.db')) as conn:
+            rows = conn.execute('''
+                SELECT UPC, ItemID
+                FROM INVENTORY
+                WHERE TRIM(COALESCE(UPC, '')) != ''
+                  AND LOWER(TRIM(COALESCE(List_State, ''))) IN ('active', 'live', 'listed')
+                  AND TRIM(COALESCE(ItemID, '')) != ''
+                  AND COALESCE(CAST(Quantity AS INTEGER), 0) > 0
+            ''').fetchall()
+        for upc, item_id in rows:
+            remember('ebay', upc, item_id)
+        live['ebay_checked'] = True
+    except Exception as e:
+        print(f"[_store_scan_live_listings] eBay lookup failed: {e}")
+
+    try:
+        with closing(sqlite3.connect('amazonStore.db')) as conn:
+            cols = {r[1].lower() for r in conn.execute("PRAGMA table_info('ITEMS')")}
+            fba_clause = (
+                " OR UPPER(TRIM(COALESCE(FULFILLMENT_CHANNEL, ''))) NOT IN ('', 'DEFAULT')"
+                if 'fulfillment_channel' in cols else ''
+            )
+            rows = conn.execute(f'''
+                SELECT UPC, ASIN
+                FROM ITEMS
+                WHERE TRIM(COALESCE(UPC, '')) != ''
+                  AND LOWER(TRIM(COALESCE(STATUS, ''))) IN ('active', 'live', 'listed')
+                  AND TRIM(COALESCE(ASIN, '')) != ''
+                  AND (COALESCE(CAST(QUANTITY AS INTEGER), 0) > 0{fba_clause})
+            ''').fetchall()
+        for upc, asin in rows:
+            remember('amazon', upc, asin)
+        live['amazon_checked'] = True
+    except Exception as e:
+        print(f"[_store_scan_live_listings] Amazon lookup failed: {e}")
+
+    return live
+
+
+def _store_listing_sync_times():
+    try:
+        with closing(sqlite3.connect('sync_settings.db')) as conn:
+            rows = dict(conn.execute(
+                "SELECT key, value FROM sync_status WHERE key IN ('ebay_listings_last', 'amazon_listings_last')"
+            ).fetchall())
+    except Exception:
+        rows = {}
+    return {'ebay': rows.get('ebay_listings_last'), 'amazon': rows.get('amazon_listings_last')}
+
+
+def _scan_stores_mark_prepared_listed():
+    """
+    Check the eBay/Amazon boxes of prepared bol_items rows whose barcode is live
+    in the synced store tables. Only ever adds checks: a box someone checked by
+    hand stays, and a missing listing never unchecks anything.
+    """
+    _ensure_bol_list_status_column()
+    live = _store_scan_live_listings()
+    result = {
+        'scanned': 0,
+        'added': {'ebay': 0, 'amazon': 0},
+        'checked': {'ebay': live['ebay_checked'], 'amazon': live['amazon_checked']},
+        'synced_at': _store_listing_sync_times(),
+        'changes': [],
+    }
+    platforms = [mp for mp in ('ebay', 'amazon') if live[f'{mp}_checked']]
+    if not platforms:
+        return result
+
+    conn = sqlite3.connect('bol.db', isolation_level='IMMEDIATE')
+    try:
+        cur = conn.cursor()
+        if not cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bol_items'").fetchone():
+            return result
+        cols = {r[1].lower() for r in cur.execute('PRAGMA table_info(bol_items)')}
+        prepared = []
+        if cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='items_prep_status'").fetchone():
+            prepared.append(
+                "EXISTS (SELECT 1 FROM items_prep_status s WHERE s.upc = b.upc COLLATE NOCASE "
+                "AND LOWER(TRIM(COALESCE(s.status, ''))) IN ('good', 'bad', 'return'))"
+            )
+        prepared += [f"COALESCE(b.{c}, 0) > 0" for c in ('good_qty', 'bad_qty') if c in cols]
+        if not prepared:
+            return result
+        where = [
+            "TRIM(COALESCE(b.upc, '')) != ''",
+            f"({' OR '.join(prepared)})",
+            '(' + ' OR '.join(f'COALESCE(b.listed_{mp}, 0) = 0' for mp in platforms) + ')',
+        ]
+        if 'itemprepped' in cols:
+            where.append('(b.itemprepped IS NULL OR b.itemprepped = 0)')
+        flag_cols = ', '.join(f'COALESCE(b.listed_{mp}, 0)' for mp in platforms)
+        rows = cur.execute(
+            f"SELECT b.id, b.upc, COALESCE(b.lot_number, ''), {flag_cols} FROM bol_items b WHERE {' AND '.join(where)}"
+        ).fetchall()
+        result['scanned'] = len(rows)
+
+        touched = set()
+        for row in rows:
+            row_id, upc, lot = row[0], row[1], row[2]
+            keys = _store_scan_upc_keys(upc)
+            for mp, flag in zip(platforms, row[3:]):
+                if int(flag or 0) == 1:
+                    continue
+                hit = next((k for k in keys if k in live[mp]), None)
+                if hit is None:
+                    continue
+                cur.execute(
+                    f'UPDATE bol_items SET listed_{mp} = 1, listed_{mp}_date = datetime("now"), '
+                    f'listed_{mp}_source = ? WHERE id = ?',
+                    (STORE_SCAN_SOURCE, row_id),
+                )
+                touched.add(row_id)
+                result['added'][mp] += 1
+                result['changes'].append({
+                    'id': row_id, 'upc': upc, 'lot_number': lot,
+                    'marketplace': mp, 'listing_id': live[mp][hit],
+                })
+        for part in _chunk_list(sorted(touched), 500):
+            cur.execute(
+                f"UPDATE bol_items SET list_status = 'listed' WHERE id IN ({','.join('?' for _ in part)})",
+                tuple(part),
+            )
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def _listing_center_mark_bol_listed(marketplace, *, upc='', lot_number='', item_id=None):

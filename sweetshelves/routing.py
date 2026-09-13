@@ -334,6 +334,7 @@ def register_routes():
     ss_runtime.app.route('/api/bol_lots', methods=['GET'])(ss_bol_inventory.api_bol_lots)
     ss_runtime.app.route('/api/lots', methods=['GET'])(ss_bol_inventory.api_bol_lots)
     ss_runtime.app.route('/api/bol_items/list_status', methods=['POST'])(ss_bol_inventory.api_bol_items_set_list_status)
+    ss_runtime.app.route('/api/bol_items/scan_stores', methods=['POST'])(ss_bol_inventory.api_bol_items_scan_stores)
     ss_runtime.app.route('/api/debug/migrate_listings', methods=['GET'])(ss_diagnostics.api_debug_migrate_listings)
     ss_runtime.app.route('/api/debug/check_item/<upc>', methods=['GET'])(ss_diagnostics.api_debug_check_item)
     ss_runtime.app.route('/api/cleanup_temporary_entry', methods=['POST'])(ss_diagnostics.api_cleanup_temporary_entry)

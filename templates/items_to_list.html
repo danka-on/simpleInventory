@@ -693,6 +693,7 @@
       <input type="text" id="filter-q" placeholder="UPC or Title">
     </label>
     <button class="btn btn-primary" id="search-btn" style="margin-left:4px">Search</button>
+    <button class="btn" id="scan-stores-btn" type="button" title="Check the Marketplaces boxes for items live on eBay or Amazon" style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0">🛒 Scan Stores</button>
     <button class="btn gear-btn" id="filter-gear" title="More filters" aria-haspopup="true" aria-expanded="false">⚙️</button>
     <div id="filter-dropdown" class="dropdown-panel" role="menu" aria-labelledby="filter-gear">
       <div class="dropdown-section">
@@ -771,7 +772,7 @@
         </label>
       </div>
       <div class="dropdown-section" style="border-top:1px solid rgba(0,0,0,0.08);padding-top:10px;margin-top:4px">
-        <button class="btn btn-sm" id="refresh-btn" type="button" style="background:#f0f7ff;color:#2563eb;border:1px solid #bfdbfe;width:100%">🔄 Refresh List</button>
+        <button class="btn btn-sm" id="refresh-btn" type="button" style="background:#f0f7ff;color:#2563eb;border:1px solid #bfdbfe;width:100%">🔄 Refresh List + Scan Stores</button>
       </div>
       <div class="dropdown-section" id="gear-reset-wrap" style="display:none">
         <button class="btn btn-sm" id="reset-gear-filters" type="button" style="background:#fff3f3;color:#b42318;border:1px solid #f3b4b4;width:100%">Reset to Default</button>
@@ -785,6 +786,7 @@
   </div>
 
   <div id="results-summary" style="margin:10px 0;padding:8px;background:#f0f0f0;border-radius:6px;font-size:0.95rem;color:#333"></div>
+  <div id="store-scan-status" hidden style="margin:-4px 0 10px;padding:8px;border-radius:6px;font-size:0.9rem;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0"></div>
   <div id="results"></div>
   <div style="display:flex; align-items:center; gap:12px; justify-content:center; margin:24px 0; flex-wrap:wrap">
     <label style="display:flex; align-items:center; gap:6px; font-size:0.95rem;">Per page:
@@ -2435,7 +2437,50 @@ document.getElementById('autoListingsModal').addEventListener('click', (e)=>{
 // Auto-refresh on dropdown changes
 document.getElementById('filter-lot').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
 document.getElementById('sort-select').addEventListener('change', (e)=>{ onGearSettingChanged(); loadItems(e, { historyMode: 'push' }); });
-document.getElementById('refresh-btn').addEventListener('click', (e)=> loadItems(e, { forceRefetch: true, historyMode: 'replace' }));
+function _storeSyncLabel(value){
+  if(!value) return 'never synced';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : ('synced ' + d.toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }));
+}
+
+let storeScanRunning = false;
+async function refreshWithStoreScan(e){
+  if(storeScanRunning) return;
+  storeScanRunning = true;
+  const buttons = ['scan-stores-btn', 'refresh-btn'].map(id => document.getElementById(id)).filter(Boolean);
+  buttons.forEach(b => { b.disabled = true; });
+  const statusEl = document.getElementById('store-scan-status');
+  const showStatus = (text, isError) => {
+    if(!statusEl) return;
+    statusEl.textContent = text;
+    statusEl.style.background = isError ? '#fef2f2' : '#ecfdf5';
+    statusEl.style.color = isError ? '#991b1b' : '#065f46';
+    statusEl.style.borderColor = isError ? '#fecaca' : '#a7f3d0';
+    statusEl.hidden = false;
+  };
+  showStatus('Scanning eBay and Amazon listings…', false);
+  try{
+    const resp = await fetch('/api/bol_items/scan_stores', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}', cache:'no-store' });
+    const j = await resp.json().catch(() => ({}));
+    if(!resp.ok || !j.success) throw new Error(j.error || ('HTTP ' + resp.status));
+    const added = j.added || {};
+    const checked = j.checked || {};
+    const synced = j.synced_at || {};
+    const part = (key, name) => checked[key]
+      ? `${Number(added[key] || 0)} newly checked on ${name} (${_storeSyncLabel(synced[key])})`
+      : `${name} listings unavailable`;
+    showStatus(`Store scan: ${part('ebay', 'eBay')}; ${part('amazon', 'Amazon')}. Existing checks are never removed.`, false);
+  }catch(err){
+    console.error('[store scan] failed:', err);
+    showStatus('Store scan failed: ' + (err && err.message ? err.message : err), true);
+  }finally{
+    await loadItems(e, { forceRefetch: true, historyMode: 'replace' });
+    buttons.forEach(b => { b.disabled = false; });
+    storeScanRunning = false;
+  }
+}
+document.getElementById('refresh-btn').addEventListener('click', refreshWithStoreScan);
+document.getElementById('scan-stores-btn').addEventListener('click', refreshWithStoreScan);
 
 function updateStatusFilterHighlight(){
   const map = {

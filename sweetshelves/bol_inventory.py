@@ -1708,6 +1708,33 @@ def api_bol_items_set_list_status():
             conn.close()
 
 
+def api_bol_items_scan_stores():
+    """Check Prepared Items marketplace boxes for barcodes live in the synced eBay/Amazon listings."""
+    try:
+        result = ss_listing_lifecycle._scan_stores_mark_prepared_listed()
+        for change in result['changes']:
+            try:
+                ss_listing_log._listinglog_add_entry(
+                    upc=change['upc'],
+                    platform=change['marketplace'],
+                    action='listed',
+                    source=ss_listing_lifecycle.STORE_SCAN_SOURCE,
+                    listing_id=change['listing_id'] or None,
+                    success=True,
+                    meta={'lot_number': change['lot_number'], 'via': 'api_bol_items_scan_stores'}
+                )
+            except Exception:
+                pass
+        if result['changes']:
+            ss_runtime.cache.clear()
+            ss_caching.update_data_version()
+        print(f"[scan_stores] scanned={result['scanned']} added={result['added']} checked={result['checked']}")
+        result['changes'] = result['changes'][:200]
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': ss_errors._safe_error(e, 'scan stores')}), 500
+
+
 def get_bol_upcs():
     """Return a JSON list of all UPCs from bol.db bol_items table (UPC column)."""
     conn = None

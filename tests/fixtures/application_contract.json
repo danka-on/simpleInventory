@@ -2914,6 +2914,17 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/bol_items/scan_stores",
+      "endpoint": "api_bol_items_scan_stores",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/debug/migrate_listings",
       "endpoint": "api_debug_migrate_listings",
       "methods": [
