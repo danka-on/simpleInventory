@@ -5653,6 +5653,19 @@
       "defaults": null,
       "strict_slashes": true,
       "subdomain": ""
+    },
+    {
+      "rule": "/api/warehouse/written-notes/<kind>/<int:note_id>/translation",
+      "endpoint": "warehouse_written_note_translation",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
     }
   ],
   "hooks": {

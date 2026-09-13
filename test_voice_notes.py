@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 from flask import Flask
 import requests
-from voice_note_routes import register, VoiceError
+from voice_note_routes import register, VoiceError, LITHUANIAN_AUDIO_HINT
 
 
 class VoiceNoteTests(unittest.TestCase):
@@ -178,6 +178,133 @@ class VoiceNoteTests(unittest.TestCase):
 
     def test_cross_site_post_rejected(self):
         self.assertEqual(self.client.post(self.url, headers={'Sec-Fetch-Site': 'cross-site'}).status_code, 403)
+        self.post.assert_not_called()
+
+    def test_vocabulary_and_quantity_guidance_reach_providers(self):
+        self.client.post(self.url)
+        speech, translation = self.post.call_args_list
+        self.assertEqual(speech.kwargs['data']['prompt'], LITHUANIAN_AUDIO_HINT)
+        for word in ('Trūksta', 'šaukšto', 'lėkštės', 'puodelio', 'Didelis', 'mažas', 'Yra tik trys'):
+            self.assertIn(word, speech.kwargs['data']['prompt'])
+        guidance = translation.kwargs['json']['system']
+        for phrase in ('truksta', 'ira tik', 'there are only three', 'N missing', 'Do not blindly replace rust'):
+            self.assertIn(phrase, guidance)
+
+    def test_manual_reanalysis_uses_audio_again(self):
+        self.client.post(self.url)
+        self.post.side_effect = [self.response({'text':'Yra tik trys.'}),
+            self.response({'stop_reason':'end_turn', 'content':[{'type':'text','text':'There are only three.'}]})]
+        result = self.client.post(self.url, json={'reanalyze':True})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.json['analysis']['lithuanian'], 'Yra tik trys.')
+        self.assertEqual(self.post.call_count, 4)
+
+    def test_failed_reanalysis_preserves_previous_result(self):
+        original = self.client.post(self.url).json['analysis']
+        self.post.side_effect = requests.Timeout('secret')
+        self.assertEqual(self.client.post(self.url, json={'reanalyze':True}).status_code, 502)
+        saved = self.client.get(self.url).json['analysis']
+        self.assertEqual(saved['english'], original['english'])
+        self.assertEqual(saved['lithuanian'], original['lithuanian'])
+        self.assertNotIn('secret', saved['error'])
+
+    def test_invalid_reanalysis_flag_rejected(self):
+        self.assertEqual(self.client.post(self.url, json={'reanalyze':'false'}).status_code, 400)
+        self.post.assert_not_called()
+
+
+class WrittenNoteTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        app = Flask(__name__, static_folder=str(self.root/'static'))
+        self.voice = register(app, self.root)
+        self.client = app.test_client()
+        with closing(sqlite3.connect(self.root/'bol.db')) as conn:
+            conn.executescript('''CREATE TABLE items_prep_notes (id INTEGER PRIMARY KEY,upc TEXT,note TEXT);
+                INSERT INTO items_prep_notes VALUES (1,'123-1','ira tik trys mazi saukstai');
+                INSERT INTO items_prep_notes VALUES (2,'123-2','truksta dideles lekstes');
+                CREATE TABLE items_prep_status (id INTEGER PRIMARY KEY,upc TEXT,note TEXT,reason TEXT);
+                INSERT INTO items_prep_status VALUES (1,'123-1','ira tik 7 puodeliai','truksta lekstes');''')
+        with closing(sqlite3.connect(self.root/'searchRack.db')) as conn:
+            conn.executescript('''CREATE TABLE SEARCHRACK (ID INTEGER PRIMARY KEY,BARCODE TEXT,WAREHOUSE_NOTE TEXT);
+                INSERT INTO SEARCHRACK VALUES (1,'123-1','There is rust on the spoon.');''')
+        self.env = patch.dict(os.environ, {'ANTHROPIC_API_KEY':'test-claude','OPENAI_API_KEY':''})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.network = patch('voice_note_routes.requests.post', return_value=VoiceNoteTests.response({
+            'stop_reason':'end_turn','content':[{'type':'text','text':'There are only three small spoons.'}]}))
+        self.post = self.network.start()
+        self.addCleanup(self.network.stop)
+        self.url = '/api/warehouse/written-notes/prep-note/1/translation'
+
+    def test_manual_translation_preserves_source_and_cached_reload(self):
+        self.assertEqual(self.client.get(self.url).json['translation']['status'], 'pending')
+        self.post.assert_not_called()
+        body = {'original':'ira tik trys mazi saukstai'}
+        response = self.client.post(self.url, json=body)
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['translation']['original'], body['original'])
+        self.assertEqual(response.json['translation']['english'], 'There are only three small spoons.')
+        self.assertEqual(self.client.get(self.url).json, response.json)
+        self.assertEqual(self.client.post(self.url, json=body).json, response.json)
+        self.assertEqual(self.post.call_count, 1)
+        self.assertIn('anthropic.com', self.post.call_args.args[0])
+        guidance = self.post.call_args.kwargs['json']['system']
+        self.assertIn('assume Lithuanian', guidance)
+        self.assertIn('already English, return it unchanged', guidance)
+        self.assertNotIn('mishears', guidance)
+        with closing(sqlite3.connect(self.root/'bol.db')) as conn:
+            self.assertEqual(conn.execute('SELECT note FROM items_prep_notes WHERE id=1').fetchone()[0], body['original'])
+
+    def test_all_written_sources_and_ids_stay_separate(self):
+        for kind, text in [('prep-reason','truksta lekstes'),('prep-status-note','ira tik 7 puodeliai'),
+                           ('warehouse','There is rust on the spoon.')]:
+            url = f'/api/warehouse/written-notes/{kind}/1/translation'
+            self.assertEqual(self.client.post(url,json={'original':text}).status_code,200)
+        self.assertEqual(self.client.get(self.url).json['translation']['english'], '')
+        self.assertEqual(self.client.get(self.url.replace('/1/','/2/')).json['translation']['english'], '')
+
+    def test_stale_browser_text_and_changed_database_are_rejected(self):
+        self.assertEqual(self.client.post(self.url,json={'original':'old note'}).status_code,409)
+        self.post.assert_not_called()
+        self.client.post(self.url,json={'original':'ira tik trys mazi saukstai'})
+        with closing(sqlite3.connect(self.root/'bol.db')) as conn:
+            conn.execute("UPDATE items_prep_notes SET note='ira tik 5' WHERE id=1")
+            conn.commit()
+        self.assertEqual(self.client.get(self.url).json['translation']['english'], '')
+
+    def test_edit_during_translation_cannot_save_old_result(self):
+        def edit(*args, **kwargs):
+            with closing(sqlite3.connect(self.root/'bol.db')) as conn:
+                conn.execute("UPDATE items_prep_notes SET note='truksta puodelio' WHERE id=1")
+                conn.commit()
+            return 'Wrong old result'
+        with patch.object(self.voice,'translate',side_effect=edit):
+            response = self.client.post(self.url,json={'original':'ira tik trys mazi saukstai'})
+        self.assertEqual(response.status_code,409)
+        self.assertEqual(self.client.get(self.url).json['translation']['english'],'')
+
+    def test_concurrent_translation_and_provider_failure_retry(self):
+        def nested(*args, **kwargs):
+            self.assertEqual(self.client.post(self.url,json={'original':args[0]}).status_code,409)
+            raise requests.Timeout('secret')
+        with patch.object(self.voice,'translate',side_effect=nested):
+            response = self.client.post(self.url,json={'original':'ira tik trys mazi saukstai'})
+        self.assertEqual(response.status_code,502)
+        self.assertNotIn('secret',response.get_data(as_text=True))
+        self.assertEqual(self.client.post(self.url,json={'original':'ira tik trys mazi saukstai'}).status_code,200)
+
+    def test_unknown_missing_empty_and_invalid_request_rejected(self):
+        self.assertEqual(self.client.get(self.url.replace('prep-note','secret')).status_code,400)
+        self.assertEqual(self.client.get(self.url.replace('/1/','/99/')).status_code,404)
+        self.assertEqual(self.client.post(self.url,json=[]).status_code,400)
+        self.assertEqual(self.client.post(self.url,json={'original':'x'},headers={'Sec-Fetch-Site':'cross-site'}).status_code,403)
+        with closing(sqlite3.connect(self.root/'bol.db')) as conn:
+            conn.execute("UPDATE items_prep_notes SET note='' WHERE id=1")
+            conn.commit()
+        self.assertEqual(self.client.get(self.url).status_code,404)
         self.post.assert_not_called()
 
 

@@ -1648,7 +1648,7 @@ function renderResults(results){
     const itemPrepSummary = r.item_prep_summary || {};
     const hasItemPrep = dbRaw === 'searchRack' && String(barcodeRaw || '').includes('-') && !!itemPrepSummary.has_content;
     const warehouseNoteButton = warehouseNoteText
-        ? `<button type="button" class="warehouse-note-open" data-note="${esc(warehouseNoteText)}" data-barcode="${barcodeRawEsc}" style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:7px;padding:5px 8px;font-weight:700;cursor:pointer;">Warehouse Note</button>`
+        ? `<button type="button" class="warehouse-note-open" data-note-id="${dbRaw === 'searchRack' ? esc(String(r.id)) : ''}" data-note="${esc(warehouseNoteText)}" data-barcode="${barcodeRawEsc}" style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;border-radius:7px;padding:5px 8px;font-weight:700;cursor:pointer;">Warehouse Note</button>`
         : '';
     const itemPrepButton = hasItemPrep
         ? `<button type="button" class="item-prep-open" data-barcode="${barcodeRawEsc}" style="border:1px solid #7c3aed;background:#f5f3ff;color:#5b21b6;border-radius:7px;padding:5px 8px;font-weight:700;cursor:pointer;">Item Prep</button>`
@@ -1890,7 +1890,7 @@ function renderResults(results){
     }));
     document.querySelectorAll('.warehouse-note-open').forEach(el=> el.addEventListener('click', (e)=>{
         e.preventDefault();
-        showWarehouseNoteModal(el.getAttribute('data-note') || '', el.getAttribute('data-barcode') || '');
+        showWarehouseNoteModal(el.getAttribute('data-note') || '', el.getAttribute('data-barcode') || '', el.getAttribute('data-note-id'));
     }));
     document.querySelectorAll('.item-prep-open').forEach(el=> el.addEventListener('click', (e)=>{
         e.preventDefault();
@@ -2322,8 +2322,9 @@ function onViewLotDetails(e){
 
 function showViewModal(html){ document.getElementById('viewContent').innerHTML = html; const m=document.getElementById('viewModal'); m.style.display='flex'; }
 
-function showWarehouseNoteModal(note, barcode){
-    showViewModal(`<div style="min-width:min(520px,82vw);"><h3 style="margin-top:0;">Warehouse Note</h3><div class="small-muted" style="margin-bottom:10px;">${esc(formatUpcDisplay(barcode || ''))}</div><div style="white-space:pre-wrap;text-align:left;line-height:1.55;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;color:#78350f;">${esc(note || '')}</div></div>`);
+function showWarehouseNoteModal(note, barcode, noteId){
+    showViewModal(`<div style="min-width:min(520px,82vw);"><h3 style="margin-top:0;">Warehouse Note</h3><div class="small-muted" style="margin-bottom:10px;">${esc(formatUpcDisplay(barcode || ''))}</div><div style="white-space:pre-wrap;text-align:left;line-height:1.55;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:14px;color:#78350f;">${esc(note || '')}${WarehouseVoiceNotes.renderWritten('warehouse', noteId, note)}</div></div>`);
+    WarehouseVoiceNotes.hydrate(document.getElementById('viewContent'));
 }
 
 function renderSuffixedItemPrepContext(data){
@@ -2340,12 +2341,12 @@ function renderSuffixedItemPrepContext(data){
         const label = String(entry.status || '').trim();
         textBlocks.push(`<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:9px;padding:10px;text-align:left;">
             ${label ? `<div style="font-size:.78rem;font-weight:800;text-transform:uppercase;color:#9a3412;margin-bottom:5px;">${esc(label)}</div>` : ''}
-            ${reason ? `<div><strong>Reason:</strong> ${esc(reason)}</div>` : ''}
-            ${note ? `<div style="white-space:pre-wrap;margin-top:${reason ? '6px' : '0'};">${esc(note)}</div>` : ''}
+            ${reason ? `<div><strong>Reason:</strong> ${esc(reason)}${WarehouseVoiceNotes.renderWritten('prep-reason', entry.id, reason)}</div>` : ''}
+            ${note ? `<div style="white-space:pre-wrap;margin-top:${reason ? '6px' : '0'};">${esc(note)}${WarehouseVoiceNotes.renderWritten('prep-status-note', entry.id, note)}</div>` : ''}
         </div>`);
     });
     notes.forEach(note => {
-        textBlocks.push(`<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:9px;padding:10px;text-align:left;white-space:pre-wrap;">${esc(note.note || '')}</div>`);
+        textBlocks.push(`<div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:9px;padding:10px;text-align:left;white-space:pre-wrap;">${esc(note.note || '')}${WarehouseVoiceNotes.renderWritten('prep-note', note.id, note.note)}</div>`);
     });
 
     const imageHtml = images.map(image => {
@@ -5294,7 +5295,7 @@ document.querySelectorAll('.modal').forEach(modal => {
 
 </script>
 <script src="/static/location-preview.js?v=20260317a"></script>
-<script src="/static/warehouse-voice-notes.js?v=20260913a"></script>
+<script src="/static/warehouse-voice-notes.js?v=20260913b"></script>
 <script src="/static/i18n.js"></script>
 </body>
 </html>
