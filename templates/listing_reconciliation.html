@@ -64,6 +64,8 @@
         .btn.primary:hover{filter:brightness(1.07);color:#fff}
         .btn.link{background:var(--c-ok);border-color:var(--c-ok);color:#fff}
         .btn.link:hover{filter:brightness(1.07);color:#fff}
+        .btn.success{background:var(--c-ok);border-color:var(--c-ok);color:#fff}
+        .btn.success:hover{filter:brightness(1.07);color:#fff}
         .btn.quiet{border-color:transparent;background:transparent;color:var(--r-muted)}
         .btn.quiet:hover{background:var(--r-panel2);color:var(--r-ink)}
         .btn.danger{color:var(--c-out)}
@@ -259,7 +261,6 @@
                 <button type="button" class="tab" role="tab" data-tab="needs_matching" aria-selected="true"><span class="n">0</span><span class="l">Needs matching</span></button>
                 <button type="button" class="tab" role="tab" data-tab="out_of_stock" aria-selected="false"><span class="n">0</span><span class="l">Out of stock</span></button>
                 <button type="button" class="tab" role="tab" data-tab="short_stock" aria-selected="false"><span class="n">0</span><span class="l">Not enough stock</span></button>
-                <button type="button" class="tab" role="tab" data-tab="in_stock" aria-selected="false"><span class="n">0</span><span class="l">Enough stock</span></button>
                 <button type="button" class="tab" role="tab" data-tab="unlisted" aria-selected="false"><span class="n">0</span><span class="l">Warehouse without listings</span></button>
                 <button type="button" class="tab" role="tab" data-tab="reviewed" aria-selected="false"><span class="n">0</span><span class="l">Reviewed</span></button>
                 <button type="button" class="tab" role="tab" data-tab="all" aria-selected="false"><span class="n">0</span><span class="l">All active listings</span></button>
@@ -315,7 +316,7 @@ const NOTES = {
     out_of_stock:'No available units. Check the shelf before changing the store listing; receiving history alone does not prove a sale.',
     short_stock:'Some stock is available, but fewer units than the listing offers.',
     in_stock:'Matched stock covers the listed quantity after pending sales.',
-    unlisted:'Stocked items with no active eBay, Amazon or Facebook listing. Unconfirmed suggestions do not count as a listing.',
+    unlisted:'Stocked items with no active eBay, Amazon (merchant or FBA) or Facebook listing. Unconfirmed suggestions do not count as a listing.',
     reviewed:'Issues you marked reviewed. A stock or quantity change can bring one back. Reviewing changes nothing in the warehouse or the stores.'
 };
 const state = {data:null, tab:'needs_matching', store:'', query:'', brand:'', shown:PAGE_SIZE, busy:false, selected:new Map()};
@@ -466,23 +467,19 @@ function actionButtons(l){
     } else if (l.store==='warehouse') {
         buttons.push(`<a class="btn sm primary" href="/listingagent?upc=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">Create listing</a>`);
         buttons.push(`<a class="btn sm" href="/unified-search?q=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">View warehouse item</a>`);
-        buttons.push('<button type="button" class="btn sm quiet" data-action="handled">Mark reviewed</button>');
+        buttons.push('<button type="button" class="btn sm success" data-action="handled">✓ Mark reviewed</button>');
     } else {
         buttons.push(`<a class="btn sm${l.state === 'accounted' ? '' : ' primary'}" href="${esc(finderUrl(l))}">Find in warehouse</a>`);
-        if (state.data?.claude_search_available && l.state !== 'accounted') buttons.push(`<button type="button" class="btn sm" data-action="search_warehouse">${l.ai_search ? 'View cached Claude search' : 'Search whole warehouse with Claude'}</button>`);
         if (l.link) buttons.push('<button type="button" class="btn sm danger" data-action="unlink">Unlink</button>');
-        if (stockStatus(l) !== 'in_stock') buttons.push('<button type="button" class="btn sm quiet" data-action="handled">Mark reviewed</button>');
+        if (stockStatus(l) !== 'in_stock') buttons.push('<button type="button" class="btn sm success" data-action="handled">✓ Mark reviewed</button>');
     }
     if (l.url) buttons.push(`<a class="btn sm quiet" href="${esc(l.url)}" target="_blank" rel="noopener">Open listing ↗</a>`);
     return `<div class="row-actions">${buttons.join('')}</div>`;
 }
 
 function aiNote(l){
-    if (!state.data?.claude_search_available) return '';
-    if (l.ai_search) {
-        return `<div class="why ai-note">Claude searched ${l.ai_search.catalog_rows.toLocaleString()} stocked rows. ${l.ai_search.match_count ? 'Suggestions require your confirmation.' : 'No suitable match found; existing suggestions remain.'} Saved result · original search ≈$${Number(l.ai_search.estimated_cost_usd).toFixed(3)}.</div>`;
-    }
-    return `<div class="why ai-note">Claude can search all ${(state.data.claude_catalog?.rows || 0).toLocaleString()} stocked rows and saved names · about $${Number(state.data.claude_catalog?.estimated_usd_low || 0).toFixed(2)}–$${Number(state.data.claude_catalog?.estimated_usd_high || 0).toFixed(2)} per new search · text only, results cached.</div>`;
+    if (!state.data?.claude_search_available || !l.ai_search) return '';
+    return `<div class="why ai-note">Claude searched ${l.ai_search.catalog_rows.toLocaleString()} stocked rows. ${l.ai_search.match_count ? 'Suggestions require your confirmation.' : 'No suitable match found; existing suggestions remain.'} Saved result · original search ≈$${Number(l.ai_search.estimated_cost_usd).toFixed(3)}.</div>`;
 }
 
 function renderListing(l){
