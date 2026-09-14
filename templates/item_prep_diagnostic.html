@@ -557,7 +557,7 @@ async function printSubmittedSuffixLabel(upc, description){
       <label style="font-weight:700;font-size:1.3rem;margin-top:16px">Notes:</label>
       <div id="notesContainer" style="display:flex;flex-direction:column;gap:8px;margin:8px 0;max-height:240px;overflow-y:auto"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-        <input type="text" id="newNoteInput" placeholder="Add a note..." style="flex:1;padding:18px;border:1px solid #ddd;border-radius:8px;font-size:1.1rem;height:60px">
+        <textarea id="newNoteInput" rows="1" placeholder="Add a note..." style="flex:1;padding:18px;border:1px solid #ddd;border-radius:8px;font-size:1.1rem;min-height:60px;box-sizing:border-box;resize:none;overflow:hidden;font-family:inherit;line-height:1.35"></textarea>
         <button type="button" id="addNoteBtn" class="btn btn-primary" style="padding:18px 22px;font-size:1.1rem">+ Add</button>
       </div>
 
@@ -611,6 +611,7 @@ async function printSubmittedSuffixLabel(upc, description){
     <div class="loading-spinner-large"></div>
   </div>
 
+  <script src="/static/media-capture.js?v=20260914c"></script>
   <script>
   // Loading overlay helpers
   function showPageLoading() {
@@ -678,6 +679,7 @@ async function printSubmittedSuffixLabel(upc, description){
     let diagVoiceSavedItem = null;
     let diagVoicePointerId = null;
     let diagVoiceMimeType = '';
+    let diagVoiceTranscription = null;
     const captureStatusDefaultText = 'Videos are compressed before saving for faster uploads and smaller files.';
 
     function parseReasonSelection(rawValue){
@@ -1027,6 +1029,45 @@ async function printSubmittedSuffixLabel(upc, description){
       diagVoicePendingFile = file;
       diagVoicePendingUrl = URL.createObjectURL(file);
       renderVoiceNotePlayer();
+      transcribeDiagVoiceNote(file);
+    }
+
+    // Voice notes are Lithuanian: transcribe and translate straight away and put both texts
+    // in the note box, which Done saves. The recording itself is still saved as well.
+    function transcribeDiagVoiceNote(file){
+      if(!file || !window.MediaCapture) return;
+      setVoiceHint('Transcribing and translating…');
+      const job = window.MediaCapture.transcribeVoiceNote(file).then(result=>{
+        if(diagVoicePendingFile !== file) return;
+        const text = window.MediaCapture.formatVoiceNote(result);
+        const input = document.getElementById('newNoteInput');
+        if(text && input){
+          const existing = String(input.value || '').trim();
+          input.value = existing ? `${existing} | ${text}` : text;
+          fitDiagNoteInput();
+        }
+        if(result.warning){
+          setVoiceHint('Lithuanian added to the note. ' + result.warning, true);
+        } else {
+          setVoiceHint('Voice note added to the note in Lithuanian and English. Tap Done to save.');
+        }
+      }).catch(err=>{
+        if(diagVoicePendingFile === file){
+          setVoiceHint((err && err.message) || 'Transcription failed. The recording is still attached.', true);
+        }
+      }).finally(()=>{
+        if(diagVoiceTranscription === job) diagVoiceTranscription = null;
+      });
+      diagVoiceTranscription = job;
+    }
+
+    // The note box grows with its text so a Lithuanian + English note stays readable.
+    function fitDiagNoteInput(){
+      const input = document.getElementById('newNoteInput');
+      if(!input || input.tagName !== 'TEXTAREA') return;
+      input.style.height = 'auto';
+      if(!input.offsetParent) return;
+      input.style.height = (input.scrollHeight + input.offsetHeight - input.clientHeight) + 'px';
     }
 
     function stopDiagVoiceStream(){
@@ -1338,7 +1379,30 @@ async function printSubmittedSuffixLabel(upc, description){
     function blobToImage(blob){ return new Promise((resolve)=>{ const url=URL.createObjectURL(blob); const img=new Image(); img.onload=()=>{ URL.revokeObjectURL(url); resolve(img); }; img.src=url; }); }
 
     if(takePhotoBtn && capturePhotoInput){
-      takePhotoBtn.addEventListener('click', ()=> capturePhotoInput.click());
+      // Take Photo opens the same photo step as receiving: several photos, the first is the
+      // thumbnail, drag or star to reorder. The plain camera input stays as a fallback.
+      takePhotoBtn.addEventListener('click', async ()=>{
+        if(!window.MediaCapture){
+          capturePhotoInput.click();
+          return;
+        }
+        const result = await window.MediaCapture.pickPhotos({
+          heading: 'Add photos',
+          detail: '{{ upc }}',
+          thumbnail: true,
+          allowSkip: false
+        });
+        if(result.action !== 'save') return;
+        // Thumbs are shown and saved newest first, so add the chosen order in reverse:
+        // the thumbnail ends up on top here and first in the item's photos.
+        const stamp = Date.now();
+        result.photos.slice().reverse().forEach((photo, offset)=>{
+          const file = window.MediaCapture.photoFile(photo, `capture_${stamp}_${result.photos.length - offset}`);
+          const entry = {id: uid(), file, quality: ''};
+          capturedFiles.push(entry);
+          makeThumb(entry, 'captured');
+        });
+      });
       capturePhotoInput.addEventListener('change', ()=>{
         const files = Array.from(capturePhotoInput.files || []);
         files.forEach(file => {
@@ -1414,6 +1478,7 @@ async function printSubmittedSuffixLabel(upc, description){
             recordNoteBtn.setPointerCapture(e.pointerId);
           }
         }catch(_){}
+        if(window.MediaCapture) window.MediaCapture.playSound('mic-on');
         const started = await (async ()=>{
           if(diagVoiceRecorder) return true;
           if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)){
@@ -1469,23 +1534,17 @@ async function printSubmittedSuffixLabel(upc, description){
       });
     }
 
-    document.addEventListener('pointerup', async (e)=>{
+    function stopDiagVoiceRecording(e){
       if(diagVoicePointerId === null || e.pointerId !== diagVoicePointerId) return;
       diagVoicePointerId = null;
       if(recordNoteBtn) recordNoteBtn.classList.remove('recording');
       if(diagVoiceRecorder && diagVoiceRecorder.state !== 'inactive'){
         diagVoiceRecorder.stop();
+        setTimeout(()=>{ if(window.MediaCapture) window.MediaCapture.playSound('mic-off'); }, 120);
       }
-    });
-
-    document.addEventListener('pointercancel', async (e)=>{
-      if(diagVoicePointerId === null || e.pointerId !== diagVoicePointerId) return;
-      diagVoicePointerId = null;
-      if(recordNoteBtn) recordNoteBtn.classList.remove('recording');
-      if(diagVoiceRecorder && diagVoiceRecorder.state !== 'inactive'){
-        diagVoiceRecorder.stop();
-      }
-    });
+    }
+    document.addEventListener('pointerup', stopDiagVoiceRecording);
+    document.addEventListener('pointercancel', stopDiagVoiceRecording);
 
     if(diagVoiceFallbackInput){
       diagVoiceFallbackInput.addEventListener('change', ()=>{
@@ -1537,6 +1596,11 @@ async function printSubmittedSuffixLabel(upc, description){
       // Show loading overlay
       showPageLoading();
       
+      // A voice note still being transcribed adds its text to the note box first.
+      if(diagVoiceTranscription){
+        await Promise.race([diagVoiceTranscription, new Promise(resolve => setTimeout(resolve, 30000))]);
+      }
+
       // Auto-save note if there's text in the note input field (simulate clicking +Add)
       const noteInput = document.getElementById('newNoteInput');
       const noteText = (noteInput.value || '').trim();
@@ -2264,6 +2328,7 @@ async function printSubmittedSuffixLabel(upc, description){
         const j = await res.json();
         if(j.success){
           input.value = '';
+          fitDiagNoteInput();
           await loadNotes();
         } else {
           alert('Failed to add note: ' + (j.error || 'unknown'));
@@ -2295,6 +2360,7 @@ async function printSubmittedSuffixLabel(upc, description){
     }
 
     document.getElementById('addNoteBtn').addEventListener('click', addNote);
+    document.getElementById('newNoteInput').addEventListener('input', fitDiagNoteInput);
     document.getElementById('newNoteInput').addEventListener('keydown', (e)=>{
       if(e.key === 'Enter'){ e.preventDefault(); addNote(); }
     });

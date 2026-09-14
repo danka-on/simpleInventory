@@ -136,3 +136,33 @@ any number of photos, shrunk to 1600 px in the browser. The first tile is marked
 **Save** stores the first as the thumbnail (`/api/items-prep/temp-item`) and all of
 them, in order, as prep photos (`/api/items_prep/diagnostic/<upc>/photos`); **Skip**
 adds the item without photos. Closing the prompt at either step does not add the item.
+
+## Item Prep voice notes and photos (2026-09-14)
+
+`static/media-capture.js` holds what receiving and Item Prep share: the tones, the photo
+tiles (first is the thumbnail, drag or star to reorder) and a stand-alone photo step,
+`MediaCapture.pickPhotos()`. Receiving's photo step uses the same tiles.
+
+When a voice note is recorded on `/item-prep` or on the BAD/RETURN diagnostic page, the
+clip is sent to `POST /api/warehouse/voice-notes/transcribe` right away. It is
+transcribed exactly like the warehouse voice notes (Whisper, `language=lt`, the
+Lithuanian spelling hint) and translated by Claude with the same glossary. The note field
+gets `LT: <transcript> | EN: <translation>`, appended to anything already typed; a failed
+translation still adds the Lithuanian and shows the warning. The recording is still saved
+as before. GOOD, BAD and Done wait up to 30 s for a transcription in flight, so its text
+is saved with the note. Both note fields wrap and grow.
+
+Photos use the stand-alone step:
+
+- **Add Photo** on Item Prep (pending photos show with the thumbnail marked; tapping one
+  reopens the step).
+- **GOOD** on an item whose lookup has no picture opens the step first. **Skip photos**
+  still marks GOOD; closing the step cancels GOOD. After GOOD, the first photo is set as
+  the item picture through `/api/items_prep/set_display_image`, which now clears the
+  cache so the next lookup shows it. Items that already have a picture keep it.
+- **Take Photo** on the diagnostic page.
+
+Prep photos are listed newest first, so the thumbnail is uploaded last: Item Prep
+uploads one photo at a time in reverse order, and the diagnostic page adds them to its
+capture list reversed. Both photo-save endpoints now add the file index to saved file
+names; before, two photos saved in the same millisecond overwrote each other.

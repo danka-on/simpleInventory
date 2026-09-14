@@ -29,7 +29,7 @@ function fakeMicrophone() {
  Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>new MediaStream()}});
  window.__recorders=[];
  window.__sounds=[];
- document.addEventListener('warehouse-identity:sound',event=>window.__sounds.push(event.detail));
+ document.addEventListener('media-capture:sound',event=>window.__sounds.push(event.detail));
  window.MediaRecorder=class {
   constructor(stream,options) { this.mimeType=(options&&options.mimeType)||'audio/webm'; this.state='inactive'; window.__recorders.push(this); }
   static isTypeSupported(type) { return type.startsWith('audio/webm'); }

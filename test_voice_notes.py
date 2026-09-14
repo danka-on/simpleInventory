@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from flask import Flask
 import requests
-from voice_note_routes import register, VoiceError, LITHUANIAN_AUDIO_HINT
+from voice_note_routes import register, VoiceError, VoiceNotes, LITHUANIAN_AUDIO_HINT
 
 
 class VoiceNoteTests(unittest.TestCase):
@@ -405,6 +405,99 @@ class NameDictationTests(unittest.TestCase):
         self.post.reset_mock()
         self.assertEqual(self.dictate(kind='essay').status_code, 400)
         self.post.assert_not_called()
+
+
+class VoiceClipTests(unittest.TestCase):
+    """Item Prep voice notes: Lithuanian transcript and English translation before saving."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / 'static').mkdir()
+        app = Flask(__name__, static_folder=str(root / 'static'))
+        register(app, root)
+        self.client = app.test_client()
+        env = patch.dict(os.environ, {'OPENAI_API_KEY': 'test-openai', 'ANTHROPIC_API_KEY': 'test-claude'})
+        env.start()
+        self.addCleanup(env.stop)
+        network = patch('voice_note_routes.requests.post')
+        self.post = network.start()
+        self.addCleanup(network.stop)
+        self.transcript = VoiceNoteTests.response({'text': 'Trūksta dviejų šaukštų.'})
+        self.translation = VoiceNoteTests.response({'stop_reason': 'end_turn', 'content': [
+            {'type': 'text', 'text': 'Two spoons are missing.'}]})
+
+    def send(self, filename='prep_voice_1.m4a', audio=b'lithuanian audio', headers=None):
+        return self.client.post('/api/warehouse/voice-notes/transcribe', headers=headers or {},
+                                data={'audio': (io.BytesIO(audio), filename)},
+                                content_type='multipart/form-data')
+
+    def test_returns_lithuanian_and_english(self):
+        self.post.side_effect = [self.transcript, self.translation]
+        response = self.send()
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual((response.json['lithuanian'], response.json['english'], response.json['warning']),
+                         ('Trūksta dviejų šaukštų.', 'Two spoons are missing.', ''))
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        first, second = self.post.call_args_list
+        self.assertEqual(first.kwargs['data']['model'], 'whisper-1')
+        self.assertEqual(first.kwargs['data']['language'], 'lt')
+        self.assertEqual(first.kwargs['files']['file'][:2], ('voice-note.m4a', b'lithuanian audio'))
+        self.assertEqual(second.kwargs['json']['messages'][0]['content'], 'Trūksta dviejų šaukštų.')
+
+    def test_failed_translation_still_returns_the_lithuanian(self):
+        self.post.side_effect = [self.transcript, requests.Timeout('secret token')]
+        response = self.send()
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['lithuanian'], 'Trūksta dviejų šaukštų.')
+        self.assertEqual(response.json['english'], '')
+        self.assertTrue(response.json['warning'])
+        self.assertNotIn('secret', response.get_data(as_text=True))
+
+    def test_missing_translation_key_warns_without_calling_claude(self):
+        self.post.return_value = self.transcript
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': ''}):
+            response = self.send()
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertIn('ANTHROPIC_API_KEY', response.json['warning'])
+        self.assertEqual(self.post.call_count, 1)
+
+    def test_bad_requests_fail_before_network(self):
+        self.assertEqual(self.send(filename='note.txt').status_code, 415)
+        self.assertEqual(self.send(audio=b'').status_code, 413)
+        self.assertEqual(self.client.post('/api/warehouse/voice-notes/transcribe').status_code, 400)
+        self.assertEqual(self.send(headers={'Sec-Fetch-Site': 'cross-site'}).status_code, 403)
+        with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
+            response = self.send()
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('OPENAI_API_KEY', response.json['error'])
+        self.post.assert_not_called()
+
+    def test_english_speech_is_returned_unchanged_not_explained(self):
+        spoken = 'Lenox wine glasses, set of four, clear.'
+        self.post.side_effect = [VoiceNoteTests.response({'text': spoken}),
+                                 VoiceNoteTests.response({'stop_reason': 'end_turn', 'content': [
+                                     {'type': 'text', 'text': spoken}]})]
+        response = self.send()
+        self.assertEqual((response.json['lithuanian'], response.json['english']), (spoken, spoken))
+        self.assertIn('already English, return it unchanged', self.post.call_args_list[1].kwargs['json']['system'])
+
+    def test_a_closing_note_about_the_language_is_dropped(self):
+        spoken = 'Lenox wine glasses, set of four, clear.'
+        noted = spoken + chr(10) * 2 + '(This is already in English, so it is returned unchanged.)'
+        self.post.side_effect = [VoiceNoteTests.response({'text': spoken}),
+                                 VoiceNoteTests.response({'stop_reason': 'end_turn', 'content': [
+                                     {'type': 'text', 'text': noted}]})]
+        self.assertEqual(self.send().json['english'], spoken)
+        kept = 'Two spoons are missing.' + chr(10) + '(Box corner crushed.)'
+        self.assertEqual(VoiceNotes.drop_language_note(kept), kept)
+
+    def test_unreachable_speech_service_reports_without_details(self):
+        self.post.side_effect = requests.ConnectionError('secret token')
+        response = self.send()
+        self.assertEqual(response.status_code, 504)
+        self.assertNotIn('secret', response.get_data(as_text=True))
 
 
 if __name__ == '__main__':

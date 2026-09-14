@@ -5734,6 +5734,17 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/warehouse/voice-notes/transcribe",
+      "endpoint": "warehouse_voice_note_transcribe",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/warehouse/voice-notes/<int:media_id>/analysis",
       "endpoint": "warehouse_voice_note_analysis",
       "methods": [

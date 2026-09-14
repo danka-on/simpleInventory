@@ -88,7 +88,8 @@ def api_items_prep_diagnostic():
                         continue
                     fn = secure_filename(f.filename)
                     name, ext = os.path.splitext(fn)
-                    unique = f"{ss_normalization._normalize_upc(upc)}_{int(time.time()*1000)}{ext or '.jpg'}"
+                    # The index keeps photos saved within the same millisecond from overwriting each other.
+                    unique = f"{ss_normalization._normalize_upc(upc)}_{int(time.time()*1000)}_{idx}{ext or '.jpg'}"
                     path = os.path.join(save_dir, unique)
                     try:
                         f.save(path)
@@ -846,7 +847,8 @@ def api_items_prep_diagnostic_add_photos(upc):
                 continue
             fn = secure_filename(f.filename)
             name, ext = os.path.splitext(fn)
-            unique = f"{upc_n}_{int(time.time()*1000)}{ext or '.jpg'}"
+            # The index keeps photos saved within the same millisecond from overwriting each other.
+            unique = f"{upc_n}_{int(time.time()*1000)}_{idx}{ext or '.jpg'}"
             abs_path = os.path.join(save_dir, unique)
             try:
                 f.save(abs_path)
@@ -1024,6 +1026,8 @@ def api_items_prep_set_display_image():
         cur.execute('UPDATE bol_items SET image_url = ? WHERE id = ?', (image_url, target_id))
         updated = cur.rowcount
         conn.commit()
+        # /api/bol_lookup is cached per full query string; only a full clear shows the new picture.
+        ss_runtime.cache.clear()
 
         print(
             f'[SET DISPLAY IMAGE] Updated bol_items id={target_id} '

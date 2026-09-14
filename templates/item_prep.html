@@ -99,7 +99,11 @@
       display:block;
       width:100%;
       min-width:0;
-      height:38px;
+      min-height:38px;
+      box-sizing:border-box;
+      resize:none;
+      overflow:hidden;
+      line-height:1.35;
       padding:8px 12px;
       border:1px solid #e8d98a;
       border-radius:10px;
@@ -357,7 +361,7 @@
       #prepSummary{margin-top:6px !important;font-size:0.88rem}
       .note-wrap{margin-top:6px}
       .note-row{gap:6px}
-      .note-input{height:34px;padding:6px 10px;font-size:0.9rem}
+      .note-input{min-height:34px;padding:6px 10px;font-size:0.9rem}
       .btn-set-note{height:34px;padding:6px 10px;font-size:0.84rem;min-width:58px}
       .voice-note-btn{width:42px;min-width:42px;height:42px;border-radius:14px}
       .voice-note-recording-dot{right:8px;bottom:8px}
@@ -512,10 +516,10 @@
           <div class="thumb-stack">
             <div class="thumb-button-wrap">
               <div id="thumbLoadingOverlay" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
-              <label for="pendingPhotoInput" title="Add photo" class="thumb-photo-btn">
+              <button type="button" id="pendingPhotoBtn" title="Add photo" class="thumb-photo-btn">
                 <span class="icon" aria-hidden="true">📷</span>
                 <span>Add Photo</span>
-              </label>
+              </button>
             </div>
           </div>
           <!-- Existing good images: compact row below thumb -->
@@ -560,7 +564,7 @@
               <span class="voice-note-recording-dot"></span>
             </span>
           </button>
-          <input id="quickPrepNote" class="note-input" type="text" placeholder="Add note (optional)">
+          <textarea id="quickPrepNote" class="note-input" rows="1" placeholder="Add note (optional)"></textarea>
           <button type="button" class="btn btn-set-note" id="setNoteBtn">Set</button>
         </div>
         <div id="quickVoiceNoteStatus" class="voice-note-status">Press and hold the mic to record one voice note</div>
@@ -637,6 +641,7 @@
     </div>
   </div>
 
+  <script src="/static/media-capture.js?v=20260914c"></script>
   <script src="/static/prep-unmatched.js?v=20260913a"></script>
   <script>
     // Loading overlay helpers
@@ -797,6 +802,9 @@
     let quickVoiceNoteUrl = '';
     let quickVoicePointerId = null;
     let quickVoiceMimeType = '';
+    let quickVoiceTranscription = null;
+    let currentItemHasImage = true;
+    let currentItemImageUrl = '';
     let printerConfigState = null;
     let printerStatusState = null;
     let printerStatusPromise = null;
@@ -901,6 +909,56 @@
       quickVoiceNoteFile = file;
       quickVoiceNoteUrl = URL.createObjectURL(file);
       renderQuickVoiceNote();
+      transcribeQuickVoiceNote(file);
+    }
+
+    // Voice notes are Lithuanian: transcribe and translate straight away, and put both
+    // texts in the note field. The recording itself is still saved with the item.
+    function transcribeQuickVoiceNote(file){
+      if(!file || !window.MediaCapture) return;
+      const upcAtStart = currentUpc;
+      setQuickVoiceStatus('Transcribing and translating…');
+      const job = window.MediaCapture.transcribeVoiceNote(file).then(result=>{
+        if(quickVoiceNoteFile !== file || currentUpc !== upcAtStart) return;
+        const text = window.MediaCapture.formatVoiceNote(result);
+        if(text) appendQuickPrepNote(text);
+        if(result.warning){
+          setQuickVoiceStatus('Lithuanian added to the note. ' + result.warning, true);
+        } else {
+          setQuickVoiceStatus('Voice note added to the note in Lithuanian and English.');
+        }
+      }).catch(err=>{
+        if(quickVoiceNoteFile === file){
+          setQuickVoiceStatus((err && err.message) || 'Transcription failed. The recording is still attached.', true);
+        }
+      }).finally(()=>{
+        if(quickVoiceTranscription === job) quickVoiceTranscription = null;
+      });
+      quickVoiceTranscription = job;
+    }
+
+    // Actions wait for a transcription in flight so its text is saved with the note.
+    async function waitForQuickVoiceTranscription(){
+      const job = quickVoiceTranscription;
+      if(!job) return;
+      await Promise.race([job, new Promise(resolve => setTimeout(resolve, 30000))]);
+    }
+
+    function appendQuickPrepNote(text){
+      const el = document.getElementById('quickPrepNote');
+      if(!el) return;
+      const existing = String(el.value || '').trim();
+      el.value = existing ? `${existing} | ${text}` : text;
+      fitQuickPrepNote();
+    }
+
+    // The note grows with its text so a Lithuanian + English note stays readable.
+    function fitQuickPrepNote(){
+      const el = document.getElementById('quickPrepNote');
+      if(!el || el.tagName !== 'TEXTAREA') return;
+      el.style.height = 'auto';
+      if(!el.offsetParent) return;
+      el.style.height = (el.scrollHeight + el.offsetHeight - el.clientHeight) + 'px';
     }
 
     function hasQuickVoiceNote(){
@@ -963,6 +1021,7 @@
       if(!recorder) return;
       if(recorder.state !== 'inactive'){
         recorder.stop();
+        setTimeout(()=>{ if(window.MediaCapture) window.MediaCapture.playSound('mic-off'); }, 120);
       }
     }
 
@@ -1517,37 +1576,93 @@
       if(section) section.style.display = 'none';
     }
 
-    function addPendingPreview(file, type){
+    let pendingPreviewUrls = [];
+
+    // Pending photos in their saved order; the first is the thumbnail. Tapping one reopens the photo step.
+    function renderPendingPreviews(){
       const previews = document.getElementById('pendingMediaPreviews');
-      if(!previews) return;
       const section = document.getElementById('pendingMediaSection');
-      if(section) section.style.display = '';
-      const wrap = document.createElement('div');
-      wrap.style.cssText = 'position:relative;display:inline-block';
-      const captureIdx = (type === 'photo' ? pendingPhotos : pendingVideos).length - 1;
-      if(type === 'photo'){
-        const img = document.createElement('img');
-        img.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid #3498db';
-        img.src = URL.createObjectURL(file);
-        wrap.appendChild(img);
-      } else {
-        const vid = document.createElement('video');
-        vid.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid #8e44ad';
-        vid.src = URL.createObjectURL(file);
-        vid.muted = true;
-        wrap.appendChild(vid);
-      }
-      const rm = document.createElement('button');
-      rm.innerHTML = '&times;';
-      rm.style.cssText = 'position:absolute;top:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:#e74c3c;color:#fff;border:none;cursor:pointer;font-size:13px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;font-weight:700';
-      const arr = type === 'photo' ? pendingPhotos : pendingVideos;
-      rm.onclick = ()=>{
-        arr.splice(captureIdx, 1);
-        previews.removeChild(wrap);
-        if(!pendingPhotos.length && !pendingVideos.length && section) section.style.display = 'none';
+      if(!previews) return;
+      pendingPreviewUrls.forEach(url => { try{ URL.revokeObjectURL(url); }catch(_){} });
+      pendingPreviewUrls = [];
+      previews.textContent = '';
+      const addPreview = (file, type, index)=>{
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:relative;display:inline-block';
+        const url = URL.createObjectURL(file);
+        pendingPreviewUrls.push(url);
+        const media = document.createElement(type === 'photo' ? 'img' : 'video');
+        const border = type !== 'photo' ? '#8e44ad' : (index === 0 ? '#d97706' : '#3498db');
+        media.style.cssText = 'width:72px;height:72px;object-fit:cover;border-radius:8px;border:2px solid ' + border + (type === 'photo' ? ';cursor:pointer' : '');
+        media.src = url;
+        if(type === 'photo'){
+          media.alt = index === 0 ? 'Thumbnail photo' : 'Photo ' + (index + 1);
+          media.onclick = ()=>{ openPrepPhotoPicker().catch(err => console.error('Photo step failed:', err)); };
+        } else {
+          media.muted = true;
+        }
+        wrap.appendChild(media);
+        if(type === 'photo' && index === 0){
+          const badge = document.createElement('span');
+          badge.className = 'pending-thumbnail-badge';
+          badge.textContent = 'Thumbnail';
+          badge.style.cssText = 'position:absolute;left:2px;right:2px;bottom:2px;border-radius:0 0 6px 6px;background:rgba(217,119,6,.95);color:#fff;font-size:10px;font-weight:800;text-align:center;padding:1px 0;pointer-events:none';
+          wrap.appendChild(badge);
+        }
+        const rm = document.createElement('button');
+        rm.type = 'button';
+        rm.innerHTML = '&times;';
+        rm.setAttribute('aria-label', 'Remove');
+        rm.style.cssText = 'position:absolute;top:-5px;right:-5px;width:20px;height:20px;border-radius:50%;background:#e74c3c;color:#fff;border:none;cursor:pointer;font-size:13px;line-height:1;padding:0;display:flex;align-items:center;justify-content:center;font-weight:700';
+        rm.onclick = ()=>{
+          (type === 'photo' ? pendingPhotos : pendingVideos).splice(index, 1);
+          renderPendingPreviews();
+        };
+        wrap.appendChild(rm);
+        previews.appendChild(wrap);
       };
-      wrap.appendChild(rm);
-      previews.appendChild(wrap);
+      pendingPhotos.forEach((file, index) => addPreview(file, 'photo', index));
+      pendingVideos.forEach((file, index) => addPreview(file, 'video', index));
+      if(section) section.style.display = (pendingPhotos.length || pendingVideos.length) ? '' : 'none';
+    }
+
+    // The same photo step as receiving: take several photos, the first is the thumbnail,
+    // drag or star to reorder. Resolves 'save', 'skip' or 'close'.
+    async function openPrepPhotoPicker(options = {}){
+      const required = !!options.required;
+      if(!window.MediaCapture){
+        if(!required) document.getElementById('pendingPhotoInput').click();
+        return 'skip';
+      }
+      const title = typeof getCurrentItemTitle === 'function' ? getCurrentItemTitle() : '';
+      const result = await window.MediaCapture.pickPhotos({
+        heading: required ? 'This item needs a photo' : 'Add photos',
+        detail: [title, currentUpc].filter(Boolean).join(' · '),
+        reason: currentItemHasImage ? '' : 'No picture yet. The first photo becomes this item\'s picture.',
+        existingImage: currentItemHasImage ? currentItemImageUrl : '',
+        emptyHint: currentItemHasImage ? 'The first photo leads this item\'s photos; its picture stays.' : '',
+        thumbnail: true,
+        allowSkip: required,
+        skipLabel: 'Skip photos',
+        photos: pendingPhotos.slice()
+      });
+      if(result.action === 'save'){
+        const stamp = Date.now();
+        pendingPhotos = result.photos.map((photo, index) => window.MediaCapture.photoFile(photo, `prep_photo_${stamp}_${index + 1}`));
+        renderPendingPreviews();
+      }
+      return result.action;
+    }
+
+    async function setPrepDisplayImage(upc, imagePath, lotNumber){
+      const payload = {upc, image_path: imagePath};
+      if(lotNumber) payload.lot_number = lotNumber;
+      const res = await fetch('/api/items_prep/set_display_image', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      return res.json().catch(() => ({success:false}));
     }
 
     function preferredCompressedVideoMimeType(){
@@ -1650,13 +1765,24 @@
       }
     }
 
+    // Photos go up one at a time, last first: prep photos are listed newest first, so the
+    // thumbnail (the first photo) leads. Returns the saved path of that thumbnail.
     async function uploadPendingMedia(upc, rowStatus){
       const uploads = [];
-      for(const file of pendingPhotos){
+      let thumbnailPath = '';
+      for(let index = pendingPhotos.length - 1; index >= 0; index--){
+        const file = pendingPhotos[index];
         const fd = new FormData();
         fd.append('photo', file, file.name || ('prep_photo_'+Date.now()+'.jpg'));
         if(rowStatus) fd.append('row_status', rowStatus);
-        uploads.push(fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos',{method:'POST',body:fd}).catch(e=>console.error('Photo upload err:',e)));
+        try{
+          const res = await fetch('/api/items_prep/diagnostic/'+encodeURIComponent(upc)+'/photos',{method:'POST',body:fd});
+          const j = await res.json().catch(()=>({}));
+          const saved = j && Array.isArray(j.images) ? j.images[0] : null;
+          if(index === 0 && saved && saved.image_path) thumbnailPath = saved.image_path;
+        }catch(e){
+          console.error('Photo upload err:', e);
+        }
       }
       for(const file of pendingVideos){
         const compressed = await compressPendingVideo(file);
@@ -1667,6 +1793,7 @@
         uploads.push(fetch('/api/items_prep/media/'+encodeURIComponent(upc),{method:'POST',body:fd}).catch(e=>console.error('Video upload err:',e)));
       }
       if(uploads.length) await Promise.all(uploads);
+      return {thumbnailPath};
     }
 
     async function loadExistingGoodData(upc){
@@ -1689,6 +1816,7 @@
         if(notes.length){
           const noteInput = document.getElementById('quickPrepNote');
           if(noteInput && !noteInput.value.trim()) noteInput.value = notes[0].note;
+          fitQuickPrepNote();
         }
 
         // Compact image thumbnails below the main thumb (36x36)
@@ -2077,6 +2205,9 @@
       if(prepSummary) prepSummary.textContent = '';
       const quickNoteEl = document.getElementById('quickPrepNote');
       if(quickNoteEl) quickNoteEl.value = '';
+      fitQuickPrepNote();
+      currentItemHasImage = true;
+      currentItemImageUrl = '';
       clearQuickVoiceNote();
       clearPendingMedia();
       const existingGoodSec = document.getElementById('existingGoodData');
@@ -2240,7 +2371,9 @@
         }
       }
       const hasImage = it.image_url && it.image_url.trim() && it.image_url !== 'nan' && it.image_url !== 'None';
-      
+      currentItemHasImage = !!hasImage;
+      currentItemImageUrl = hasImage ? it.image_url : '';
+
       console.log('Item lookup:', {upc: it.upc, image_url: it.image_url, hasImage: hasImage});
 
       const hero = document.getElementById('hero'); hero.style.display=''; hero.src = it.image_url || '';
@@ -2288,6 +2421,7 @@
     function clearQuickPrepNote(){
       const el = document.getElementById('quickPrepNote');
       if(el) el.value = '';
+      fitQuickPrepNote();
     }
 
     let setQtyModalValue = 2;
@@ -2313,6 +2447,7 @@
       if(noteEl){
         const existing = String(noteEl.value || '').trim();
         noteEl.value = existing ? `${existing} | ${noteText}` : noteText;
+        fitQuickPrepNote();
         noteEl.focus();
         try {
           noteEl.setSelectionRange(noteEl.value.length, noteEl.value.length);
@@ -2433,11 +2568,17 @@
 
     document.getElementById('lookupBtn').onclick = ()=>{ triggerLookupFromInput(document.getElementById('manualUpc').value); };
     
-    // Pending photo capture handler
+    // Add Photo opens the photo step; the plain file input stays as a fallback.
+    document.getElementById('pendingPhotoBtn').onclick = ()=>{
+      if(!currentUpc) return;
+      openPrepPhotoPicker().catch(err => console.error('Photo step failed:', err));
+    };
     document.getElementById('pendingPhotoInput').onchange = function(){
-      Array.from(this.files||[]).forEach(f=>{ pendingPhotos.push(f); addPendingPreview(f,'photo'); });
+      Array.from(this.files||[]).forEach(f=>{ pendingPhotos.push(f); });
+      renderPendingPreviews();
       this.value = '';
     };
+    document.getElementById('quickPrepNote').addEventListener('input', fitQuickPrepNote);
 
     document.getElementById('newUniqueEntryBtn').onclick = ()=>{
       // Clear existing good data display
@@ -2507,6 +2648,7 @@
             quickVoiceNoteBtn.setPointerCapture(e.pointerId);
           }
         }catch(_){}
+        if(window.MediaCapture) window.MediaCapture.playSound('mic-on');
         const started = await startQuickVoiceRecording();
         if(!started && quickVoiceFallbackInput){
           setQuickVoiceStatus('Opening microphone...');
@@ -2603,8 +2745,18 @@
           closePreparedPrintWindow(preparedPrintWindow);
           return;
         }
+        // An item with no picture gets the photo step first; Skip still marks it GOOD.
+        if(!currentItemHasImage && !pendingPhotos.length && window.MediaCapture){
+          const photoAction = await openPrepPhotoPicker({required: true});
+          if(photoAction === 'close') return;
+        }
+        if(quickVoiceTranscription){
+          showPageLoading();
+          await waitForQuickVoiceTranscription();
+        }
         const quickNote = getQuickPrepNoteText();
         const hasVoiceNote = hasQuickVoiceNote();
+        const needsDisplayImage = !currentItemHasImage && pendingPhotos.length > 0;
         // Show loading overlay
         showPageLoading();
         const goodExtraPayload = {};
@@ -2651,7 +2803,15 @@
           }
           // Upload pending photos/videos to the result UPC (base for normal good, suffix for new-unique-entry)
           if(pendingPhotos.length || pendingVideos.length){
-            try{ await uploadPendingMedia(resultUpc, 'good'); }catch(e){ console.error('Pending media upload error:',e); }
+            let uploaded = null;
+            try{ uploaded = await uploadPendingMedia(resultUpc, 'good'); }catch(e){ console.error('Pending media upload error:',e); }
+            // An item without a picture takes its thumbnail photo as the display image.
+            if(needsDisplayImage && uploaded && uploaded.thumbnailPath){
+              try{
+                const shown = await setPrepDisplayImage(resultBaseUpc || resultUpc, uploaded.thumbnailPath, result.lot_number || getActionLotNumber());
+                if(!(shown && shown.success)) console.error('Display image not set:', shown);
+              }catch(e){ console.error('Display image not set:', e); }
+            }
             clearPendingMedia();
           }
           autoPrintResult = await maybeAutoPrintSuffixedBarcode(resultUpc, getCurrentItemTitle(), preparedPrintWindow);
@@ -2780,6 +2940,10 @@
         const continueAction = await maybeRunPlateSetPrompt();
         if(!continueAction){
           return;
+        }
+        if(quickVoiceTranscription){
+          showPageLoading();
+          await waitForQuickVoiceTranscription();
         }
         const quickNote = getQuickPrepNoteText();
         const hasVoiceNote = hasQuickVoiceNote();

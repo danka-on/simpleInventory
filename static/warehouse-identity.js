@@ -6,11 +6,10 @@
  * page confirms a saved name with next(), items that need a picture continue to
  * step 2: take photos, reorder them (the first is the thumbnail), save or skip.
  * Step 2 ends by firing "warehouse-identity:complete" on #missingTitleModal with
- * { title, photos, imageUrl }. Each feedback sound fires "warehouse-identity:sound".
+ * { title, photos, imageUrl }. Tones and the photo tiles come from media-capture.js.
  */
 (() => {
     const NO_SPEECH_STOP_MS = 8000;
-    const PHOTO_EDGE_PX = 1600;
     const DICTATION = {
         name: {
             button: 'warehouseDictateBtn',
@@ -33,15 +32,13 @@
             done: 'Note added. Check it before confirming.'
         }
     };
-    const SOUNDS = {
-        'mic-on': { wave: 'sine', notes: [660, 990], step: 0.09, length: 0.08 },
-        'mic-off': { wave: 'sine', notes: [990, 660], step: 0.09, length: 0.08 },
-        confirm: { wave: 'triangle', notes: [784, 1047, 1319], step: 0.1, length: 0.14 }
-    };
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const byId = id => document.getElementById(id);
     const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
-    const flow = { generation: 0, photos: [] };
+    const capture = () => window.MediaCapture;
+    const playSound = name => (capture() ? capture().playSound(name) : 0);
+    const flow = { generation: 0 };
+    let strip = null;
     let dictation = null;
     let recognition = null;
 
@@ -53,52 +50,6 @@
     }
     const nameStatus = (message, tone) => setStatus('warehouseIdentityStatus', message, tone);
     const photoStatus = (message, tone) => setStatus('missingTitlePhotoStatus', message, tone);
-
-    // ---- Sounds ----------------------------------------------------------
-
-    function audioContext() {
-        const Context = window.AudioContext || window.webkitAudioContext;
-        if (!Context) return null;
-        try {
-            if (!window.audioCtx) window.audioCtx = new Context();
-            if (window.audioCtx.state === 'suspended') window.audioCtx.resume().catch(() => {});
-            return window.audioCtx;
-        } catch (_) {
-            return null;
-        }
-    }
-
-    // Plays a short tone sequence; returns roughly how long it lasts in ms.
-    function playSound(name) {
-        const sound = SOUNDS[name];
-        document.dispatchEvent(new CustomEvent('warehouse-identity:sound', { detail: name }));
-        const context = audioContext();
-        if (!context || !sound) return 0;
-        try {
-            const start = context.currentTime + 0.01;
-            sound.notes.forEach((frequency, index) => {
-                const at = start + index * sound.step;
-                const osc = context.createOscillator();
-                const gain = context.createGain();
-                osc.type = sound.wave;
-                osc.frequency.setValueAtTime(frequency, at);
-                gain.gain.setValueAtTime(0.0001, at);
-                gain.gain.exponentialRampToValueAtTime(0.25, at + 0.012);
-                gain.gain.exponentialRampToValueAtTime(0.0001, at + sound.length);
-                osc.connect(gain);
-                gain.connect(context.destination);
-                osc.start(at);
-                osc.stop(at + sound.length + 0.02);
-                osc.onended = () => {
-                    osc.disconnect();
-                    gain.disconnect();
-                };
-            });
-        } catch (_) {
-            return 0;
-        }
-        return Math.round(((sound.notes.length - 1) * sound.step + sound.length) * 1000) + 30;
-    }
 
     // ---- Dictation -------------------------------------------------------
 
@@ -416,116 +367,24 @@
         if (!photos) requestAnimationFrame(fitNameField);
     }
 
-    function movePhoto(from, to) {
-        if (flow.busy || from === to || !flow.photos[from]) return;
-        const [photo] = flow.photos.splice(from, 1);
-        flow.photos.splice(to, 0, photo);
-        renderPhotos();
-        photoStatus(photoHint());
-    }
+    const currentPhotos = () => (strip ? strip.photos : []);
 
-    // Drag a tile onto another tile to swap places in the order; the first is the thumbnail.
-    function enableDrag(tile, index) {
-        tile.addEventListener('pointerdown', event => {
-            if (flow.busy || event.button > 0 || (event.target.closest && event.target.closest('button'))) return;
-            const strip = tile.parentElement;
-            const start = { x: event.clientX, y: event.clientY };
-            let moved = false;
-            let target = index;
-            try { tile.setPointerCapture(event.pointerId); } catch (_) {}
-            const tiles = () => Array.from(strip.children);
-            const onMove = move => {
-                const dx = move.clientX - start.x;
-                const dy = move.clientY - start.y;
-                if (!moved && Math.hypot(dx, dy) < 8) return;
-                moved = true;
-                tile.classList.add('is-dragging');
-                tile.style.transform = `translate(${dx}px, ${dy}px)`;
-                target = index;
-                tiles().forEach((other, position) => {
-                    const box = other.getBoundingClientRect();
-                    const over = other !== tile && move.clientX >= box.left && move.clientX <= box.right
-                        && move.clientY >= box.top && move.clientY <= box.bottom;
-                    other.classList.toggle('is-drop-target', over);
-                    if (over) target = position;
-                });
-            };
-            const onEnd = () => {
-                tile.removeEventListener('pointermove', onMove);
-                tile.removeEventListener('pointerup', onEnd);
-                tile.removeEventListener('pointercancel', onEnd);
-                if (moved && target !== index) {
-                    movePhoto(index, target);
-                    return;
-                }
-                tile.classList.remove('is-dragging');
-                tile.style.transform = '';
-                tiles().forEach(other => other.classList.remove('is-drop-target'));
-            };
-            tile.addEventListener('pointermove', onMove);
-            tile.addEventListener('pointerup', onEnd);
-            tile.addEventListener('pointercancel', onEnd);
-        });
-    }
-
-    function renderPhotos() {
-        const photos = flow.photos;
-        const strip = byId('warehousePhotoStrip');
-        if (strip) {
-            strip.textContent = '';
-            photos.forEach((src, index) => {
-                const tile = document.createElement('figure');
-                tile.className = 'identity-photo' + (index === 0 ? ' is-thumbnail' : '');
-                const image = document.createElement('img');
-                image.src = src;
-                image.alt = index === 0 ? 'Thumbnail photo' : `Photo ${index + 1}`;
-                image.draggable = false;
-                const remove = document.createElement('button');
-                remove.type = 'button';
-                remove.className = 'identity-photo-remove';
-                remove.textContent = '\u00d7';
-                remove.disabled = !!flow.busy;
-                remove.setAttribute('aria-label', `Remove photo ${index + 1}`);
-                remove.addEventListener('click', () => {
-                    if (flow.busy) return;
-                    flow.photos.splice(index, 1);
-                    renderPhotos();
-                    photoStatus(photoHint());
-                });
-                tile.append(image, remove);
-                if (index === 0) {
-                    const badge = document.createElement('span');
-                    badge.className = 'identity-photo-badge';
-                    badge.textContent = 'Thumbnail';
-                    tile.appendChild(badge);
-                } else {
-                    const promote = document.createElement('button');
-                    promote.type = 'button';
-                    promote.className = 'identity-photo-promote';
-                    promote.textContent = '\u2605';
-                    promote.disabled = !!flow.busy;
-                    promote.setAttribute('aria-label', `Make photo ${index + 1} the thumbnail`);
-                    promote.addEventListener('click', () => movePhoto(index, 0));
-                    tile.appendChild(promote);
-                }
-                enableDrag(tile, index);
-                strip.appendChild(tile);
-            });
-        }
+    function renderPhotoControls() {
+        const count = currentPhotos().length;
         const current = byId('missingTitlePhotoPreview');
         if (current) {
-            current.hidden = !flow.existingImage || photos.length > 0;
+            current.hidden = !flow.existingImage || count > 0;
             if (flow.existingImage && current.getAttribute('src') !== flow.existingImage) current.src = flow.existingImage;
         }
         const take = byId('missingTitlePhotoBtn');
         if (take) {
             take.disabled = !!flow.busy;
-            take.innerHTML = `<i class="fas fa-camera"></i> ${photos.length ? 'Add another photo' : 'Take photo'}`;
+            take.innerHTML = `<i class="fas fa-camera"></i> ${count ? 'Add another photo' : 'Take photo'}`;
         }
         const done = byId('warehousePhotoDoneBtn');
         if (done) {
-            done.disabled = !photos.length || !!flow.busy;
-            done.textContent = photos.length > 1 ? `Save ${photos.length} photos` : 'Save photo';
+            done.disabled = !count || !!flow.busy;
+            done.textContent = count > 1 ? `Save ${count} photos` : 'Save photo';
         }
         const skip = byId('warehousePhotoSkipBtn');
         if (skip) {
@@ -534,75 +393,28 @@
         }
     }
 
+    function renderPhotos() {
+        if (strip) strip.render();
+        renderPhotoControls();
+    }
+
     function photoHint() {
-        if (flow.photos.length > 1) return 'Drag a photo to the first spot, or tap \u2605, to make it the thumbnail.';
-        if (!flow.photos.length && flow.existingImage) return 'Current thumbnail shown. A new photo replaces it.';
+        const hint = strip ? strip.hint() : '';
+        if (hint) return hint;
+        if (!currentPhotos().length && flow.existingImage) return 'Current thumbnail shown. A new photo replaces it.';
         return '';
-    }
-
-    function readAsDataUrl(file) {
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result || ''));
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(file);
-        });
-    }
-
-    // Phone photos are several MB; 1600 px keeps labels legible and uploads quick.
-    function shrinkPhoto(file) {
-        return new Promise(resolve => {
-            const url = URL.createObjectURL(file);
-            const image = new Image();
-            image.onload = () => {
-                URL.revokeObjectURL(url);
-                try {
-                    const scale = Math.min(1, PHOTO_EDGE_PX / Math.max(image.naturalWidth, image.naturalHeight));
-                    const canvas = document.createElement('canvas');
-                    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-                    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-                    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-                    resolve(canvas.toDataURL('image/jpeg', 0.85));
-                } catch (_) {
-                    resolve(readAsDataUrl(file));
-                }
-            };
-            image.onerror = () => {
-                URL.revokeObjectURL(url);
-                resolve(readAsDataUrl(file));
-            };
-            image.src = url;
-        });
     }
 
     async function addPhotos(input) {
         const files = Array.from(input.files || []);
         input.value = '';
-        if (!files.length) return;
-        const generation = flow.generation;
+        if (!files.length || !strip) return;
         photoStatus('Preparing photo\u2026');
-        let failed = false;
-        for (const file of files) {
-            try {
-                const photo = await shrinkPhoto(file);
-                if (generation !== flow.generation) return;
-                flow.photos.push(photo);
-            } catch (_) {
-                failed = true;
-            }
-        }
-        renderPhotos();
-        if (failed) photoStatus('A photo could not be read. Try again.', 'bad');
+        const result = await strip.add(files);
+        if (result.stale) return;
+        renderPhotoControls();
+        if (result.failed) photoStatus('A photo could not be read. Try again.', 'bad');
         else photoStatus(photoHint());
-    }
-
-    function dataUrlBlob(dataUrl) {
-        const [header, body] = String(dataUrl).split(',');
-        const type = (/data:([^;,]+)/.exec(header) || [])[1] || 'image/jpeg';
-        const bytes = atob(body || '');
-        const buffer = new Uint8Array(bytes.length);
-        for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
-        return new Blob([buffer], { type });
     }
 
     async function send(url, options, failure) {
@@ -632,12 +444,13 @@
     // The first photo replaces the thumbnail exactly as the single-photo flow did;
     // every photo also joins the item's prep photos so listing can use them.
     async function savePhotos() {
-        if (flow.busy || !flow.photos.length) return;
+        const photos = currentPhotos();
+        if (flow.busy || !photos.length || !capture()) return;
         const generation = flow.generation;
-        const job = { upc: flow.upc, title: flow.title, photos: flow.photos.slice() };
+        const job = { upc: flow.upc, title: flow.title, photos };
         flow.busy = true;
         renderPhotos();
-        photoStatus(job.photos.length > 1 ? `Saving ${job.photos.length} photos\u2026` : 'Saving photo\u2026');
+        photoStatus(photos.length > 1 ? `Saving ${photos.length} photos\u2026` : 'Saving photo\u2026');
         try {
             if (flow.thumbnail.source !== job.photos[0]) {
                 const saved = await send('/api/items-prep/temp-item', {
@@ -650,8 +463,8 @@
             }
             const form = new FormData();
             job.photos.forEach((photo, index) => {
-                const blob = dataUrlBlob(photo);
-                form.append('photos[]', blob, `receiving-${index + 1}${blob.type === 'image/png' ? '.png' : '.jpg'}`);
+                const file = capture().photoFile(photo, `receiving-${index + 1}`);
+                form.append('photos[]', file, file.name);
             });
             await send('/api/items_prep/diagnostic/' + encodeURIComponent(job.upc) + '/photos',
                 { method: 'POST', body: form }, 'Photos were not saved. Try again or skip.');
@@ -675,10 +488,10 @@
             title: '',
             photosWanted: false,
             existingImage: '',
-            photos: [],
             thumbnail: { source: '', url: '' },
             busy: false
         });
+        if (strip) strip.set([]);
         nameStatus('');
         photoStatus('');
         const field = byId('missingTitleInput');
@@ -760,7 +573,17 @@
         window.addEventListener('resize', fitNameField);
         const modal = byId('missingTitleModal');
         // Any tap inside the prompt unlocks audio, so later tones are allowed to play.
-        if (modal) modal.addEventListener('pointerdown', () => audioContext(), true);
+        if (modal) modal.addEventListener('pointerdown', () => { if (capture()) capture().unlockAudio(); }, true);
+        if (capture()) {
+            strip = capture().createPhotoStrip(byId('warehousePhotoStrip'), {
+                thumbnail: true,
+                isBusy: () => !!flow.busy,
+                onChange: () => {
+                    renderPhotoControls();
+                    photoStatus(photoHint());
+                }
+            });
+        }
         const take = byId('missingTitlePhotoBtn');
         const input = byId('missingTitlePhotoInput');
         if (take && input) {

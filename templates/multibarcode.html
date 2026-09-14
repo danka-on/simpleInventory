@@ -1129,94 +1129,7 @@
             cursor: pointer;
         }
 
-        .identity-photo-strip {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-            gap: 8px;
-            margin: 0 0 10px;
-        }
-
-        .identity-photo-strip:empty {
-            display: none;
-        }
-
-        .identity-photo {
-            position: relative;
-            height: 84px;
-            margin: 0;
-            border-radius: 10px;
-            overflow: hidden;
-            border: 1px solid rgba(146, 64, 14, 0.2);
-            background: #fff;
-            cursor: grab;
-            touch-action: none;
-            -webkit-user-select: none;
-            user-select: none;
-        }
-
-        .identity-photo.is-thumbnail {
-            border: 3px solid #d97706;
-        }
-
-        .identity-photo.is-dragging {
-            z-index: 3;
-            opacity: 0.9;
-            cursor: grabbing;
-            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.3);
-        }
-
-        .identity-photo.is-drop-target {
-            outline: 3px dashed #1d4ed8;
-            outline-offset: 2px;
-        }
-
-        .identity-photo img {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            pointer-events: none;
-            -webkit-touch-callout: none;
-        }
-
-        .identity-photo-badge {
-            position: absolute;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            padding: 3px 0;
-            background: rgba(217, 119, 6, 0.95);
-            color: #fff;
-            font-size: 0.7rem;
-            font-weight: 800;
-            text-align: center;
-            pointer-events: none;
-        }
-
-        .identity-photo .identity-photo-promote {
-            left: 4px;
-            right: auto;
-            background: rgba(217, 119, 6, 0.95);
-            font-size: 0.9rem;
-        }
-
-        .identity-photo button {
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            width: 26px;
-            height: 26px;
-            margin: 0;
-            padding: 0;
-            border: none;
-            border-radius: 50%;
-            background: rgba(17, 24, 39, 0.72);
-            color: #fff;
-            font-size: 1rem;
-            line-height: 26px;
-            cursor: pointer;
-        }
-
+        /* Photo tile styles (.identity-photo-strip, .identity-photo) come from media-capture.js. */
         .missing-title-photo .missing-title-photo-status {
             margin: 6px 0 12px;
         }
@@ -1385,7 +1298,8 @@
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
     <script src="/static/scan-feedback.js?v=20260912a"></script>
-    <script src="/static/warehouse-identity.js?v=20260914b"></script>
+    <script src="/static/media-capture.js?v=20260914c"></script>
+    <script src="/static/warehouse-identity.js?v=20260914c"></script>
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
     <script src="/static/no-barcode-label.js?v=20260912a"></script>
     <script src="/static/ios-scanner-keyboard.js?v=20260907a"></script>
