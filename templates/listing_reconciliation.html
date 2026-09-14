@@ -7,99 +7,236 @@
     <title>Listings &amp; Stock - Sweet Shelves</title>
     <style>
         :root{
-            --bg:#f4f6f8;--card:#fff;--border:#dfe6ed;--text:#172033;--muted:#64748b;
-            --blue:#2563eb;--green:#15803d;--amber:#a16207;--red:#dc2626;--purple:#6d28d9;
-            --shadow:0 7px 24px rgba(15,23,42,.06);
+            color-scheme:light;
+            --r-bg:#f3f5f8;--r-panel:#fff;--r-panel2:#f8fafc;--r-line:#e3e8ef;--r-line2:#cbd5e1;
+            --r-ink:#0f172a;--r-ink2:#334155;--r-muted:#64748b;
+            --r-shadow:0 1px 2px rgba(15,23,42,.05),0 6px 20px rgba(15,23,42,.05);
+            --r-accent:#2563eb;--r-accent-soft:#dbeafe;
+            --c-need:#7c3aed;--c-need-soft:#ede9fe;
+            --c-out:#dc2626;--c-out-soft:#fee2e2;
+            --c-short:#d97706;--c-short-soft:#fef3c7;
+            --c-ok:#059669;--c-ok-soft:#d1fae5;
+            --c-unlisted:#0284c7;--c-unlisted-soft:#e0f2fe;
+            --c-done:#64748b;--c-done-soft:#e2e8f0;
+            --c-all:#0f172a;--c-all-soft:#e2e8f0;
+            --s-ebay:#0064d2;--s-ebay-ink:#fff;--s-amazon:#f59e0b;--s-amazon-ink:#1f1300;--s-wh:#475569;--s-wh-ink:#fff;
+        }
+        html.ss-theme-night{
+            color-scheme:dark;
+            --r-bg:#0b1220;--r-panel:#111a2e;--r-panel2:#172238;--r-line:rgba(255,255,255,.09);--r-line2:rgba(255,255,255,.18);
+            --r-ink:#e2e8f0;--r-ink2:#cbd5e1;--r-muted:#94a3b8;
+            --r-shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+            --r-accent:#60a5fa;--r-accent-soft:rgba(96,165,250,.16);
+            --c-need:#a78bfa;--c-need-soft:rgba(167,139,250,.16);
+            --c-out:#f87171;--c-out-soft:rgba(248,113,113,.16);
+            --c-short:#fbbf24;--c-short-soft:rgba(251,191,36,.16);
+            --c-ok:#34d399;--c-ok-soft:rgba(52,211,153,.16);
+            --c-unlisted:#38bdf8;--c-unlisted-soft:rgba(56,189,248,.16);
+            --c-done:#94a3b8;--c-done-soft:rgba(148,163,184,.16);
+            --c-all:#e2e8f0;--c-all-soft:rgba(226,232,240,.14);
+            --s-ebay:#3b82f6;--s-amazon:#f59e0b;--s-wh:#64748b;
         }
         *{box-sizing:border-box}
-        body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,"Segoe UI",Arial,sans-serif}
-        .page{max-width:1240px;margin:auto;padding:22px}
-        .header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px}
-        h1{margin:0 0 6px;font-size:clamp(1.55rem,3vw,2.2rem);letter-spacing:-.03em}
+        html,body{margin:0}
+        body{background:var(--r-bg);color:var(--r-ink);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.45}
+        html.ss-theme-night body{background:var(--r-bg);color:var(--r-ink)}
+        button,input,select{font:inherit;color:inherit}
+        button{cursor:pointer}
+        a{color:var(--r-accent)}
+        code{font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;font-size:.92em}
+        .page{max-width:1240px;margin:auto;padding:16px 16px 96px;min-width:0}
+
+        /* Header */
+        .header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+        .brand{display:flex;align-items:center;gap:12px;min-width:0}
+        .back{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border:1px solid var(--r-line2);border-radius:9px;background:var(--r-panel);color:var(--r-ink2);text-decoration:none;font-weight:600;font-size:13px;white-space:nowrap}
+        .back:hover{border-color:var(--r-accent);color:var(--r-accent)}
+        h1{margin:0;font-size:1.35rem;letter-spacing:-.02em;line-height:1.2}
+        .meta-line{color:var(--r-muted);font-size:12.5px;margin-top:2px}
+        .meta-line b{color:var(--r-ink);font-weight:700;font-variant-numeric:tabular-nums}
         .actions{display:flex;gap:8px;flex-wrap:wrap}
-        .btn{border:1px solid var(--border);background:white;color:var(--text);padding:9px 13px;border-radius:8px;text-decoration:none;font-weight:750;cursor:pointer;font:inherit;font-size:.86rem}
-        .btn:disabled{opacity:.55;cursor:default}
-        .btn.primary{background:var(--blue);border-color:var(--blue);color:white}
-        .btn.link{background:var(--green);border-color:var(--green);color:white}
-        .btn.quiet{color:var(--muted)}
-        .btn.danger{color:var(--red)}
-        .panel{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow)}
-        .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
-        .tile{padding:14px;border-top:4px solid var(--tone,var(--border))}
-        .tile-name{font-size:.72rem;font-weight:850;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-        .tile-value{font-size:1.65rem;font-weight:850;margin-top:6px;font-variant-numeric:tabular-nums}
-        .tile-detail{font-size:.74rem;color:var(--muted);margin-top:2px}
-        .loading{padding:70px 15px;text-align:center;color:var(--muted)}
-        .spinner{height:34px;width:34px;border:4px solid #dbeafe;border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px}
-        @keyframes spin{to{transform:rotate(360deg)}}
-        .error{display:none;padding:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:9px;margin-bottom:14px}
+
+        /* Buttons */
+        .btn{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--r-line2);background:var(--r-panel);color:var(--r-ink2);padding:7px 12px;border-radius:9px;text-decoration:none;font-weight:650;font-size:13px;line-height:1.2;white-space:nowrap;transition:border-color .12s,background .12s,color .12s}
+        .btn:hover{border-color:var(--r-accent);color:var(--r-accent)}
+        .btn:disabled{opacity:.5;cursor:default}
+        .btn.primary{background:var(--r-accent);border-color:var(--r-accent);color:#fff}
+        .btn.primary:hover{filter:brightness(1.07);color:#fff}
+        .btn.link{background:var(--c-ok);border-color:var(--c-ok);color:#fff}
+        .btn.link:hover{filter:brightness(1.07);color:#fff}
+        .btn.quiet{border-color:transparent;background:transparent;color:var(--r-muted)}
+        .btn.quiet:hover{background:var(--r-panel2);color:var(--r-ink)}
+        .btn.danger{color:var(--c-out)}
+        .btn.danger:hover{border-color:var(--c-out);background:var(--c-out-soft)}
+        .btn.sm{padding:5px 9px;font-size:12px;border-radius:7px}
+
+        .panel{background:var(--r-panel);border:1px solid var(--r-line);border-radius:14px;box-shadow:var(--r-shadow)}
+        .error{display:none;padding:12px 14px;border:1px solid var(--c-out);background:var(--c-out-soft);color:var(--c-out);border-radius:10px;margin-bottom:12px;font-weight:600}
+
+        /* Loading skeleton */
+        .loading{padding:6px 0}
+        .skel{height:92px;border-radius:14px;margin-bottom:10px;background:linear-gradient(90deg,var(--r-panel) 0%,var(--r-panel2) 50%,var(--r-panel) 100%);background-size:200% 100%;animation:shimmer 1.2s ease-in-out infinite;border:1px solid var(--r-line)}
+        @keyframes shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+        .loading .hint{color:var(--r-muted);font-size:13px;text-align:center;padding:8px}
         #workspace{display:none}
-        .controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
-        .controls input,.controls select{border:1px solid var(--border);background:white;border-radius:8px;padding:9px 11px;font:inherit;color:var(--text)}
-        .controls input{flex:1 1 240px;min-width:180px}
-        .tabs{display:flex;gap:8px;margin:6px 0 14px;flex-wrap:wrap}
-        .tab{border:1px solid var(--border);background:white;border-radius:999px;padding:8px 15px;font-weight:800;font-size:.85rem;cursor:pointer;font:inherit}
-        .tab[aria-selected="true"]{background:var(--text);border-color:var(--text);color:white}
-        .section-note{color:var(--muted);font-size:.83rem;line-height:1.5;margin:0 0 12px}
-        .bulk{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
+
+        /* Status board: one bar + colored tabs */
+        .board{padding:12px 14px 10px;margin-bottom:12px}
+        .health{display:flex;align-items:center;gap:14px;margin-bottom:10px}
+        .health .pct{font-size:1.5rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1;color:var(--c-ok);white-space:nowrap}
+        .health .pct small{display:block;font-size:11px;font-weight:600;color:var(--r-muted);letter-spacing:.02em;text-transform:uppercase;margin-top:3px}
+        .bar{flex:1;height:12px;border-radius:999px;overflow:hidden;background:var(--c-done-soft);display:flex;min-width:0}
+        .bar i{display:block;height:100%;transition:width .35s ease}
+        .bar .in{background:var(--c-ok)}.bar .short{background:var(--c-short)}.bar .out{background:var(--c-out)}.bar .need{background:var(--c-need)}
+        .tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin;padding-bottom:2px;margin:0 -2px}
+        .tab{--tone:var(--c-all);--soft:var(--c-all-soft);flex:1 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:118px;padding:8px 11px;border:1px solid var(--r-line);border-radius:11px;background:var(--r-panel);text-align:left;transition:background .12s,border-color .12s}
+        .tab:hover{background:var(--r-panel2)}
+        .tab .n{font-size:1.15rem;font-weight:800;line-height:1;color:var(--tone);font-variant-numeric:tabular-nums}
+        .tab .l{font-size:11.5px;font-weight:650;color:var(--r-muted);white-space:nowrap;display:flex;align-items:center;gap:5px}
+        .tab .l::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--tone);flex:none}
+        .tab[aria-selected="true"]{background:var(--soft);border-color:var(--tone);box-shadow:inset 0 0 0 1px var(--tone)}
+        .tab[aria-selected="true"] .l{color:var(--r-ink)}
+        .tab[data-tab="needs_matching"]{--tone:var(--c-need);--soft:var(--c-need-soft)}
+        .tab[data-tab="out_of_stock"]{--tone:var(--c-out);--soft:var(--c-out-soft)}
+        .tab[data-tab="short_stock"]{--tone:var(--c-short);--soft:var(--c-short-soft)}
+        .tab[data-tab="in_stock"]{--tone:var(--c-ok);--soft:var(--c-ok-soft)}
+        .tab[data-tab="unlisted"]{--tone:var(--c-unlisted);--soft:var(--c-unlisted-soft)}
+        .tab[data-tab="reviewed"]{--tone:var(--c-done);--soft:var(--c-done-soft)}
+
+        /* Toolbar */
+        .toolbar{position:sticky;top:0;z-index:20;display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;margin-bottom:10px;background:var(--r-panel);border:1px solid var(--r-line);border-radius:12px;box-shadow:var(--r-shadow)}
+        html.ss-has-top-banner .toolbar{top:calc(var(--ss-banner-h,44px) + 6px)}
+        .search{flex:1 1 260px;position:relative;display:flex;align-items:center;min-width:0}
+        .search svg{position:absolute;left:11px;width:16px;height:16px;color:var(--r-muted);pointer-events:none}
+        .search input{width:100%;min-width:0;padding:9px 34px 9px 34px;border:1px solid var(--r-line2);border-radius:9px;background:var(--r-panel2);color:var(--r-ink);font-size:14px}
+        .search input:focus{outline:none;border-color:var(--r-accent);box-shadow:0 0 0 3px var(--r-accent-soft);background:var(--r-panel)}
+        .search input::placeholder{color:var(--r-muted)}
+        .search input::-webkit-search-cancel-button,.search input::-webkit-search-decoration{-webkit-appearance:none;appearance:none;display:none}
+        .search .clear{position:absolute;right:6px;width:26px;height:26px;border:0;border-radius:50%;background:transparent;color:var(--r-muted);font-size:18px;line-height:1;display:none;align-items:center;justify-content:center}
+        .search .clear:hover{background:var(--r-line);color:var(--r-ink)}
+        .search.has-query .clear{display:inline-flex}
+        .toolbar select{border:1px solid var(--r-line2);background:var(--r-panel2);border-radius:9px;padding:8px 10px;color:var(--r-ink);max-width:200px}
+        .toolbar select:focus{outline:none;border-color:var(--r-accent);box-shadow:0 0 0 3px var(--r-accent-soft)}
+        .scope{display:none;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--r-ink2);padding:6px 8px;border:1px solid var(--r-line);border-radius:9px;background:var(--r-panel2);cursor:pointer;white-space:nowrap}
+        .scope input{width:15px;height:15px;accent-color:var(--r-accent);margin:0}
+        .toolbar.searching .scope{display:inline-flex}
+        .summary{font-size:12.5px;color:var(--r-muted);font-weight:600;white-space:nowrap}
+        .summary:empty{display:none}
+
+        /* Section note + bulk */
+        .noterow{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:0 4px 10px}
+        .section-note{color:var(--r-muted);font-size:12.5px;line-height:1.45;margin:0}
+        .bulk{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
         .bulk[hidden]{display:none}
-        .link-bulk{position:sticky;top:8px;z-index:5;padding:12px;background:white;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow)}
-        .pick-link{display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem;font-weight:700}
-        .pick-link input{width:20px;height:20px;accent-color:var(--green)}
-        .suggestion-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-        .bulk-status{font-size:.82rem;font-weight:700;color:var(--muted)}
-        .bulk-status.bad{color:var(--red)}
-        .item{padding:14px;margin-bottom:11px;display:grid;grid-template-columns:64px minmax(0,1fr);gap:14px;align-items:start}
-        .thumb{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--border);background:#f1f5f9}
-        .title{font-weight:800;font-size:1rem;line-height:1.3}
+        .bulk-status{font-size:12.5px;font-weight:600;color:var(--r-muted)}
+        .bulk-status.bad{color:var(--c-out)}
+        .bulk-status:empty{display:none}
+
+        /* Floating selection tray */
+        .tray{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:30;display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;max-width:calc(100vw - 24px);padding:10px 14px;background:var(--r-panel);border:1px solid var(--c-ok);border-radius:14px;box-shadow:0 12px 40px rgba(15,23,42,.22)}
+        .tray[hidden]{display:none}
+        .tray .bulk-status{max-width:60vw}
+
+        /* Rows */
+        .item{--tone:var(--c-done);position:relative;padding:12px 14px 12px 16px;margin-bottom:8px;display:grid;grid-template-columns:56px minmax(0,1fr);gap:12px;align-items:start;overflow:hidden}
+        .item::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--tone)}
+        .item[data-status="needs_matching"]{--tone:var(--c-need)}
+        .item[data-status="out_of_stock"]{--tone:var(--c-out)}
+        .item[data-status="short_stock"]{--tone:var(--c-short)}
+        .item[data-status="in_stock"]{--tone:var(--c-ok)}
+        .item[data-status="unlisted"]{--tone:var(--c-unlisted)}
+        .item[data-status="reviewed"]{--tone:var(--c-done);opacity:.9}
+        .thumb{width:56px;height:56px;object-fit:cover;border-radius:9px;border:1px solid var(--r-line);background:var(--r-panel2);cursor:zoom-in}
+        .body{min-width:0}
+        .head{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
+        .title{font-weight:700;font-size:14.5px;line-height:1.3;margin:0;flex:1 1 240px;min-width:0;overflow-wrap:anywhere}
         .title a{color:inherit;text-decoration:none}
         .title a:hover{text-decoration:underline}
-        .meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
-        .chip{background:#eef2f6;border-radius:999px;padding:3px 10px;font-size:.72rem;font-weight:700;color:#475569}
-        .chip.store-ebay{background:#fee2e2;color:#991b1b}
-        .chip.store-amazon{background:#fef3c7;color:#92400e}
-        .chip.code{font-family:"SFMono-Regular",Consolas,monospace}
-        .chip.loc{background:#e0f2fe;color:#075985}
-        .chip.hint{background:#ede9fe;color:#5b21b6}
-        .chip.bad{background:#fee2e2;color:#991b1b}
-        .chip.ok{background:#dcfce7;color:#166534}
-        .chip.warn{background:#fef3c7;color:#92400e}
-        .rack{margin-top:9px;font-size:.8rem;color:var(--muted);line-height:1.6}
-        .rack code{background:#f1f5f9;border-radius:4px;padding:1px 5px;font-size:.74rem}
-        .suggestion{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:10px;align-items:center;margin-top:9px;padding:8px 10px;border:1px dashed var(--border);border-radius:9px;background:#f8fafc}
-        .suggestion img{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--border);background:#f1f5f9}
-        .suggestion .why{font-size:.74rem;color:var(--muted);margin-top:2px}
-        .suggestion .name{font-weight:700;font-size:.86rem}
-        .row-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
-        .row-status{font-size:.78rem;font-weight:700;margin-top:6px;min-height:1.1em}
-        .row-status.ok{color:var(--green)}
-        .row-status.bad{color:var(--red)}
-        .empty{padding:52px 18px;text-align:center;color:var(--muted)}
-        .empty strong{display:block;color:var(--text);font-size:1.05rem;margin-bottom:5px}
-        .thumb,.suggestion img{cursor:zoom-in}
+        .status-pill{flex:none;font-size:11px;font-weight:750;letter-spacing:.02em;padding:3px 9px;border-radius:999px;background:var(--soft,var(--c-done-soft));color:var(--tone);border:1px solid color-mix(in srgb,var(--tone) 35%,transparent)}
+        .item[data-status="needs_matching"] .status-pill{--soft:var(--c-need-soft)}
+        .item[data-status="out_of_stock"] .status-pill{--soft:var(--c-out-soft)}
+        .item[data-status="short_stock"] .status-pill{--soft:var(--c-short-soft)}
+        .item[data-status="in_stock"] .status-pill{--soft:var(--c-ok-soft)}
+        .item[data-status="unlisted"] .status-pill{--soft:var(--c-unlisted-soft)}
+        .meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;align-items:center}
+        .chip{display:inline-flex;align-items:center;gap:4px;background:var(--r-panel2);border:1px solid var(--r-line);border-radius:6px;padding:2px 7px;font-size:11.5px;font-weight:650;color:var(--r-ink2);max-width:100%;overflow-wrap:anywhere}
+        .chip.store{border:0;font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.04em}
+        .chip.store-ebay{background:var(--s-ebay);color:var(--s-ebay-ink,#fff)}
+        .chip.store-amazon{background:var(--s-amazon);color:var(--s-amazon-ink,#1f1300)}
+        .chip.store-warehouse{background:var(--s-wh);color:var(--s-wh-ink,#fff)}
+        .chip.code{font-family:"SFMono-Regular",Consolas,monospace;font-weight:600;letter-spacing:.01em}
+        .chip.ok{background:var(--c-ok-soft);color:var(--c-ok);border-color:transparent}
+        .chip.bad{background:var(--c-out-soft);color:var(--c-out);border-color:transparent}
+        .chip.warn{background:var(--c-short-soft);color:var(--c-short);border-color:transparent}
+        .chip.hint{background:var(--c-need-soft);color:var(--c-need);border-color:transparent}
+
+        /* Stock strip: inline on purpose so it reads as one sentence */
+        .stock{display:block;margin-top:7px;font-size:12.5px;color:var(--r-muted);font-variant-numeric:tabular-nums}
+        .stock b{color:var(--r-ink);font-weight:800;font-size:13.5px}
+        .stock b.ok{color:var(--c-ok)}.stock b.warn{color:var(--c-short)}.stock b.bad{color:var(--c-out)}
+        .stock .sep{color:var(--r-line2)}
+
+        .rack{margin-top:6px;font-size:12px;color:var(--r-muted);line-height:1.6;overflow-wrap:anywhere}
+        .rack code{background:var(--r-panel2);border:1px solid var(--r-line);border-radius:4px;padding:0 5px}
+        .rack .loc{display:inline-block;background:var(--c-unlisted-soft);color:var(--c-unlisted);border-radius:4px;padding:0 6px;font-weight:700}
+
+        /* Suggestions */
+        .suggestions{margin-top:8px;display:grid;gap:6px}
+        .suggestion{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;padding:7px 9px;border:1px dashed color-mix(in srgb,var(--c-need) 45%,transparent);border-radius:9px;background:var(--r-panel2)}
+        .suggestion img{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--r-line);background:var(--r-panel);cursor:zoom-in}
+        .suggestion .name{font-weight:700;font-size:13px;overflow-wrap:anywhere}
+        .suggestion .why{font-size:11.5px;color:var(--r-muted);margin-top:1px;overflow-wrap:anywhere}
+        .suggestion .why strong{color:var(--c-need)}
+        .suggestion-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+        .pick-link{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:700;color:var(--r-ink2);padding:4px 6px;border-radius:7px}
+        .pick-link:hover{background:var(--r-panel)}
+        .pick-link input{width:17px;height:17px;accent-color:var(--c-ok);margin:0}
+        .why{font-size:11.5px;color:var(--r-muted);overflow-wrap:anywhere}
+        .ai-note{margin-top:6px}
+        .row-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px;align-items:center}
+        .row-status{font-size:12px;font-weight:700;margin-top:4px;min-height:0}
+        .row-status:empty{display:none}
+        .row-status.ok{color:var(--c-ok)}
+        .row-status.bad{color:var(--c-out)}
+        .empty{padding:44px 18px;text-align:center;color:var(--r-muted)}
+        .empty strong{display:block;color:var(--r-ink);font-size:1rem;margin-bottom:4px}
+        .more{display:block;margin:6px auto 18px}
+        #reviewHistory{padding:10px 14px;margin-bottom:10px;font-size:12.5px;color:var(--r-muted)}
+        #reviewHistory summary{cursor:pointer;font-weight:700;color:var(--r-ink2)}
+        #reviewHistory p{margin:4px 0}
+
+        /* Image preview */
         .image-preview{border:0;border-radius:12px;padding:48px 12px 12px;background:#111827;color:white;max-width:96vw;max-height:96vh;overflow:auto}
         .image-preview::backdrop{background:rgba(0,0,0,.8)}
         .image-preview img{display:block;width:90vw;height:82vh;object-fit:contain;margin:auto}
         .image-preview .close-preview{position:absolute;right:10px;top:8px}
-        .more{display:block;margin:6px auto 18px}
+
         @media (max-width:760px){
-            .page{padding:14px}
-            .item{grid-template-columns:52px minmax(0,1fr)}
-            .thumb{width:52px;height:52px}
-            .suggestion{grid-template-columns:44px minmax(0,1fr)}
-            .suggestion-actions{grid-column:2 / -1}
+            .page{padding:10px 10px 110px}
+            .header{margin-bottom:10px}
+            h1{font-size:1.15rem}
+            .actions .btn{padding:7px 10px}
+            .board{padding:10px 10px 8px}
+            .tab{min-width:104px;padding:7px 9px}
+            .toolbar{position:static;padding:8px}
+            .item{grid-template-columns:48px minmax(0,1fr);padding:10px 10px 10px 13px;gap:10px}
+            .thumb{width:48px;height:48px}
+            .suggestion{grid-template-columns:40px minmax(0,1fr)}
+            .suggestion-actions{grid-column:1 / -1;justify-content:flex-start}
         }
     </style>
 </head>
 <body>
 <div class="page">
     <div class="header">
-        <div>
-            <h1>Listings &amp; Stock</h1>
-
+        <div class="brand">
+            <a class="back" href="/store-manager" aria-label="Back to Store Manager">&larr;</a>
+            <div>
+                <h1>Listings &amp; Stock</h1>
+                <div class="meta-line"><b id="tileLive">0</b> active listings <span id="tileLiveDetail"></span></div>
+            </div>
         </div>
         <div class="actions">
-            <a class="btn" href="/store-manager">← Store Manager</a>
             <a class="btn" href="/sync">Sync stores</a>
             <button type="button" class="btn primary" id="refreshButton">Refresh</button>
         </div>
@@ -108,83 +245,61 @@
     <div class="error" id="errorBox"></div>
 
     <div class="loading" id="loadingBox">
-        <div class="spinner"></div>
-        Matching every active listing against the warehouse…
+        <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+        <div class="hint">Matching every active listing against the warehouse…</div>
     </div>
 
     <div id="workspace">
-        <div class="tiles">
-            <div class="panel tile" style="--tone:var(--blue)">
-                <div class="tile-name">Active listings</div>
-                <div class="tile-value" id="tileLive">0</div>
-                <div class="tile-detail" id="tileLiveDetail"></div>
+        <div class="panel board">
+            <div class="health">
+                <div class="pct"><span id="tileCoverage">0%</span><small id="tileCoverageDetail">enough stock</small></div>
+                <div class="bar" id="healthBar" aria-hidden="true"><i class="in"></i><i class="short"></i><i class="out"></i><i class="need"></i></div>
             </div>
-            <div class="panel tile" style="--tone:var(--green)">
-                <div class="tile-name">Enough stock</div>
-                <div class="tile-value" id="tileCoverage">0%</div>
-                <div class="tile-detail" id="tileCoverageDetail"></div>
-            </div>
-            <div class="panel tile" style="--tone:var(--purple)">
-                <div class="tile-name">Needs matching</div>
-                <div class="tile-value" id="tileSuggested">0</div>
-                <div class="tile-detail">confirm the warehouse item</div>
-            </div>
-            <div class="panel tile" style="--tone:var(--amber)">
-                <div class="tile-name">Out of stock</div>
-                <div class="tile-value" id="tileSoldOut">0</div>
-                <div class="tile-detail">no available units</div>
-            </div>
-            <div class="panel tile" style="--tone:var(--red)">
-                <div class="tile-name">Warehouse without listings</div>
-                <div class="tile-value" id="tileUnaccounted">0</div>
-                <div class="tile-detail">stock with no saved listing</div>
-            </div>
-            <div class="panel tile" style="--tone:var(--border)">
-                <div class="tile-name">Not enough stock</div>
-                <div class="tile-value" id="tileShort">0</div>
-                <div class="tile-detail">available units below listed quantity</div>
+            <div class="tabs" role="tablist" id="tabs">
+                <button type="button" class="tab" role="tab" data-tab="needs_matching" aria-selected="true"><span class="n">0</span><span class="l">Needs matching</span></button>
+                <button type="button" class="tab" role="tab" data-tab="out_of_stock" aria-selected="false"><span class="n">0</span><span class="l">Out of stock</span></button>
+                <button type="button" class="tab" role="tab" data-tab="short_stock" aria-selected="false"><span class="n">0</span><span class="l">Not enough stock</span></button>
+                <button type="button" class="tab" role="tab" data-tab="in_stock" aria-selected="false"><span class="n">0</span><span class="l">Enough stock</span></button>
+                <button type="button" class="tab" role="tab" data-tab="unlisted" aria-selected="false"><span class="n">0</span><span class="l">Warehouse without listings</span></button>
+                <button type="button" class="tab" role="tab" data-tab="reviewed" aria-selected="false"><span class="n">0</span><span class="l">Reviewed</span></button>
+                <button type="button" class="tab" role="tab" data-tab="all" aria-selected="false"><span class="n">0</span><span class="l">All active listings</span></button>
             </div>
         </div>
 
-        <div class="controls">
+        <div class="toolbar" id="toolbar">
+            <div class="search" id="searchWrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+                <input type="search" id="searchBox" placeholder="Search name, UPC, ASIN, SKU, shelf or paste a link" title="Press / to search" aria-label="Search listings and warehouse" autocomplete="off">
+                <button type="button" class="clear" id="clearSearchButton" aria-label="Clear search" title="Clear search">&times;</button>
+            </div>
             <select id="storeFilter" aria-label="Store">
                 <option value="">Both stores</option>
                 <option value="ebay">eBay only</option>
                 <option value="amazon">Amazon only</option>
             </select>
             <select id="brandFilter" aria-label="Brand"><option value="">All brands</option></select>
-            <input type="search" id="searchBox" placeholder="Search names, UPC, ASIN, SKU, shelf or paste a listing link" aria-label="Search listings and warehouse">
+            <label class="scope" title="Search every view, not only the selected one"><input type="checkbox" id="searchAllTabs" checked> All views</label>
+            <span id="searchSummary" class="summary" role="status"></span>
         </div>
 
-        <div class="bulk">
-            <label><input type="checkbox" id="searchAllTabs" checked> Search all views</label>
-            <button type="button" class="btn quiet" id="clearSearchButton">Clear search</button>
-            <span id="searchSummary" class="bulk-status" role="status"></span>
-        </div>
-        <div class="tabs" role="tablist" id="tabs">
-            <button type="button" class="tab" role="tab" data-tab="all" aria-selected="false">All active listings</button>
-            <button type="button" class="tab" role="tab" data-tab="needs_matching" aria-selected="true">Needs matching</button>
-            <button type="button" class="tab" role="tab" data-tab="out_of_stock" aria-selected="false">Out of stock</button>
-            <button type="button" class="tab" role="tab" data-tab="short_stock" aria-selected="false">Not enough stock</button>
-            <button type="button" class="tab" role="tab" data-tab="in_stock" aria-selected="false">Enough stock</button>
-            <button type="button" class="tab" role="tab" data-tab="unlisted" aria-selected="false">Warehouse without listings</button>
-            <button type="button" class="tab" role="tab" data-tab="reviewed" aria-selected="false">Reviewed</button>
+        <div class="noterow">
+            <p class="section-note" id="sectionNote"></p>
+            <div class="bulk" id="bulkBar" hidden>
+                <button type="button" class="btn sm" id="bulkHandledButton">Mark all as handled</button>
+                <span class="bulk-status" id="bulkStatus"></span>
+            </div>
         </div>
 
-        <p class="section-note" id="sectionNote"></p>
-        <div class="bulk" id="bulkBar" hidden>
-            <button type="button" class="btn" id="bulkHandledButton">Mark all as handled</button>
-            <span class="bulk-status" id="bulkStatus"></span>
-        </div>
-        <div class="bulk link-bulk" id="linkBulkBar" hidden>
-            <button type="button" class="btn link" id="linkSelectedButton">Link selected</button>
-            <button type="button" class="btn quiet" id="clearSelectedButton">Clear selection</button>
-            <span class="bulk-status" id="linkBulkStatus" role="status" aria-live="polite"></span>
-        </div>
-        <div id="itemList"></div>
         <div id="reviewHistory" class="panel" hidden></div>
+        <div id="itemList"></div>
         <button type="button" class="btn more" id="moreButton" hidden>Show more</button>
     </div>
+</div>
+
+<div class="tray" id="linkBulkBar" hidden>
+    <button type="button" class="btn link" id="linkSelectedButton">Link selected</button>
+    <button type="button" class="btn quiet" id="clearSelectedButton">Clear selection</button>
+    <span class="bulk-status" id="linkBulkStatus" role="status" aria-live="polite"></span>
 </div>
 
 <dialog id="imagePreview" class="image-preview" aria-label="Enlarged product photo">
@@ -195,13 +310,13 @@
 const PAGE_SIZE = 150;
 const LABELS = {all:'All active listings',needs_matching:'Needs matching',out_of_stock:'Out of stock',short_stock:'Not enough stock',in_stock:'Enough stock',unlisted:'Warehouse without listings',reviewed:'Reviewed'};
 const NOTES = {
-    all:'Active eBay and merchant-fulfilled Amazon listings. Available stock subtracts sales from the last 7 days awaiting warehouse removal. Shared stock is not reserved separately for each store.',
-    needs_matching:'Confirm which warehouse item belongs to each listing. Suggestions do not count as stock until linked.',
-    out_of_stock:'No units remain available for these listings. Check the item before adjusting a store listing; receiving history alone does not prove a sale.',
-    short_stock:'Some stock is available, but less than the quantity offered on this listing.',
-    in_stock:'Matched warehouse stock covers the listed quantity after recent pending sales. Stock shared between stores is not reserved twice.',
-    unlisted:'Stock with no saved active eBay/Amazon listing or Facebook listing record. Unconfirmed name suggestions do not count as a listing link.',
-    reviewed:'Issues you marked reviewed. Changed stock or listing quantities can bring an issue back. Reviewing does not change inventory or marketplace listings.'
+    all:'Active eBay and merchant-fulfilled Amazon listings. Available = physical stock minus sales from the last 7 days not yet pulled. Stock shared between stores is not reserved twice.',
+    needs_matching:'No barcode match on the rack. Confirm the warehouse item for each listing; a suggestion does not count as stock until linked.',
+    out_of_stock:'No available units. Check the shelf before changing the store listing; receiving history alone does not prove a sale.',
+    short_stock:'Some stock is available, but fewer units than the listing offers.',
+    in_stock:'Matched stock covers the listed quantity after pending sales.',
+    unlisted:'Stocked items with no active eBay, Amazon or Facebook listing. Unconfirmed suggestions do not count as a listing.',
+    reviewed:'Issues you marked reviewed. A stock or quantity change can bring one back. Reviewing changes nothing in the warehouse or the stores.'
 };
 const state = {data:null, tab:'needs_matching', store:'', query:'', brand:'', shown:PAGE_SIZE, busy:false, selected:new Map()};
 function stockStatus(l){return l.stock_status || ({suggested:'needs_matching',unaccounted:'needs_matching',sold_out:'out_of_stock',accounted:l.short_by?'short_stock':'in_stock',handled:'reviewed',warehouse_unlisted:'unlisted'}[l.state]);}
@@ -212,10 +327,9 @@ function esc(value){
         {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
     ));
 }
-function plural(n, word){ return `${n} ${word}${n === 1 ? '' : 's'}`; }
-function storeName(store){ return store === 'ebay' ? 'eBay' : store === 'amazon' ? 'Amazon' : store; }
+function storeName(store){ return store === 'ebay' ? 'eBay' : store === 'amazon' ? 'Amazon' : store === 'warehouse' ? 'Warehouse' : store; }
 function missingImg(){
-    return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="#f1f5f9" rx="8"/></svg>');
+    return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="#e2e8f0" rx="8"/></svg>');
 }
 function finderUrl(l){
     const params = new URLSearchParams({
@@ -228,7 +342,7 @@ function finderUrl(l){
 }
 
 function searchText(value){
-    return String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    return String(value || '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase()
         .replace(/[^a-z0-9.]+/g, ' ').trim();
 }
 function oneLetterApart(a, b){
@@ -276,25 +390,25 @@ function searchRank(l){
     }
     return score + (texts.some(t=>t===searchText(query)) ? 100 : 0);
 }
+function searchingAllTabs(){ return !!state.query.trim() && document.getElementById('searchAllTabs').checked; }
 function visibleListings(){
     if (!state.data) return [];
-    const allTabs=state.query.trim() && document.getElementById('searchAllTabs').checked;
+    const allTabs=searchingAllTabs();
     return allItems().filter(l=>(allTabs || (state.tab==='all' ? l.store!=='warehouse' : stockStatus(l)===state.tab)) && (!state.store || l.store==='warehouse' || l.store===state.store) && (!state.brand || (l.attributes?.brands || []).includes(state.brand)))
         .map(l=>({listing:l,score:searchRank(l)})).filter(result=>result.score>0)
         .sort((a,b)=>b.score-a.score).map(result=>result.listing);
 }
 
 function chips(l){
-    const out = [`<span class="chip">${esc(LABELS[stockStatus(l)] || l.state)}</span>`, `<span class="chip store-${esc(l.store)}">${esc(l.store==='warehouse'?'Warehouse':storeName(l.store))}</span>`];
-    if(l.store!=='warehouse') out.push(`<span class="chip">Listed: ${l.qty}</span>`);
-    if (l.upc) out.push(`<span class="chip code">${esc(l.upc)}</span>`);
-    else out.push(`<span class="chip bad">no UPC on listing</span>`);
-    if (l.sku && l.sku !== l.upc && !l.hint) out.push(`<span class="chip code">SKU ${esc(l.sku)}</span>`);
-    if (l.hint) out.push(`<span class="chip hint">note: ${esc(l.hint)}</span>`);
+    const out = [`<span class="chip store store-${esc(l.store)}">${esc(storeName(l.store))}</span>`];
+    if (l.upc) out.push(`<span class="chip code" title="Barcode / UPC">${esc(l.upc)}</span>`);
+    else out.push('<span class="chip bad">no UPC on listing</span>');
+    const sku = String(l.sku || '').trim();
+    if (sku && !['none','null'].includes(sku.toLowerCase()) && sku !== l.upc && !l.hint) out.push(`<span class="chip code" title="SKU">SKU ${esc(sku)}</span>`);
+    if (l.hint) out.push(`<span class="chip hint" title="Note from the listing SKU field">note: ${esc(l.hint)}</span>`);
     if (l.match_kind === 'linked') out.push(`<span class="chip ok">linked by hand${l.link && l.link.stale ? ' · row gone' : ''}</span>`);
-    else if (l.match_kind === 'suffix') out.push(`<span class="chip ok">matched a -suffix unit</span>`);
-    else if (l.match_kind === 'zero-pad') out.push(`<span class="chip ok">matched (leading zeros differ)</span>`);
-    else if (l.match_kind === 'exact') out.push(`<span class="chip ok">barcode on rack</span>`);
+    else if (l.match_kind === 'suffix') out.push('<span class="chip ok">matched a -suffix unit</span>');
+    else if (l.match_kind === 'zero-pad') out.push('<span class="chip ok">matched (leading zeros differ)</span>');
     if (l.link && l.link.stale) out.push('<span class="chip bad">Previous link unavailable — check warehouse</span>');
     if (l.available_short_by || l.short_by) out.push(`<span class="chip bad">short by ${l.available_short_by ?? l.short_by}</span>`);
     if (l.state !== 'accounted' && l.received) {
@@ -303,15 +417,31 @@ function chips(l){
     return out.join('');
 }
 
+function stockStrip(l){
+    const sep = '<span class="sep"> · </span>';
+    const linked = l.state === 'accounted' || l.store === 'warehouse' || l.physical_qty != null;
+    const listed = Number(l.qty || 0);
+    if (!linked) {
+        return `<div class="stock"><span>Listed: <b>${listed}</b></span>${sep}<span>Warehouse: <b class="bad">not linked</b></span></div>`;
+    }
+    const physical = l.physical_qty ?? l.warehouse_qty ?? 0;
+    const pending = l.pending_sale_qty || 0;
+    const available = l.available_qty ?? l.warehouse_qty ?? 0;
+    const tone = available <= 0 ? 'bad' : (l.store !== 'warehouse' && available < listed) ? 'warn' : 'ok';
+    let html = `<span>Physical: <b>${physical}</b></span>${sep}<span>Pending sales: <b${pending > 0 ? ' class="warn"' : ''}>${pending}</b></span>${sep}<span>Available: <b class="${tone}">${available}</b></span>`;
+    if (l.store !== 'warehouse') html += `${sep}<span>Listed: <b>${listed}</b></span>`;
+    return `<div class="stock">${html}</div>`;
+}
+
 function rackLines(l){
     if (!l.warehouse.length) return l.state === 'accounted' ? '<div class="rack">The linked rack row has no stock left.</div>' : '';
     return '<div class="rack">' + l.warehouse.map(w =>
-        `#${w.searchrack_id} · <code>${esc(w.barcode)}</code> · ${w.location ? esc(w.location) : 'no location'} · qty ${w.quantity}`
+        `#${w.searchrack_id} · <code>${esc(w.barcode)}</code> · ${w.location ? `<span class="loc">${esc(w.location)}</span>` : 'no location'} · qty ${w.quantity}`
         + (w.note ? ` · <em>${esc(w.note)}</em>` : '')).join('<br>') + '</div>';
 }
 
 function suggestionBlocks(l){
-    return l.suggestions.map(s => `
+    return `<div class="suggestions">` + l.suggestions.map(s => `
         <div class="suggestion">
             <img src="${esc(s.image || '') || missingImg()}" alt="" loading="lazy" onerror="this.src='${missingImg()}'">
             <div>
@@ -324,45 +454,57 @@ function suggestionBlocks(l){
                 <label class="pick-link"><input type="checkbox" data-select-link data-searchrack-id="${s.searchrack_id}"
                     aria-label="Select match ${esc(s.barcode)} for ${esc(l.title || l.listing_key)}"
                     ${state.selected.get(selectionKey(l))?.searchrack_id === s.searchrack_id ? 'checked' : ''}>Select</label>
-                <button type="button" class="btn link" data-action="link" data-searchrack-id="${s.searchrack_id}">Link</button>
+                <button type="button" class="btn link sm" data-action="link" data-searchrack-id="${s.searchrack_id}">Link</button>
             </div>
-        </div>`).join('');
+        </div>`).join('') + '</div>';
 }
 
 function actionButtons(l){
     const buttons = [];
     if (stockStatus(l) === 'reviewed') {
-        buttons.push('<button type="button" class="btn" data-action="undo">Reopen issue</button>');
+        buttons.push('<button type="button" class="btn sm" data-action="undo">Reopen issue</button>');
     } else if (l.store==='warehouse') {
-        buttons.push(`<a class="btn" href="/unified-search?q=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">View warehouse item</a>`);
-        buttons.push(`<a class="btn" href="/listingagent?upc=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">Create listing</a>`);
-        buttons.push('<button type="button" class="btn quiet" data-action="handled">Mark reviewed</button>');
+        buttons.push(`<a class="btn sm primary" href="/listingagent?upc=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">Create listing</a>`);
+        buttons.push(`<a class="btn sm" href="/unified-search?q=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">View warehouse item</a>`);
+        buttons.push('<button type="button" class="btn sm quiet" data-action="handled">Mark reviewed</button>');
     } else {
-        buttons.push(`<a class="btn" href="${esc(finderUrl(l))}">Find in warehouse</a>`);
-        if (state.data?.claude_search_available && l.state !== 'accounted') buttons.push(`<button type="button" class="btn" data-action="search_warehouse">${l.ai_search ? 'View cached Claude search' : 'Search whole warehouse with Claude'}</button>`);
-        if (l.link) buttons.push('<button type="button" class="btn danger" data-action="unlink">Unlink</button>');
-        if (stockStatus(l) !== 'in_stock') buttons.push('<button type="button" class="btn quiet" data-action="handled">Mark reviewed</button>');
+        buttons.push(`<a class="btn sm${l.state === 'accounted' ? '' : ' primary'}" href="${esc(finderUrl(l))}">Find in warehouse</a>`);
+        if (state.data?.claude_search_available && l.state !== 'accounted') buttons.push(`<button type="button" class="btn sm" data-action="search_warehouse">${l.ai_search ? 'View cached Claude search' : 'Search whole warehouse with Claude'}</button>`);
+        if (l.link) buttons.push('<button type="button" class="btn sm danger" data-action="unlink">Unlink</button>');
+        if (stockStatus(l) !== 'in_stock') buttons.push('<button type="button" class="btn sm quiet" data-action="handled">Mark reviewed</button>');
     }
-    if (l.url) buttons.push(`<a class="btn quiet" href="${esc(l.url)}" target="_blank" rel="noopener">Open listing</a>`);
+    if (l.url) buttons.push(`<a class="btn sm quiet" href="${esc(l.url)}" target="_blank" rel="noopener">Open listing ↗</a>`);
     return `<div class="row-actions">${buttons.join('')}</div>`;
+}
+
+function aiNote(l){
+    if (!state.data?.claude_search_available) return '';
+    if (l.ai_search) {
+        return `<div class="why ai-note">Claude searched ${l.ai_search.catalog_rows.toLocaleString()} stocked rows. ${l.ai_search.match_count ? 'Suggestions require your confirmation.' : 'No suitable match found; existing suggestions remain.'} Saved result · original search ≈$${Number(l.ai_search.estimated_cost_usd).toFixed(3)}.</div>`;
+    }
+    return `<div class="why ai-note">Claude can search all ${(state.data.claude_catalog?.rows || 0).toLocaleString()} stocked rows and saved names · about $${Number(state.data.claude_catalog?.estimated_usd_low || 0).toFixed(2)}–$${Number(state.data.claude_catalog?.estimated_usd_high || 0).toFixed(2)} per new search · text only, results cached.</div>`;
 }
 
 function renderListing(l){
     const title = l.title || '(untitled listing)';
-    return `<div class="panel item" data-store="${esc(l.store)}" data-key="${esc(l.listing_key)}">
+    const status = stockStatus(l);
+    const open = !['accounted','handled'].includes(l.state) && status !== 'reviewed';
+    const showPill = state.tab === 'all' || searchingAllTabs();
+    return `<div class="panel item" data-store="${esc(l.store)}" data-key="${esc(l.listing_key)}" data-status="${esc(status)}">
         <img class="thumb" src="${esc(l.image || '') || missingImg()}" alt="" loading="lazy" onerror="this.src='${missingImg()}'">
-        <div>
-            <div class="title">${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</div>
+        <div class="body">
+            <div class="head">
+                <h3 class="title">${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</h3>
+                ${showPill ? `<span class="status-pill">${esc(LABELS[status] || l.state)}</span>` : ''}
+            </div>
             <div class="meta">${chips(l)}</div>
-            <div class="rack"><strong>Physical:</strong> ${l.physical_qty ?? (l.state==='accounted'?l.warehouse_qty:'not linked')} · <strong>Pending sales:</strong> ${l.pending_sale_qty || 0} · <strong>Available:</strong> ${l.available_qty ?? (l.state==='accounted'?l.warehouse_qty:'not confirmed')}</div>
+            ${stockStrip(l)}
             ${rackLines(l)}
-            ${!['accounted','handled'].includes(l.state) && stockStatus(l)!=='reviewed' && l.suggestions && l.suggestions.length ? suggestionBlocks(l) : ''}
-            ${!['accounted','handled'].includes(l.state) && stockStatus(l)!=='reviewed' ? (l.has_more_suggestions
-                ? '<div class="row-actions"><button type="button" class="btn" data-action="more_matches">Show 3 more matches</button><span class="why">Local search · no API cost</span></div>'
+            ${open && l.suggestions && l.suggestions.length ? suggestionBlocks(l) : ''}
+            ${open ? (l.has_more_suggestions
+                ? '<div class="row-actions"><button type="button" class="btn sm" data-action="more_matches">Show 3 more matches</button><span class="why">Local search · no API cost</span></div>'
                 : l.more_matches_loaded ? '<div class="why">No more matching products found locally.</div>' : '') : ''}
-            ${!['accounted','handled','warehouse_unlisted'].includes(l.state) && stockStatus(l)!=='reviewed' && state.data?.claude_search_available ? `<div class="why">${l.ai_search
-                ? `Claude searched ${l.ai_search.catalog_rows.toLocaleString()} stocked rows. ${l.ai_search.match_count ? 'Suggestions require your confirmation.' : 'No suitable match found; existing suggestions remain.'} Saved result · original search ≈$${Number(l.ai_search.estimated_cost_usd).toFixed(3)}.`
-                : `Search all ${(state.data.claude_catalog?.rows || 0).toLocaleString()} stocked rows and saved names · estimated $${Number(state.data.claude_catalog?.estimated_usd_low || 0).toFixed(2)}–$${Number(state.data.claude_catalog?.estimated_usd_high || 0).toFixed(2)} per new search. Text only; results cached.`}</div>` : ''}
+            ${open && l.state !== 'warehouse_unlisted' ? aiNote(l) : ''}
             ${actionButtons(l)}
             <div class="row-status"></div>
         </div>
@@ -398,7 +540,12 @@ document.getElementById('itemList').addEventListener('keydown', event => {
 function render(){
     updateLinkSelection();
     const rows = visibleListings();
-    document.getElementById('searchSummary').textContent = `${rows.length} results${state.query.trim() && document.getElementById('searchAllTabs').checked ? ' across all tabs' : ' in this tab'}`;
+    const filtered = !!(state.query.trim() || state.store || state.brand);
+    document.getElementById('searchSummary').textContent = filtered
+        ? `${rows.length} result${rows.length === 1 ? '' : 's'}${searchingAllTabs() ? ' across all views' : ' in this view'}`
+        : '';
+    document.getElementById('searchWrap').classList.toggle('has-query', !!state.query);
+    document.getElementById('toolbar').classList.toggle('searching', !!state.query.trim());
     const note = document.getElementById('sectionNote');
     note.textContent = NOTES[state.tab] || '';
     const bulkBar = document.getElementById('bulkBar');
@@ -411,7 +558,7 @@ function render(){
     historyBox.hidden = state.tab!=='reviewed' || !history.length;
     if(!historyBox.hidden) historyBox.innerHTML = `<details><summary>Earlier review history (${history.length})</summary><p>Saved reviews from earlier stock conditions or alert rules. These records do not change current stock.</p>${history.map(r=>`<p>${esc(r.dismissed_at)} · ${esc(r.upc || 'Listing issue')} · ${esc(r.store || 'all stores')}</p>`).join('')}</details>`;
     if (!rows.length) {
-        list.innerHTML = `<div class="panel empty"><strong>Nothing here.</strong>${state.query || state.store ? 'No listing on this tab matches the filter.' : 'This tab is clear.'}</div>`;
+        list.innerHTML = `<div class="panel empty"><strong>Nothing here.</strong>${filtered ? 'No listing on this view matches the filter.' : 'This view is clear.'}</div>`;
         document.getElementById('moreButton').hidden = true;
         return;
     }
@@ -426,22 +573,35 @@ function render(){
     more.textContent = `Show more (${rows.length - state.shown} left)`;
 }
 
+function formatTime(raw){
+    if (!raw) return '';
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+}
+
 function applyTotals(data){
     const t = data.totals;
     const by = data.stock_counts || allItems().reduce((out,l)=>{const key=stockStatus(l);out[key]=(out[key]||0)+1;return out;},{});
     const count = key => key==='all' ? t.listings : by[key] || 0;
+    const pct = key => t.listings ? Math.max(0, Math.min(100, 100*count(key)/t.listings)) : 0;
     document.getElementById('tileLive').textContent = t.listings.toLocaleString();
-    document.getElementById('tileLiveDetail').textContent = `eBay + merchant-fulfilled Amazon · ${t.rack_rows} stocked rows`;
+    const updated = formatTime(data.generated_at);
+    document.getElementById('tileLiveDetail').textContent = `· eBay + merchant-fulfilled Amazon · ${Number(t.rack_rows || 0).toLocaleString()} stocked rows${updated ? ' · updated ' + updated : ''}`;
     document.getElementById('tileCoverage').textContent = `${t.listings ? Math.round(100*count('in_stock')/t.listings) : 100}%`;
-    document.getElementById('tileCoverageDetail').textContent = `${count('in_stock')} of ${t.listings} active listings`;
-    document.getElementById('tileSuggested').textContent = count('needs_matching').toLocaleString();
-    document.getElementById('tileSoldOut').textContent = count('out_of_stock').toLocaleString();
-    document.getElementById('tileUnaccounted').textContent = count('unlisted').toLocaleString();
-    document.getElementById('tileShort').textContent = count('short_stock').toLocaleString();
+    document.getElementById('tileCoverageDetail').textContent = `enough stock · ${count('in_stock').toLocaleString()} of ${t.listings.toLocaleString()}`;
+    const bar = document.getElementById('healthBar');
+    bar.querySelector('.in').style.width = pct('in_stock') + '%';
+    bar.querySelector('.short').style.width = pct('short_stock') + '%';
+    bar.querySelector('.out').style.width = pct('out_of_stock') + '%';
+    bar.querySelector('.need').style.width = pct('needs_matching') + '%';
+    bar.title = `${count('in_stock')} enough · ${count('short_stock')} not enough · ${count('out_of_stock')} out of stock · ${count('needs_matching')} needs matching`;
     document.querySelectorAll('#tabs .tab').forEach(tab => {
         const key = tab.dataset.tab;
         const label = LABELS[key];
-        tab.textContent = `${label} (${count(key)})`;
+        tab.querySelector('.n').textContent = count(key).toLocaleString();
+        tab.querySelector('.l').textContent = label;
+        tab.setAttribute('aria-label', `${label} (${count(key)})`);
     });
 }
 
@@ -641,23 +801,35 @@ async function bulkHandled(){
     setBusy(false);
 }
 
+function selectTab(key){
+    if (!LABELS[key]) return;
+    state.tab = key;
+    state.shown = PAGE_SIZE;
+    document.querySelectorAll('#tabs .tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === key ? 'true' : 'false'));
+    render();
+}
+
 document.getElementById('itemList').addEventListener('click', event => {
     const button = event.target.closest('[data-action]');
     if (button) act(button.closest('.item'), button.dataset.action, button);
 });
 document.getElementById('tabs').addEventListener('click', event => {
     const tab = event.target.closest('.tab');
-    if (!tab) return;
-    state.tab = tab.dataset.tab;
-    state.shown = PAGE_SIZE;
-    document.querySelectorAll('#tabs .tab').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
-    render();
+    if (tab) selectTab(tab.dataset.tab);
 });
 document.getElementById('storeFilter').addEventListener('change', event => { state.store = event.target.value; state.shown = PAGE_SIZE; render(); });
 document.getElementById('brandFilter').addEventListener('change', event=>{state.brand=event.target.value;state.shown=PAGE_SIZE;render();});
 document.getElementById('searchAllTabs').addEventListener('change', () => {state.shown=PAGE_SIZE;render();});
-document.getElementById('clearSearchButton').addEventListener('click', () => {state.query='';document.getElementById('searchBox').value='';state.shown=PAGE_SIZE;render();});
+function clearSearch(){ state.query=''; document.getElementById('searchBox').value=''; state.shown=PAGE_SIZE; render(); }
+document.getElementById('clearSearchButton').addEventListener('click', clearSearch);
 document.getElementById('searchBox').addEventListener('input', event => { state.query = event.target.value; state.shown = PAGE_SIZE; render(); });
+document.getElementById('searchBox').addEventListener('keydown', event => { if (event.key === 'Escape') { clearSearch(); event.target.blur(); } });
+document.addEventListener('keydown', event => {
+    if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (['INPUT','SELECT','TEXTAREA'].includes(event.target.tagName) || event.target.isContentEditable) return;
+    event.preventDefault();
+    document.getElementById('searchBox').focus();
+});
 document.getElementById('moreButton').addEventListener('click', () => { state.shown += PAGE_SIZE; render(); });
 document.getElementById('bulkHandledButton').addEventListener('click', bulkHandled);
 document.getElementById('refreshButton').addEventListener('click', () => load(true));
