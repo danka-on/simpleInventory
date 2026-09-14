@@ -99,6 +99,17 @@ class ListingReconciliationTests(unittest.TestCase):
         self.assertEqual(payload['listings'], [])
         self.assertEqual(payload['totals']['live'], 0)
 
+    def test_stock_for_an_fba_listing_is_not_reported_as_unlisted(self):
+        self.rack(1, 'Waiting for the FBA shipment', '0222222222222', quantity=3)
+        self.rack(2, 'By ASIN', 'B0FBA00001')
+        self.rack(3, 'Truly unlisted', '444444444444')
+        self.amazon('SKU-FBA', 'At Amazon', '222222222222', channel='AMAZON_NA', asin='B0FBA00001')
+        self.amazon('SKU-OFF-FBA', 'Old FBA', '444444444444', status='Inactive', channel='AMAZON_NA')
+        payload = self.scan()
+        self.assertEqual(payload['listings'], [])
+        self.assertEqual([row['upc'] for row in payload['unlisted']], ['444444444444'])
+        self.assertEqual(payload['stock_counts'], {'unlisted': 1})
+
     def test_no_upc_listing_gets_a_title_suggestion_and_its_location_note(self):
         self.rack(1, 'Portmeirion Botanic Garden Teaspoons Set of 6', '749151436145', location='or3s1b1')
         self.rack(2, 'Lawrence Frames Silver Cluster Frame 5x7', '751148079136')

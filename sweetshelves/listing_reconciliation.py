@@ -284,6 +284,26 @@ def _load_listings():
     return listings
 
 
+def _load_fba_codes():
+    """Product keys of active FBA listings: their rack stock is listed, at Amazon."""
+    codes = set()
+    with ss_database.db_connection('amazonStore.db') as conn:
+        cols = _columns(conn.cursor(), 'ITEMS')
+        if 'fulfillment_channel' not in cols:
+            return codes
+        rows = conn.execute(
+            "SELECT UPC, ASIN, SKU FROM ITEMS"
+            " WHERE LOWER(TRIM(COALESCE(STATUS, ''))) = 'active'"
+            " AND UPPER(TRIM(COALESCE(FULFILLMENT_CHANNEL, ''))) LIKE 'AMAZON%'"
+        ).fetchall()
+    for row in rows:
+        for value in row:
+            key = _product_key(value)
+            if key:
+                codes.add(key)
+    return codes
+
+
 def _ensure_alert_tables(conn):
     """The helper creates these relative to the working directory; be safe here."""
     conn.execute('''
@@ -655,8 +675,10 @@ def build_reconciliation():
                     _apply_ai_result(entry, evidence, index)
 
     orders, reviews, facebook = _stock_context()
+    # Stock for an FBA listing is spoken for even though the listing itself is
+    # not reconciled here, so it must not surface as "warehouse without listings".
     unlisted, stock_counts = stock_matching.apply(results, rack, orders,
-        {r['snapshot_hash'] for r in reviews}, facebook, _product_key)
+        {r['snapshot_hash'] for r in reviews}, facebook | _load_fba_codes(), _product_key)
     for row in unlisted:
         row['attributes'] = name_matching.attributes(row['title'])
     current_review_hashes = {l['review_hash'] for l in results+unlisted if l['stock_status'] == 'reviewed'}
