@@ -1140,12 +1140,15 @@ class AmazonManager:
             'total': repaired_local + repaired_catalog,
         }
     
-    def sync_listings_to_db(self):
+    def sync_listings_to_db(self, force=False):
         """
         Fetch active listings from Amazon and sync to amazonStore.db
         Similar to eBay's ebayStore.db
         With quota protection and smart syncing
-        
+
+        force: run even if the last sync was recent (a person asked for it);
+        the automatic worker leaves it False to protect the report quota.
+
         Returns:
             Number of listings synced, or -1 if quota exceeded
         """
@@ -1194,9 +1197,10 @@ class AmazonManager:
             cur.execute('SELECT value, updated_at FROM sync_metadata WHERE key = ?', ('last_listings_sync',))
             last_sync_row = cur.fetchone()
 
-            if last_sync_row:
-                last_sync_time = datetime.fromisoformat(last_sync_row[1])
-                time_since_sync = (datetime.now() - last_sync_time).total_seconds() / 3600  # hours
+            if last_sync_row and not force:
+                # updated_at is stored as UTC, so compare against UTC.
+                last_sync_time = datetime.fromisoformat(str(last_sync_row[1]).rstrip('Z'))
+                time_since_sync = (datetime.utcnow() - last_sync_time).total_seconds() / 3600  # hours
 
                 # Only sync if it's been more than 4 hours (reduce quota usage)
                 if time_since_sync < 4:

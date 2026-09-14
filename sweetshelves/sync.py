@@ -264,10 +264,10 @@ def sync_all():
                 print(f"⚠️ Amazon orders sync failed: {e}")
                 results['amazon_orders'] = str(e)
             
-            # Sync Amazon listings
+            # Sync Amazon listings (a person asked, so skip the quota throttle)
             try:
                 amazon = ss_integrations.AmazonManager()
-                amazon.sync_listings_to_db()
+                amazon.sync_listings_to_db(force=True)
                 update_sync_timestamp('amazon_listings')
                 results['amazon_listings'] = 'success'
             except Exception as e:
@@ -439,7 +439,8 @@ def sync_amazon_listings_api():
         return jsonify({'success': False, 'message': 'Amazon integration not available'}), 500
     try:
         amazon = ss_integrations.AmazonManager()
-        result = amazon.sync_listings_to_db()
+        # A manual sync must really run; only the automatic worker is throttled.
+        result = amazon.sync_listings_to_db(force=True)
         
         # Handle quota exceeded
         if result == -1:
@@ -453,7 +454,7 @@ def sync_amazon_listings_api():
         if result == 0:
             return jsonify({
                 'success': True, 
-                'message': 'No listings to sync (last sync was recent)'
+                'message': 'Amazon returned no listings to sync'
             })
         
         update_sync_timestamp('amazon_listings')
