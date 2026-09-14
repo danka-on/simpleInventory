@@ -327,10 +327,12 @@ class NameDictationTests(unittest.TestCase):
         self.post = network.start()
         self.addCleanup(network.stop)
 
-    def dictate(self, filename='name.webm', audio=b'spoken name', headers=None):
+    def dictate(self, filename='name.webm', audio=b'spoken name', headers=None, kind=None):
+        data = {'audio': (io.BytesIO(audio), filename)}
+        if kind is not None:
+            data['kind'] = kind
         return self.client.post('/api/warehouse/name-dictation', headers=headers or {},
-                                data={'audio': (io.BytesIO(audio), filename)},
-                                content_type='multipart/form-data')
+                                data=data, content_type='multipart/form-data')
 
     def test_label_read_aloud_becomes_a_clean_name(self):
         self.post.return_value = VoiceNoteTests.response(
@@ -379,6 +381,30 @@ class NameDictationTests(unittest.TestCase):
         response = self.dictate()
         self.assertEqual(response.status_code, 504)
         self.assertNotIn('secret', response.get_data(as_text=True))
+
+    def test_note_keeps_the_spoken_language_and_punctuation(self):
+        self.post.return_value = VoiceNoteTests.response({'text': ' Trūksta dviejų šaukštų.  Dėžė pažeista. '})
+        response = self.dictate(filename='note.webm', kind='note')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['text'], 'Trūksta dviejų šaukštų. Dėžė pažeista.')
+        call = self.post.call_args
+        self.assertNotIn('language', call.kwargs['data'])
+        self.assertNotIn('prompt', call.kwargs['data'])
+        self.assertEqual(call.kwargs['files']['file'][0], 'note.webm')
+
+    def test_notes_may_be_long_but_names_are_capped(self):
+        self.post.return_value = VoiceNoteTests.response({'text': 'x' * 2500})
+        self.assertEqual(len(self.dictate(kind='note').json['text']), 2000)
+        self.assertEqual(len(self.dictate(kind='name').json['text']), 200)
+
+    def test_silent_note_and_unknown_kind_are_rejected(self):
+        self.post.return_value = VoiceNoteTests.response({'text': 'Ačiū.'})
+        response = self.dictate(kind='note')
+        self.assertEqual(response.status_code, 422)
+        self.assertIn('the note', response.json['error'])
+        self.post.reset_mock()
+        self.assertEqual(self.dictate(kind='essay').status_code, 400)
+        self.post.assert_not_called()
 
 
 if __name__ == '__main__':

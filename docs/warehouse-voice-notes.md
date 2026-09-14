@@ -120,8 +120,19 @@ The text fills the name field for the worker to check; nothing is saved until
 gpt-4o-transcribe: it spelled "Zwilling Henckels" right in about 1.2 s, where
 whisper-1 wrote "Henkel".
 
+The optional note has its own mic and is sent with `kind=note`: no language or
+spelling hint, so a Lithuanian note stays Lithuanian (translate it later from the
+warehouse page), punctuation is kept and up to 2000 characters come back. Dictated
+text is appended to anything already typed in the note.
+
+Pressing a mic plays a rising tone before the microphone opens, the recording ending
+plays a falling tone, and a confirmed name or saved photos play a three-note chime.
+The name field is a one-row textarea that grows, so long names wrap instead of
+scrolling sideways. The old "Read the label" paragraph under it is gone.
+
 Items without a thumbnail then get a photo step (`static/warehouse-identity.js`):
-any number of photos, shrunk to 1600 px in the browser. **Save** stores the first
-as the thumbnail (`/api/items-prep/temp-item`) and all of them as prep photos
-(`/api/items_prep/diagnostic/<upc>/photos`); **Skip** adds the item without photos.
-Closing the prompt at either step does not add the item.
+any number of photos, shrunk to 1600 px in the browser. The first tile is marked
+**Thumbnail**; drag a tile onto another spot or tap its star to change the order.
+**Save** stores the first as the thumbnail (`/api/items-prep/temp-item`) and all of
+them, in order, as prep photos (`/api/items_prep/diagnostic/<upc>/photos`); **Skip**
+adds the item without photos. Closing the prompt at either step does not add the item.

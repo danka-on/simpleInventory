@@ -2,25 +2,46 @@
  *
  * The page owns the modal and the promise its scan waits on; this file owns what
  * happens inside it. Step 1 names the item, typed or dictated through
- * /api/warehouse/name-dictation. When the page confirms a saved name with next(),
- * items that need a picture continue to step 2, where any number of photos can be
- * taken, saved or skipped. Step 2 ends by firing "warehouse-identity:complete" on
- * #missingTitleModal with { title, photos, imageUrl }.
+ * /api/warehouse/name-dictation; the optional note can be dictated too. When the
+ * page confirms a saved name with next(), items that need a picture continue to
+ * step 2: take photos, reorder them (the first is the thumbnail), save or skip.
+ * Step 2 ends by firing "warehouse-identity:complete" on #missingTitleModal with
+ * { title, photos, imageUrl }. Each feedback sound fires "warehouse-identity:sound".
  */
 (() => {
-    const MAX_RECORDING_MS = 15000;
-    const QUIET_STOP_MS = 1300;
     const NO_SPEECH_STOP_MS = 8000;
     const PHOTO_EDGE_PX = 1600;
-    const MIC_LABELS = {
-        idle: 'Tap and say the name',
-        starting: 'Starting microphone\u2026',
-        listening: 'Listening\u2026',
-        working: 'Writing it down\u2026'
+    const DICTATION = {
+        name: {
+            button: 'warehouseDictateBtn',
+            label: 'warehouseDictateLabel',
+            field: 'missingTitleInput',
+            maxMs: 15000,
+            quietMs: 1300,
+            labels: { idle: 'Tap and say the name', starting: 'Starting microphone\u2026', listening: 'Listening\u2026', working: 'Writing it down\u2026' },
+            prompt: 'Say the brand, item, size and color. Tap the mic when done.',
+            done: 'Check it against the label, then confirm.'
+        },
+        note: {
+            button: 'warehouseNoteDictateBtn',
+            label: '',
+            field: 'missingTitleNoteInput',
+            maxMs: 60000,
+            quietMs: 2000,
+            labels: { idle: 'Dictate note', starting: 'Starting microphone\u2026', listening: 'Stop dictating the note', working: 'Writing the note\u2026' },
+            prompt: 'Say the note. Tap the mic when done.',
+            done: 'Note added. Check it before confirming.'
+        }
+    };
+    const SOUNDS = {
+        'mic-on': { wave: 'sine', notes: [660, 990], step: 0.09, length: 0.08 },
+        'mic-off': { wave: 'sine', notes: [990, 660], step: 0.09, length: 0.08 },
+        confirm: { wave: 'triangle', notes: [784, 1047, 1319], step: 0.1, length: 0.14 }
     };
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const byId = id => document.getElementById(id);
-    const flow = { generation: 0 };
+    const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const flow = { generation: 0, photos: [] };
     let dictation = null;
     let recognition = null;
 
@@ -33,26 +54,84 @@
     const nameStatus = (message, tone) => setStatus('warehouseIdentityStatus', message, tone);
     const photoStatus = (message, tone) => setStatus('missingTitlePhotoStatus', message, tone);
 
-    function fillName(text) {
-        const input = byId('missingTitleInput');
-        if (!input) return;
-        input.value = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+    // ---- Sounds ----------------------------------------------------------
+
+    function audioContext() {
+        const Context = window.AudioContext || window.webkitAudioContext;
+        if (!Context) return null;
+        try {
+            if (!window.audioCtx) window.audioCtx = new Context();
+            if (window.audioCtx.state === 'suspended') window.audioCtx.resume().catch(() => {});
+            return window.audioCtx;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    // Plays a short tone sequence; returns roughly how long it lasts in ms.
+    function playSound(name) {
+        const sound = SOUNDS[name];
+        document.dispatchEvent(new CustomEvent('warehouse-identity:sound', { detail: name }));
+        const context = audioContext();
+        if (!context || !sound) return 0;
+        try {
+            const start = context.currentTime + 0.01;
+            sound.notes.forEach((frequency, index) => {
+                const at = start + index * sound.step;
+                const osc = context.createOscillator();
+                const gain = context.createGain();
+                osc.type = sound.wave;
+                osc.frequency.setValueAtTime(frequency, at);
+                gain.gain.setValueAtTime(0.0001, at);
+                gain.gain.exponentialRampToValueAtTime(0.25, at + 0.012);
+                gain.gain.exponentialRampToValueAtTime(0.0001, at + sound.length);
+                osc.connect(gain);
+                gain.connect(context.destination);
+                osc.start(at);
+                osc.stop(at + sound.length + 0.02);
+                osc.onended = () => {
+                    osc.disconnect();
+                    gain.disconnect();
+                };
+            });
+        } catch (_) {
+            return 0;
+        }
+        return Math.round(((sound.notes.length - 1) * sound.step + sound.length) * 1000) + 30;
     }
 
     // ---- Dictation -------------------------------------------------------
 
     const canRecord = () => !!(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 
-    function setMic(state) {
-        const button = byId('warehouseDictateBtn');
+    function setMic(kind, state) {
+        const config = DICTATION[kind];
+        const button = byId(config.button);
         if (!button) return;
         button.dataset.state = state;
         button.disabled = state === 'starting' || state === 'working';
         button.setAttribute('aria-pressed', state === 'listening' ? 'true' : 'false');
+        button.setAttribute('aria-label', config.labels[state]);
         button.style.setProperty('--level', '0');
-        const label = byId('warehouseDictateLabel');
-        if (label) label.textContent = MIC_LABELS[state];
+        const label = config.label && byId(config.label);
+        if (label) label.textContent = config.labels[state];
+    }
+
+    function resetMics() {
+        Object.keys(DICTATION).forEach(kind => setMic(kind, 'idle'));
+    }
+
+    function applyDictation(kind, text) {
+        const field = byId(DICTATION[kind].field);
+        if (!field) return;
+        const heard = String(text || '').replace(/\s+/g, ' ').trim();
+        if (kind === 'note') {
+            const existing = field.value.trim();
+            field.value = ((existing ? existing + ' ' : '') + heard).slice(0, 2000);
+        } else {
+            field.value = heard.slice(0, 200);
+        }
+        field.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
     function recordingType() {
@@ -95,35 +174,39 @@
             releaseSession(session);
         }
         if (recognition) {
-            try { recognition.abort(); } catch (_) {}
+            try { recognition.speech.abort(); } catch (_) {}
             recognition = null;
         }
-        setMic('idle');
+        resetMics();
     }
 
     function finishDictation(session, message, tone) {
         if (dictation !== session) return;
         dictation = null;
-        setMic('idle');
+        setMic(session.kind, 'idle');
         nameStatus(message, tone);
     }
 
-    async function startDictation() {
+    async function startDictation(kind) {
         cancelDictation();
         // The page may still be saying "Item needs a name"; don't record it.
         try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (_) {}
-        const session = { chunks: [] };
+        const config = DICTATION[kind];
+        const session = { kind, chunks: [] };
         dictation = session;
-        setMic('starting');
+        setMic(kind, 'starting');
         nameStatus('');
+        // The start tone plays before the microphone opens, so it is heard, not recorded.
+        await wait(playSound('mic-on'));
+        if (dictation !== session) return;
         try {
             session.stream = await navigator.mediaDevices.getUserMedia({
                 audio: { echoCancellation: true, noiseSuppression: true }
             });
         } catch (error) {
             finishDictation(session, error && error.name === 'NotAllowedError'
-                ? 'Microphone access is blocked. Allow it for this site, or type the name.'
-                : 'Microphone unavailable. Type the name instead.', 'bad');
+                ? 'Microphone access is blocked. Allow it for this site, or type instead.'
+                : 'Microphone unavailable. Type instead.', 'bad');
             return;
         }
         if (dictation !== session) {
@@ -140,20 +223,21 @@
             session.recorder.start();
         } catch (_) {
             releaseSession(session);
-            finishDictation(session, 'Recording is not supported here. Type the name instead.', 'bad');
+            finishDictation(session, 'Recording is not supported here. Type instead.', 'bad');
             return;
         }
         session.startedAt = Date.now();
-        session.maxTimer = setTimeout(() => stopRecording(session), MAX_RECORDING_MS);
+        session.maxTimer = setTimeout(() => stopRecording(session), config.maxMs);
         watchForPause(session);
-        setMic('listening');
-        nameStatus('Say the brand, item, size and color. Tap the mic when done.');
+        setMic(kind, 'listening');
+        nameStatus(config.prompt);
     }
 
     // Stop by itself once the speaker pauses, so dictating is a single tap.
     function watchForPause(session) {
         const Context = window.AudioContext || window.webkitAudioContext;
         if (!Context) return;
+        const config = DICTATION[session.kind];
         try {
             session.audio = new Context();
             if (session.audio.state === 'suspended') session.audio.resume().catch(() => {});
@@ -174,7 +258,7 @@
                 const level = Math.sqrt(sum / samples.length);
                 if (noise === null) noise = level;
                 const threshold = Math.max(0.015, noise * 2.5);
-                const button = byId('warehouseDictateBtn');
+                const button = byId(config.button);
                 if (button) button.style.setProperty('--level', Math.min(1, level / (threshold * 2)).toFixed(2));
                 const now = Date.now();
                 if (level > threshold) {
@@ -185,7 +269,7 @@
                     noise = level < noise ? level : noise + (level - noise) * 0.05;
                     if (spokenMs >= 300) {
                         quietSince = quietSince || now;
-                        if (now - quietSince >= QUIET_STOP_MS) stopRecording(session);
+                        if (now - quietSince >= config.quietMs) stopRecording(session);
                     }
                 }
                 if (!spokenMs && now - session.startedAt >= NO_SPEECH_STOP_MS) stopRecording(session);
@@ -214,19 +298,23 @@
         session.transcribing = true;
         releaseSession(session);
         if (dictation !== session) return;
+        // Give the phone a moment to leave recording mode so the stop tone is audible.
+        setTimeout(() => playSound('mic-off'), 120);
+        const config = DICTATION[session.kind];
         const type = (session.recorder && session.recorder.mimeType) || recordingType() || 'audio/webm';
         const audio = new Blob(session.chunks, { type });
         if (!audio.size) {
             finishDictation(session, "Didn't catch that. Tap the microphone and try again.", 'bad');
             return;
         }
-        setMic('working');
+        setMic(session.kind, 'working');
         nameStatus('');
         session.controller = new AbortController();
-        const timeout = setTimeout(() => session.controller.abort(), 25000);
+        const timeout = setTimeout(() => session.controller.abort(), 30000);
         try {
             const form = new FormData();
-            form.append('audio', audio, 'name' + fileExtension(type));
+            form.append('kind', session.kind);
+            form.append('audio', audio, session.kind + fileExtension(type));
             const response = await fetch('/api/warehouse/name-dictation', {
                 method: 'POST',
                 body: form,
@@ -234,60 +322,77 @@
             });
             const result = await response.json().catch(() => ({}));
             if (dictation !== session) return;
-            if (!response.ok || !result.success) throw new Error(result.error || 'Dictation failed. Type the name or try again.');
-            fillName(result.text);
-            finishDictation(session, 'Check it against the label, then confirm.', 'ok');
+            if (!response.ok || !result.success) throw new Error(result.error || 'Dictation failed. Type it or try again.');
+            applyDictation(session.kind, result.text);
+            finishDictation(session, config.done, 'ok');
         } catch (error) {
             finishDictation(session, error && error.name === 'AbortError'
-                ? 'Dictation timed out. Try again or type the name.'
-                : (error && error.message) || 'Dictation failed. Type the name or try again.', 'bad');
+                ? 'Dictation timed out. Try again or type it.'
+                : (error && error.message) || 'Dictation failed. Type it or try again.', 'bad');
         } finally {
             clearTimeout(timeout);
         }
     }
 
     // Browsers without MediaRecorder can still use their own speech service.
-    function startBrowserSpeech() {
+    function startBrowserSpeech(kind) {
         cancelDictation();
+        const config = DICTATION[kind];
         const speech = new SpeechRecognition();
-        recognition = speech;
-        speech.lang = 'en-US';
+        const session = { kind, speech };
+        recognition = session;
+        speech.lang = kind === 'name' ? 'en-US' : (document.documentElement.lang || navigator.language || 'en-US');
         speech.interimResults = false;
         speech.onresult = event => {
-            if (recognition !== speech) return;
-            fillName(event.results[0][0].transcript);
-            nameStatus('Check it against the label, then confirm.', 'ok');
+            if (recognition !== session) return;
+            applyDictation(kind, event.results[0][0].transcript);
+            nameStatus(config.done, 'ok');
         };
         speech.onerror = () => {
-            if (recognition === speech) nameStatus('Dictation unavailable. Type the name instead.', 'bad');
+            if (recognition === session) nameStatus('Dictation unavailable. Type instead.', 'bad');
         };
         speech.onend = () => {
-            if (recognition !== speech) return;
+            if (recognition !== session) return;
             recognition = null;
-            setMic('idle');
+            setMic(kind, 'idle');
+            playSound('mic-off');
         };
-        setMic('listening');
-        nameStatus('Say the brand, item, size and color. Tap the mic when done.');
+        playSound('mic-on');
+        setMic(kind, 'listening');
+        nameStatus(config.prompt);
         try {
             speech.start();
         } catch (_) {
             recognition = null;
-            setMic('idle');
-            nameStatus('Dictation unavailable. Type the name instead.', 'bad');
+            setMic(kind, 'idle');
+            nameStatus('Dictation unavailable. Type instead.', 'bad');
         }
     }
 
-    function toggleDictation() {
+    function toggleDictation(kind) {
         if (recognition) {
-            try { recognition.stop(); } catch (_) {}
+            try { recognition.speech.stop(); } catch (_) {}
             return;
         }
         if (dictation) {
-            if (dictation.recorder && !dictation.stopping) stopRecording(dictation);
-            return;
+            if (dictation.kind === kind) {
+                if (dictation.recorder && !dictation.stopping) stopRecording(dictation);
+                return;
+            }
+            // The other field is still being written down; let it finish.
+            if (dictation.stopping) return;
+            cancelDictation();
         }
-        if (canRecord()) startDictation();
-        else if (SpeechRecognition) startBrowserSpeech();
+        if (canRecord()) startDictation(kind);
+        else if (SpeechRecognition) startBrowserSpeech(kind);
+    }
+
+    // The name wraps onto more lines instead of scrolling sideways, so all of it shows.
+    function fitNameField() {
+        const field = byId('missingTitleInput');
+        if (!field || field.tagName !== 'TEXTAREA' || !field.offsetParent) return;
+        field.style.height = 'auto';
+        field.style.height = (field.scrollHeight + field.offsetHeight - field.clientHeight) + 'px';
     }
 
     // ---- Steps and photos ------------------------------------------------
@@ -308,21 +413,76 @@
         }
         const heading = byId('missingTitleHeading');
         if (heading) heading.textContent = photos ? 'Add photos' : 'Name this item';
+        if (!photos) requestAnimationFrame(fitNameField);
+    }
+
+    function movePhoto(from, to) {
+        if (flow.busy || from === to || !flow.photos[from]) return;
+        const [photo] = flow.photos.splice(from, 1);
+        flow.photos.splice(to, 0, photo);
+        renderPhotos();
+        photoStatus(photoHint());
+    }
+
+    // Drag a tile onto another tile to swap places in the order; the first is the thumbnail.
+    function enableDrag(tile, index) {
+        tile.addEventListener('pointerdown', event => {
+            if (flow.busy || event.button > 0 || (event.target.closest && event.target.closest('button'))) return;
+            const strip = tile.parentElement;
+            const start = { x: event.clientX, y: event.clientY };
+            let moved = false;
+            let target = index;
+            try { tile.setPointerCapture(event.pointerId); } catch (_) {}
+            const tiles = () => Array.from(strip.children);
+            const onMove = move => {
+                const dx = move.clientX - start.x;
+                const dy = move.clientY - start.y;
+                if (!moved && Math.hypot(dx, dy) < 8) return;
+                moved = true;
+                tile.classList.add('is-dragging');
+                tile.style.transform = `translate(${dx}px, ${dy}px)`;
+                target = index;
+                tiles().forEach((other, position) => {
+                    const box = other.getBoundingClientRect();
+                    const over = other !== tile && move.clientX >= box.left && move.clientX <= box.right
+                        && move.clientY >= box.top && move.clientY <= box.bottom;
+                    other.classList.toggle('is-drop-target', over);
+                    if (over) target = position;
+                });
+            };
+            const onEnd = () => {
+                tile.removeEventListener('pointermove', onMove);
+                tile.removeEventListener('pointerup', onEnd);
+                tile.removeEventListener('pointercancel', onEnd);
+                if (moved && target !== index) {
+                    movePhoto(index, target);
+                    return;
+                }
+                tile.classList.remove('is-dragging');
+                tile.style.transform = '';
+                tiles().forEach(other => other.classList.remove('is-drop-target'));
+            };
+            tile.addEventListener('pointermove', onMove);
+            tile.addEventListener('pointerup', onEnd);
+            tile.addEventListener('pointercancel', onEnd);
+        });
     }
 
     function renderPhotos() {
-        const photos = flow.photos || [];
+        const photos = flow.photos;
         const strip = byId('warehousePhotoStrip');
         if (strip) {
             strip.textContent = '';
             photos.forEach((src, index) => {
-                const figure = document.createElement('figure');
-                figure.className = 'identity-photo';
+                const tile = document.createElement('figure');
+                tile.className = 'identity-photo' + (index === 0 ? ' is-thumbnail' : '');
                 const image = document.createElement('img');
                 image.src = src;
-                image.alt = `Photo ${index + 1}`;
+                image.alt = index === 0 ? 'Thumbnail photo' : `Photo ${index + 1}`;
+                image.draggable = false;
                 const remove = document.createElement('button');
                 remove.type = 'button';
+                remove.className = 'identity-photo-remove';
                 remove.textContent = '\u00d7';
                 remove.disabled = !!flow.busy;
                 remove.setAttribute('aria-label', `Remove photo ${index + 1}`);
@@ -330,9 +490,26 @@
                     if (flow.busy) return;
                     flow.photos.splice(index, 1);
                     renderPhotos();
+                    photoStatus(photoHint());
                 });
-                figure.append(image, remove);
-                strip.appendChild(figure);
+                tile.append(image, remove);
+                if (index === 0) {
+                    const badge = document.createElement('span');
+                    badge.className = 'identity-photo-badge';
+                    badge.textContent = 'Thumbnail';
+                    tile.appendChild(badge);
+                } else {
+                    const promote = document.createElement('button');
+                    promote.type = 'button';
+                    promote.className = 'identity-photo-promote';
+                    promote.textContent = '\u2605';
+                    promote.disabled = !!flow.busy;
+                    promote.setAttribute('aria-label', `Make photo ${index + 1} the thumbnail`);
+                    promote.addEventListener('click', () => movePhoto(index, 0));
+                    tile.appendChild(promote);
+                }
+                enableDrag(tile, index);
+                strip.appendChild(tile);
             });
         }
         const current = byId('missingTitlePhotoPreview');
@@ -358,10 +535,9 @@
     }
 
     function photoHint() {
-        if (flow.photos.length) return 'The first photo becomes the thumbnail.';
-        return flow.existingImage
-            ? 'Current thumbnail shown. A new photo replaces it.'
-            : 'Take one or more photos. The first becomes the thumbnail.';
+        if (flow.photos.length > 1) return 'Drag a photo to the first spot, or tap \u2605, to make it the thumbnail.';
+        if (!flow.photos.length && flow.existingImage) return 'Current thumbnail shown. A new photo replaces it.';
+        return '';
     }
 
     function readAsDataUrl(file) {
@@ -481,6 +657,7 @@
                 { method: 'POST', body: form }, 'Photos were not saved. Try again or skip.');
             if (generation !== flow.generation) return;
             flow.busy = false;
+            playSound('confirm');
             complete(job.photos.length, flow.thumbnail.url);
         } catch (error) {
             if (generation !== flow.generation) return;
@@ -504,6 +681,8 @@
         });
         nameStatus('');
         photoStatus('');
+        const field = byId('missingTitleInput');
+        if (field) field.style.height = '';
         showStep('name');
         renderPhotos();
     }
@@ -554,6 +733,7 @@
         // (it will fire "warehouse-identity:complete"), false when naming is finished.
         next(title) {
             const name = String(title || '').replace(/\s+/g, ' ').trim();
+            playSound('confirm');
             if (flow.title && flow.title !== name) flow.thumbnail = { source: '', url: '' };
             flow.title = name;
             if (!flow.photosWanted) return false;
@@ -567,12 +747,20 @@
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-        const mic = byId('warehouseDictateBtn');
-        if (mic && (canRecord() || SpeechRecognition)) {
-            mic.hidden = false;
-            setMic('idle');
-            mic.addEventListener('click', toggleDictation);
-        }
+        const canDictate = canRecord() || !!SpeechRecognition;
+        Object.keys(DICTATION).forEach(kind => {
+            const button = byId(DICTATION[kind].button);
+            if (!button || !canDictate) return;
+            button.hidden = false;
+            setMic(kind, 'idle');
+            button.addEventListener('click', () => toggleDictation(kind));
+        });
+        const nameField = byId('missingTitleInput');
+        if (nameField) nameField.addEventListener('input', fitNameField);
+        window.addEventListener('resize', fitNameField);
+        const modal = byId('missingTitleModal');
+        // Any tap inside the prompt unlocks audio, so later tones are allowed to play.
+        if (modal) modal.addEventListener('pointerdown', () => audioContext(), true);
         const take = byId('missingTitlePhotoBtn');
         const input = byId('missingTitlePhotoInput');
         if (take && input) {
