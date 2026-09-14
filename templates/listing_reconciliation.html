@@ -334,7 +334,7 @@ function actionButtons(l){
     if (stockStatus(l) === 'reviewed') {
         buttons.push('<button type="button" class="btn" data-action="undo">Reopen issue</button>');
     } else if (l.store==='warehouse') {
-        buttons.push(`<a class="btn" href="/all-search?q=${encodeURIComponent(l.upc)}">View warehouse item</a>`);
+        buttons.push(`<a class="btn" href="/unified-search?q=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">View warehouse item</a>`);
         buttons.push(`<a class="btn" href="/listingagent?upc=${encodeURIComponent(l.upc)}&return=%2Fstore-listing-helper%3Ftab%3Dunlisted">Create listing</a>`);
         buttons.push('<button type="button" class="btn quiet" data-action="handled">Mark reviewed</button>');
     } else {
