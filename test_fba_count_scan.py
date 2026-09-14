@@ -742,6 +742,30 @@ class FbaCountScanTest(unittest.TestCase):
         self.assertEqual(items[0]["fba_offer_strategy"], "convert_existing")
         self.assertEqual(items[0]["proposed_fba_seller_sku"], "")
 
+    def test_amazon_fulfilled_listing_with_spare_stock_keeps_its_own_sku(self):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.row_factory = sqlite3.Row
+        db.execute("""CREATE TABLE SEARCHRACK (
+                    ID INTEGER PRIMARY KEY, BARCODE TEXT, ITEM_POSITION TEXT, QUANTITY INTEGER)""")
+        db.execute("INSERT INTO SEARCHRACK (BARCODE, ITEM_POSITION, QUANTITY) VALUES (?, ?, ?)",
+                   ("047596288405", "OR1S1B1", 3))
+        items = [{
+            "barcode": "047596288405", "seller_sku": "1V-ER80-WQ1J-FBA-2", "quantity": 1,
+            "fba": {"amazon_listing": {"seller_sku": "1V-ER80-WQ1J-FBA-2", "fulfillment_channel": "AMAZON_NA"}},
+        }]
+        try:
+            ss_fba_inventory._fba_apply_inventory_offer_strategy(db.cursor(), items)
+        finally:
+            db.close()
+        self.assertEqual(items[0]["local_inventory_remaining_after_fba"], 2)
+        self.assertEqual(items[0]["fba_offer_strategy"], "convert_existing")
+        self.assertEqual(items[0]["proposed_fba_seller_sku"], "")
+
+    def test_proposed_companion_sku_never_stacks_fba_suffixes(self):
+        self.assertEqual(ss_fba_inventory._fba_proposed_seller_sku("FBM-SKU"), "FBM-SKU-FBA")
+        self.assertEqual(ss_fba_inventory._fba_proposed_seller_sku("FBM-SKU-FBA"), "FBM-SKU-FBA-2")
+        self.assertEqual(ss_fba_inventory._fba_proposed_seller_sku("FBM-SKU-FBA-2"), "FBM-SKU-FBA-3")
+
     def test_companion_fba_offer_clones_sales_terms_without_changing_source(self):
         listings = Mock()
 

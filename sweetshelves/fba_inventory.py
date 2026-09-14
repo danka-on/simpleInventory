@@ -314,6 +314,9 @@ def _fba_proposed_seller_sku(source_sku):
     source = ss_fba_schema._fba_trim(source_sku, 255)
     if not source:
         return ''
+    base, _sep, suffix = source.rpartition('-')
+    if suffix.isdigit() and base.upper().endswith('-FBA'):
+        return ss_fba_schema._fba_trim(f'{base}-{int(suffix) + 1}', 255)
     if source.upper().endswith('-FBA'):
         return ss_fba_schema._fba_trim(source + '-2', 255)
     return ss_fba_schema._fba_trim(source[:251] + '-FBA', 255)
@@ -354,7 +357,20 @@ def _fba_apply_inventory_offer_strategy(cur, items):
                 or ss_fba_schema._fba_trim(item.get('fba_enablement_status'), 40).lower() in ('enabling', 'ready')
             )
         ), '')
-        strategy = existing_strategy or ('separate_fba_sku' if remaining > 0 else 'convert_existing')
+        # A companion SKU only exists to keep a merchant-fulfilled offer selling.
+        # A listing Amazon already fulfills ships as-is; cloning it creates a
+        # second FBA offer that has to activate from scratch.
+        already_fba = any(
+            not ss_fba_schema._fba_trim(item.get('fbm_seller_sku'), 255)
+            and ss_fba_schema._fba_trim(
+                ((item.get('fba') if isinstance(item.get('fba'), dict) else {}).get('amazon_listing') or {})
+                .get('fulfillment_channel'), 40
+            ).upper().startswith('AMAZON')
+            for item in bucket['items']
+        )
+        strategy = existing_strategy or (
+            'separate_fba_sku' if remaining > 0 and not already_fba else 'convert_existing'
+        )
         proposed = next((
             ss_fba_schema._fba_trim(item.get('proposed_fba_seller_sku'), 255)
             for item in bucket['items'] if ss_fba_schema._fba_trim(item.get('proposed_fba_seller_sku'), 255)
