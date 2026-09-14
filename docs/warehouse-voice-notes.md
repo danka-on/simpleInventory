@@ -105,3 +105,23 @@ The four deployed files are:
 `voice_note_routes.py`, `written_note_routes.py`, `static/warehouse-voice-notes.js`,
 and `templates/searchrack.html`. The existing routing registration is sufficient.
 Never transfer databases when deploying this feature.
+
+## Receiving name dictation (2026-09-14)
+
+When `/barcode` or `/multibarcode` asks for an item name, the prompt leads with a
+microphone button. The browser records a short clip (WebM, MP4 or OGG, under 5 MB),
+stops about a second after the speaker pauses, and posts it to
+`POST /api/warehouse/name-dictation` (registered by `voice_note_routes.register`).
+The server sends it to OpenAI `gpt-4o-transcribe` in English with a product-label
+hint, falls back to `whisper-1` only when the newer model itself is refused, and
+returns the cleaned name. Silence transcripts such as "Thank you." are rejected.
+The text fills the name field for the worker to check; nothing is saved until
+**Confirm name**, and clips are not stored. A synthetic-speech check that day chose
+gpt-4o-transcribe: it spelled "Zwilling Henckels" right in about 1.2 s, where
+whisper-1 wrote "Henkel".
+
+Items without a thumbnail then get a photo step (`static/warehouse-identity.js`):
+any number of photos, shrunk to 1600 px in the browser. **Save** stores the first
+as the thumbnail (`/api/items-prep/temp-item`) and all of them as prep photos
+(`/api/items_prep/diagnostic/<upc>/photos`); **Skip** adds the item without photos.
+Closing the prompt at either step does not add the item.

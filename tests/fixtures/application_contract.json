@@ -5723,6 +5723,17 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/warehouse/name-dictation",
+      "endpoint": "warehouse_name_dictation",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/warehouse/voice-notes/<int:media_id>/analysis",
       "endpoint": "warehouse_voice_note_analysis",
       "methods": [

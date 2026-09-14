@@ -1,6 +1,7 @@
 """Offline voice-note tests: isolated recordings and DB, no paid API calls."""
 from pathlib import Path
 from contextlib import closing
+import io
 import os
 import sqlite3
 import tempfile
@@ -306,6 +307,78 @@ class WrittenNoteTests(unittest.TestCase):
             conn.commit()
         self.assertEqual(self.client.get(self.url).status_code,404)
         self.post.assert_not_called()
+
+
+class NameDictationTests(unittest.TestCase):
+    """Receiving-screen dictation: one short clip in, one cleaned item name out."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name)
+        (root / 'static').mkdir()
+        app = Flask(__name__, static_folder=str(root / 'static'))
+        register(app, root)
+        self.client = app.test_client()
+        env = patch.dict(os.environ, {'OPENAI_API_KEY': 'test-openai'})
+        env.start()
+        self.addCleanup(env.stop)
+        network = patch('voice_note_routes.requests.post')
+        self.post = network.start()
+        self.addCleanup(network.stop)
+
+    def dictate(self, filename='name.webm', audio=b'spoken name', headers=None):
+        return self.client.post('/api/warehouse/name-dictation', headers=headers or {},
+                                data={'audio': (io.BytesIO(audio), filename)},
+                                content_type='multipart/form-data')
+
+    def test_label_read_aloud_becomes_a_clean_name(self):
+        self.post.return_value = VoiceNoteTests.response(
+            {'text': ' "Lenox Tuscany Classics wine glasses, set of 4,  clear." '})
+        response = self.dictate(filename='name.mp4')
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['text'], 'Lenox Tuscany Classics wine glasses, set of 4, clear')
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        call = self.post.call_args
+        self.assertEqual(call.args[0], 'https://api.openai.com/v1/audio/transcriptions')
+        self.assertEqual(call.kwargs['data']['model'], 'gpt-4o-transcribe')
+        self.assertEqual(call.kwargs['data']['language'], 'en')
+        self.assertEqual(call.kwargs['files']['file'][:2], ('name.mp4', b'spoken name'))
+
+    def test_refused_newer_model_falls_back_to_whisper(self):
+        self.post.side_effect = [VoiceNoteTests.response({}, 404),
+                                 VoiceNoteTests.response({'text': 'Zwilling fry pan'})]
+        self.assertEqual(self.dictate().json['text'], 'Zwilling fry pan')
+        self.assertEqual([c.kwargs['data']['model'] for c in self.post.call_args_list],
+                         ['gpt-4o-transcribe', 'whisper-1'])
+
+    def test_quota_errors_are_not_retried_on_another_model(self):
+        self.post.return_value = VoiceNoteTests.response({}, 429)
+        self.assertEqual(self.dictate().status_code, 502)
+        self.assertEqual(self.post.call_count, 1)
+
+    def test_silence_is_not_returned_as_a_name(self):
+        for heard in ('', '  ', 'Thank you.', 'you'):
+            self.post.return_value = VoiceNoteTests.response({'text': heard})
+            self.assertEqual(self.dictate().status_code, 422, heard)
+
+    def test_bad_requests_fail_before_network(self):
+        self.assertEqual(self.dictate(filename='name.txt').status_code, 415)
+        self.assertEqual(self.dictate(audio=b'').status_code, 413)
+        self.assertEqual(self.dictate(audio=b'x' * 5_000_001).status_code, 413)
+        self.assertEqual(self.client.post('/api/warehouse/name-dictation').status_code, 400)
+        self.assertEqual(self.dictate(headers={'Sec-Fetch-Site': 'cross-site'}).status_code, 403)
+        with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
+            response = self.dictate()
+        self.assertEqual(response.status_code, 503)
+        self.assertIn('OPENAI_API_KEY', response.json['error'])
+        self.post.assert_not_called()
+
+    def test_unreachable_service_reports_without_leaking_details(self):
+        self.post.side_effect = requests.Timeout('secret token')
+        response = self.dictate()
+        self.assertEqual(response.status_code, 504)
+        self.assertNotIn('secret', response.get_data(as_text=True))
 
 
 if __name__ == '__main__':

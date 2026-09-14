@@ -1,4 +1,5 @@
-"""Manual Lithuanian transcription and Claude translation of saved prep audio."""
+"""Manual Lithuanian transcription and Claude translation of saved prep audio,
+plus item-name dictation for the receiving screens."""
 from contextlib import contextmanager
 import hashlib
 import os
@@ -43,6 +44,17 @@ VOICE_AMBIGUITY_GUIDANCE = (
     'Do not blindly replace rust: rūdys, surūdijęs or clear corrosion context mean actual rust. '
     'Keep genuinely ambiguous passages marked as unclear; never invent missing items or damage. '
 )
+# Receiving-screen dictation: a short clip of a product label read aloud. gpt-4o-transcribe
+# spelled brand names best in a 2026-09-14 check; Whisper stays as the fallback.
+NAME_MODELS = ('gpt-4o-transcribe', 'whisper-1')
+MAX_NAME_AUDIO_BYTES = 5_000_000
+NAME_FORMATS = FORMATS | {'.ogg', '.oga'}
+NAME_AUDIO_HINT = (
+    'A warehouse worker reads a retail product label aloud: brand, item type, material, '
+    'size, count and color. Example: Calphalon nonstick 12-inch frying pan, black.'
+)
+# What transcription models return for silence or background noise instead of a name.
+NOT_A_NAME = {'you', 'thank you', 'thanks', 'thank you for watching', 'thanks for watching', 'bye', 'ok', 'okay'}
 
 
 class VoiceError(Exception):
@@ -228,8 +240,58 @@ class VoiceNotes:
                 raise VoiceError('This analysis was superseded. Reopen the item to see the current result.', 409)
 
 
+def transcribe_item_name(filename, audio):
+    """Turn a short recording of a product label read aloud into an item name."""
+    suffix = Path(str(filename or '')).suffix.lower()
+    if suffix not in NAME_FORMATS:
+        raise VoiceError('Unsupported recording format. Use WebM, MP4, M4A, OGG, MP3 or WAV.', 415)
+    if not 0 < len(audio) <= MAX_NAME_AUDIO_BYTES:
+        raise VoiceError('The recording must be nonempty and smaller than 5 MB.', 413)
+    key = os.getenv('OPENAI_API_KEY', '').strip()
+    if not key:
+        raise VoiceError('Dictation needs server setup: add OPENAI_API_KEY to the Pi .env and restart the service.', 503)
+    text = ''
+    for model in NAME_MODELS:
+        try:
+            response = requests.post('https://api.openai.com/v1/audio/transcriptions',
+                headers={'Authorization': 'Bearer ' + key},
+                files={'file': ('name' + suffix, audio, 'application/octet-stream')},
+                data={'model': model, 'language': 'en', 'response_format': 'json', 'prompt': NAME_AUDIO_HINT},
+                timeout=(5, 30))
+        except requests.RequestException:
+            raise VoiceError('Dictation could not reach the speech service. Try again or type the name.', 504) from None
+        # Only a refusal of the newer model itself is worth a second, older-model try.
+        if response.status_code in (400, 403, 404) and model != NAME_MODELS[-1]:
+            continue
+        text = VoiceNotes.provider_json(response, 'Transcription').get('text')
+        break
+    name = ' '.join(str(text or '').split()).strip(' "\'“”').rstrip('.!?,;:…').strip()
+    lowered = name.lower()
+    if not name or lowered in NOT_A_NAME or 'warehouse worker reads' in lowered:
+        raise VoiceError("Didn't catch a name. Hold the device closer and say it again.", 422)
+    return name[:200].rstrip()
+
+
 def register(app, base_dir):
     service = VoiceNotes(base_dir, app.static_folder)
+
+    @app.route('/api/warehouse/name-dictation', methods=['POST'])
+    def warehouse_name_dictation():
+        try:
+            if request.headers.get('Sec-Fetch-Site') == 'cross-site':
+                raise VoiceError('Dictate item names from the receiving screen.', 403)
+            upload = request.files.get('audio')
+            if upload is None:
+                raise VoiceError('No recording was received. Tap the microphone and try again.', 400)
+            name = transcribe_item_name(upload.filename, upload.read(MAX_NAME_AUDIO_BYTES + 1))
+            response = jsonify(success=True, text=name)
+            response.headers['Cache-Control'] = 'no-store'
+            return response
+        except VoiceError as exc:
+            return jsonify(success=False, error=str(exc)), exc.status
+        except Exception:
+            app.logger.exception('Receiving name dictation failed')
+            return jsonify(success=False, error='Dictation failed. Type the name or try again.'), 500
 
     @app.route('/api/warehouse/voice-notes/<int:media_id>/analysis', methods=['GET', 'POST'])
     def warehouse_voice_note_analysis(media_id):

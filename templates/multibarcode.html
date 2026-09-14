@@ -787,25 +787,6 @@
             margin: -18px -20px 14px;
         }
 
-        .missing-title-icon {
-            width: 52px;
-            height: 52px;
-            border-radius: 50%;
-            background: rgba(245, 158, 11, 0.14);
-            color: #d97706;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.45rem;
-            margin: 0 auto 12px;
-            animation: missingTitlePulse 1.15s ease-in-out infinite;
-        }
-
-        @keyframes missingTitlePulse {
-            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.16); }
-            50% { transform: scale(1.06); box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
-        }
-
         .missing-title-heading {
             margin: 0 0 8px;
             text-align: center;
@@ -833,7 +814,6 @@
 
 
         .missing-title-photo {
-            display: none;
             margin: 0 0 14px;
             padding: 10px;
             border: 1px solid #fcd34d;
@@ -877,7 +857,7 @@
         }
 
         .missing-title-photo-preview {
-            display: none;
+            display: block;
             width: 100%;
             max-height: 170px;
             object-fit: cover;
@@ -956,6 +936,212 @@
             background: #16a34a;
             color: #fff;
             flex: 1;
+        }
+
+        .missing-title-btn.cancel {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .missing-title-btn:disabled {
+            opacity: 0.55;
+            cursor: default;
+        }
+
+        .missing-title-card [hidden] {
+            display: none !important;
+        }
+
+        .identity-steps {
+            display: flex;
+            gap: 6px;
+            list-style: none;
+            margin: 0 34px 10px 0;
+            padding: 0;
+        }
+
+        .identity-steps li {
+            flex: 1;
+            padding: 5px 4px;
+            border-radius: 999px;
+            background: #f3f4f6;
+            color: #9ca3af;
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-align: center;
+        }
+
+        .identity-steps li.is-active {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .identity-steps li.is-done {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .identity-mic {
+            width: 100%;
+            min-height: 62px;
+            margin: 0 0 12px;
+            padding: 10px 14px;
+            border: none;
+            border-radius: 14px;
+            background: #1d4ed8;
+            color: #fff;
+            font-size: 1.05rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            cursor: pointer;
+            touch-action: manipulation;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+
+        .identity-mic[data-state="listening"] {
+            background: #dc2626;
+        }
+
+        .identity-mic[data-state="starting"],
+        .identity-mic[data-state="working"] {
+            background: #475569;
+            cursor: progress;
+        }
+
+        .identity-mic-icon {
+            width: 40px;
+            height: 40px;
+            flex: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            box-shadow: 0 0 0 calc(var(--level, 0) * 12px) rgba(255, 255, 255, 0.3);
+            transition: box-shadow 90ms linear;
+        }
+
+        .identity-mic[data-state="working"] .identity-mic-icon {
+            animation: identityPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes identityPulse {
+            50% { opacity: 0.45; }
+        }
+
+        .identity-hint {
+            margin: -6px 0 8px;
+            color: #6b7280;
+            font-size: 0.8rem;
+            line-height: 1.35;
+        }
+
+        .identity-status {
+            min-height: 1.1em;
+            margin: 0 0 10px;
+            color: #b45309;
+            font-size: 0.85rem;
+            font-weight: 700;
+            line-height: 1.35;
+        }
+
+        .identity-status[data-tone="ok"],
+        .missing-title-photo-status[data-tone="ok"] {
+            color: #166534;
+        }
+
+        .identity-status[data-tone="bad"],
+        .missing-title-photo-status[data-tone="bad"] {
+            color: #b91c1c;
+        }
+
+        .identity-confirmed {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0 0 10px;
+            padding: 9px 10px;
+            border-radius: 10px;
+            background: #f0fdf4;
+            color: #166534;
+            font-size: 0.92rem;
+            font-weight: 700;
+        }
+
+        .identity-confirmed span {
+            flex: 1;
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .identity-link {
+            margin: 0;
+            padding: 4px 6px;
+            border: none;
+            background: none;
+            color: #1d4ed8;
+            font-size: 0.9rem;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .identity-photo-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+            gap: 8px;
+            margin: 0 0 10px;
+        }
+
+        .identity-photo-strip:empty {
+            display: none;
+        }
+
+        .identity-photo {
+            position: relative;
+            height: 84px;
+            margin: 0;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(146, 64, 14, 0.2);
+            background: #fff;
+        }
+
+        .identity-photo img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .identity-photo button {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 26px;
+            height: 26px;
+            margin: 0;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            background: rgba(17, 24, 39, 0.72);
+            color: #fff;
+            font-size: 1rem;
+            line-height: 26px;
+            cursor: pointer;
+        }
+
+        .missing-title-photo .missing-title-photo-status {
+            margin: 6px 0 12px;
+        }
+
+        .missing-title-actions .missing-title-btn {
+            min-height: 50px;
+            font-size: 1.05rem;
         }
     </style>
 </head>
@@ -1044,27 +1230,45 @@
     </div>
 
     <div id="missingTitleModal" class="missing-title-modal">
-        <div class="missing-title-card">
+        <div class="missing-title-card" role="dialog" aria-modal="true" aria-labelledby="missingTitleHeading">
             <button type="button" id="missingTitleCloseBtn" class="missing-title-close-btn" aria-label="Close">&#x2715;</button>
             <div class="missing-title-accent"></div>
-            <div class="missing-title-icon"><i class="fas fa-wave-square"></i></div>
-            <h3 class="missing-title-heading">Missing Title/Image</h3>
+            <ol id="warehouseIdentitySteps" class="identity-steps" hidden>
+                <li data-identity-step="name">1 &middot; Name</li>
+                <li data-identity-step="photos">2 &middot; Photos</li>
+            </ol>
+            <h3 class="missing-title-heading" id="missingTitleHeading">Name this item</h3>
             <div class="missing-title-code" id="missingTitleBarcodeText"></div>
             <div id="missingTitleScreenWarning" class="missing-title-warning" hidden>Could not check this barcode against the catalog. Name it to be safe — closing this will not add the item.</div>
-            <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Brand + item + size/color (only what you can verify)" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done" data-scanner-keyboard="on">
-            <p style="font-size:13px">Read the label: brand, item type, size or color. Keep uncertain details out. Saved names are remembered even after stock is removed; Macy BOL and store data take priority when available.</p>
-            <button type="button" id="warehouseDictateBtn" class="missing-title-note-btn" hidden>Dictate name</button>
-            <div id="warehouseIdentityStatus" role="status" aria-live="polite" style="font-size:13px;color:#b45309"></div>
-            <button type="button" id="missingTitleNoteBtn" class="missing-title-note-btn">+ note</button>
-            <textarea id="missingTitleNoteInput" class="missing-title-note-input" maxlength="2000" placeholder="Warehouse note for this exact item"></textarea>
-            <div id="missingTitlePhotoSection" class="missing-title-photo">
-                <input type="file" id="missingTitlePhotoInput" accept="image/*" capture="environment" style="display:none">
-                <button type="button" id="missingTitlePhotoBtn" class="missing-title-photo-btn">Photo Mode For Thumbnail</button>
-                <div id="missingTitlePhotoStatus" class="missing-title-photo-status">Optional: capture a thumbnail while this item is already being fixed.</div>
-                <img id="missingTitlePhotoPreview" class="missing-title-photo-preview" alt="Thumbnail preview">
+            <div id="warehouseNameStep">
+                <button type="button" id="warehouseDictateBtn" class="identity-mic" hidden>
+                    <span class="identity-mic-icon" aria-hidden="true"><i class="fas fa-microphone"></i></span>
+                    <span id="warehouseDictateLabel">Tap and say the name</span>
+                </button>
+                <input type="text" id="missingTitleInput" class="missing-title-input" maxlength="200" placeholder="Brand + item + size/color (only what you can verify)" autocomplete="off" autocapitalize="words" spellcheck="false" inputmode="text" enterkeyhint="done" data-scanner-keyboard="on">
+                <p class="identity-hint">Read the label: brand, item type, size or color. Keep uncertain details out. Saved names are remembered even after stock is removed; Macy BOL and store data take priority when available.</p>
+                <div id="warehouseIdentityStatus" class="identity-status" role="status" aria-live="polite"></div>
+                <button type="button" id="missingTitleNoteBtn" class="missing-title-note-btn">+ note</button>
+                <textarea id="missingTitleNoteInput" class="missing-title-note-input" maxlength="2000" placeholder="Warehouse note for this exact item"></textarea>
+                <div class="missing-title-actions">
+                    <button type="button" id="missingTitleSaveBtn" class="missing-title-btn save">Confirm name</button>
+                </div>
             </div>
-            <div class="missing-title-actions">
-                <button type="button" id="missingTitleSaveBtn" class="missing-title-btn save">Complete</button>
+            <div id="missingTitlePhotoSection" class="missing-title-photo" hidden>
+                <div class="identity-confirmed">
+                    <i class="fas fa-check" aria-hidden="true"></i>
+                    <span id="warehouseConfirmedName"></span>
+                    <button type="button" id="warehouseEditNameBtn" class="identity-link">Edit</button>
+                </div>
+                <img id="missingTitlePhotoPreview" class="missing-title-photo-preview" alt="Current thumbnail" hidden>
+                <div id="warehousePhotoStrip" class="identity-photo-strip"></div>
+                <input type="file" id="missingTitlePhotoInput" accept="image/*" capture="environment" style="display:none">
+                <button type="button" id="missingTitlePhotoBtn" class="missing-title-photo-btn"><i class="fas fa-camera"></i> Take photo</button>
+                <div id="missingTitlePhotoStatus" class="missing-title-photo-status" role="status" aria-live="polite"></div>
+                <div class="missing-title-actions">
+                    <button type="button" id="warehousePhotoSkipBtn" class="missing-title-btn cancel">Skip</button>
+                    <button type="button" id="warehousePhotoDoneBtn" class="missing-title-btn save" disabled>Save photo</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1086,7 +1290,7 @@
     <!-- ZXing Library -->
     <script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
     <script src="/static/scan-feedback.js?v=20260912a"></script>
-    <script src="/static/warehouse-identity.js?v=1"></script>
+    <script src="/static/warehouse-identity.js?v=20260914a"></script>
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
     <script src="/static/no-barcode-label.js?v=20260912a"></script>
     <script src="/static/ios-scanner-keyboard.js?v=20260907a"></script>
@@ -1311,16 +1515,8 @@
                 barcodeItems = barcodeEntryState.setNote(barcodeItems, index, warehouseNote);
                 persistBarcodeItems();
             }
-            if (result.photoData) {
-                try {
-                    const uploadResult = await uploadMissingTitleThumbnail(key || actualCode, title, result.photoData);
-                    if (uploadResult && uploadResult.image_url) {
-                        cachedItem = Object.assign({}, cachedItem || {}, { image_url: uploadResult.image_url });
-                    }
-                } catch (err) {
-                    console.error('Thumbnail save failed:', err);
-                    alert('Thumbnail was not saved: ' + (err && err.message ? err.message : 'unknown error'));
-                }
+            if (result.imageUrl) {
+                cachedItem = Object.assign({}, cachedItem || {}, { image_url: result.imageUrl });
             }
             if (key) manualTitles[key] = title.slice(0, 200);
             saveManualTitleOverrides(manualTitles);
@@ -1350,11 +1546,6 @@
         const missingTitleInput = document.getElementById('missingTitleInput');
         const missingTitleNoteBtn = document.getElementById('missingTitleNoteBtn');
         const missingTitleNoteInput = document.getElementById('missingTitleNoteInput');
-        const missingTitlePhotoSection = document.getElementById('missingTitlePhotoSection');
-        const missingTitlePhotoInput = document.getElementById('missingTitlePhotoInput');
-        const missingTitlePhotoBtn = document.getElementById('missingTitlePhotoBtn');
-        const missingTitlePhotoStatus = document.getElementById('missingTitlePhotoStatus');
-        const missingTitlePhotoPreview = document.getElementById('missingTitlePhotoPreview');
         const missingTitleSaveBtn = document.getElementById('missingTitleSaveBtn');
         const warehouseNoteModal = document.getElementById('warehouseNoteModal');
         const warehouseNoteBarcode = document.getElementById('warehouseNoteBarcode');
@@ -1364,7 +1555,6 @@
         let missingTitleModalOpen = false;
         let missingTitleModalResolver = null;
         let missingTitleResumeCamera = false;
-        let missingTitlePendingPhotoData = '';
         let missingTitleCurrentIssue = null;
         let warehouseNoteEditingIndex = -1;
         const pendingMissingTitleNotes = {};
@@ -1647,57 +1837,6 @@
             }
         }
 
-        function resetMissingTitlePhotoState() {
-            missingTitlePendingPhotoData = '';
-            if (missingTitlePhotoInput) {
-                missingTitlePhotoInput.value = '';
-            }
-            if (missingTitlePhotoPreview) {
-                missingTitlePhotoPreview.style.display = 'none';
-                missingTitlePhotoPreview.removeAttribute('src');
-            }
-            if (missingTitlePhotoStatus) {
-                missingTitlePhotoStatus.textContent = 'Optional: capture a thumbnail while this item is already being fixed.';
-            }
-        }
-
-        function showExistingMissingTitleThumbnail(imageUrl) {
-            const url = String(imageUrl || '').trim();
-            if (!url || !missingTitlePhotoPreview) return false;
-            missingTitlePhotoPreview.src = url;
-            missingTitlePhotoPreview.style.display = 'block';
-            if (missingTitlePhotoStatus) {
-                missingTitlePhotoStatus.textContent = 'Current thumbnail shown. Taking a new photo will replace it.';
-            }
-            return true;
-        }
-
-        function setMissingTitlePhotoVisibility(show) {
-            if (!missingTitlePhotoSection) return;
-            missingTitlePhotoSection.style.display = show ? 'block' : 'none';
-        }
-
-        async function uploadMissingTitleThumbnail(code, title, imageData) {
-            const barcode = normalizeManualTitleKey(code);
-            const itemTitle = String(title || '').replace(/\s+/g, ' ').trim();
-            const photoData = String(imageData || '').trim();
-            if (!barcode || !itemTitle || !photoData) return { success: false, skipped: true };
-            const response = await fetch('/api/items-prep/temp-item', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    upc: barcode,
-                    item_description: itemTitle,
-                    image_data: photoData
-                })
-            });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok || payload.success === false) {
-                throw new Error((payload && payload.error) || 'Unable to save thumbnail');
-            }
-            return payload;
-        }
-
         function suspendBarcodeCaptureForMissingTitle(suspend) {
             if (barcodeInput) {
                 barcodeInput.readOnly = !!suspend;
@@ -1773,9 +1912,7 @@
             missingTitleModal.style.display = 'none';
             missingTitleModalOpen = false;
             missingTitleCurrentIssue = null;
-            resetMissingTitlePhotoState();
             resetMissingTitleNoteState('');
-            setMissingTitlePhotoVisibility(false);
             suspendBarcodeCaptureForMissingTitle(false);
             const resolver = missingTitleModalResolver;
             missingTitleModalResolver = null;
@@ -1813,19 +1950,23 @@
             const screenWarning = document.getElementById('missingTitleScreenWarning');
             if (screenWarning) screenWarning.hidden = !missingTitleCurrentIssue.screenFailed;
             missingTitleInput.value = existingTitle;
-            if (window.warehouseIdentity) window.warehouseIdentity.reset();
+            if (window.warehouseIdentity) {
+                window.warehouseIdentity.begin({
+                    upc: missingTitleCurrentIssue.barcode,
+                    photos: !!missingTitleCurrentIssue.missingImage || !!existingImage,
+                    existingImage
+                });
+            }
             missingTitleInput.style.borderColor = '#f2c66d';
             missingTitleInput.style.boxShadow = '';
-            resetMissingTitlePhotoState();
             resetMissingTitleNoteState(existingNote);
-            setMissingTitlePhotoVisibility(!!missingTitleCurrentIssue.missingImage || !!existingImage);
-            showExistingMissingTitleThumbnail(existingImage);
             missingTitleInput.readOnly = false;
             missingTitleModal.style.display = 'flex';
             missingTitleModalOpen = true;
             suspendBarcodeCaptureForMissingTitle(true);
             playMissingTitleAlert();
-            focusMissingTitleEntry(true);
+            // With a microphone on a touch screen the name starts from the mic button.
+            if (!window.warehouseIdentity || !window.warehouseIdentity.prefersVoice()) focusMissingTitleEntry(true);
 
             return new Promise(resolve => {
                 missingTitleModalResolver = resolve;
@@ -1914,15 +2055,6 @@
                 pendingMissingTitleNotes[key] = warehouseNote;
             } else {
                 delete pendingMissingTitleNotes[key];
-            }
-
-            if (modalResult.photoData) {
-                try {
-                    await uploadMissingTitleThumbnail(key, value, modalResult.photoData);
-                } catch (err) {
-                    console.error('Thumbnail save failed:', err);
-                    alert('Thumbnail was not saved: ' + (err && err.message ? err.message : 'unknown error'));
-                }
             }
 
             overrides[key] = value.slice(0, 200);
@@ -2141,12 +2273,22 @@
                     overrides[issueKey] = value.slice(0, 200);
                     saveManualTitleOverrides(overrides);
                 }
-                closeMissingTitleModal({
-                    action: 'save',
-                    title: value,
-                    note: cleanMissingTitleWarehouseNote(missingTitleNoteInput && missingTitleNoteInput.value),
-                    photoData: missingTitlePendingPhotoData || ''
-                });
+                // Items without a thumbnail continue to the photo step, which finishes the modal.
+                if (window.warehouseIdentity.next(value)) return;
+                finishMissingTitle(value);
+            });
+        }
+        function finishMissingTitle(title, photos = {}) {
+            closeMissingTitleModal({
+                action: 'save',
+                title,
+                note: cleanMissingTitleWarehouseNote(missingTitleNoteInput && missingTitleNoteInput.value),
+                imageUrl: photos.imageUrl || ''
+            });
+        }
+        if (missingTitleModal) {
+            missingTitleModal.addEventListener('warehouse-identity:complete', event => {
+                if (missingTitleModalOpen) finishMissingTitle(event.detail.title, event.detail);
             });
         }
         if (missingTitleNoteBtn && missingTitleNoteInput) {
@@ -2166,38 +2308,6 @@
                 closeWarehouseNoteModal();
             }
         });
-
-        if (missingTitlePhotoBtn && missingTitlePhotoInput) {
-            missingTitlePhotoBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                missingTitlePhotoInput.click();
-            });
-            missingTitlePhotoInput.addEventListener('change', () => {
-                const file = missingTitlePhotoInput.files && missingTitlePhotoInput.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = () => {
-                    missingTitlePendingPhotoData = String(reader.result || '');
-                    if (missingTitlePhotoPreview && missingTitlePendingPhotoData) {
-                        missingTitlePhotoPreview.src = missingTitlePendingPhotoData;
-                        missingTitlePhotoPreview.style.display = 'block';
-                    }
-                    if (missingTitlePhotoStatus) {
-                        const replacing = missingTitleCurrentIssue && (missingTitleCurrentIssue.existingImage || missingTitleCurrentIssue.image_url);
-                        missingTitlePhotoStatus.textContent = replacing
-                            ? 'New thumbnail ready. Complete will replace the current thumbnail.'
-                            : 'Thumbnail ready to save with this title.';
-                    }
-                };
-                reader.onerror = () => {
-                    missingTitlePendingPhotoData = '';
-                    if (missingTitlePhotoStatus) {
-                        missingTitlePhotoStatus.textContent = 'Photo capture failed. Try again.';
-                    }
-                };
-                reader.readAsDataURL(file);
-            });
-        }
 
         if (missingTitleInput) {
             missingTitleInput.addEventListener('input', () => {
