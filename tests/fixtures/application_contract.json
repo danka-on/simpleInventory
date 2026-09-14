@@ -5678,6 +5678,51 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/items-prep/unmatched/lookup",
+      "endpoint": "prep_unmatched_lookup",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items-prep/unmatched/adopt",
+      "endpoint": "prep_unmatched_adopt",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items-prep/unmatched/read-name",
+      "endpoint": "prep_unmatched_read-name",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/items-prep/unmatched/manual",
+      "endpoint": "prep_unmatched_manual",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/warehouse/voice-notes/<int:media_id>/analysis",
       "endpoint": "warehouse_voice_note_analysis",
       "methods": [

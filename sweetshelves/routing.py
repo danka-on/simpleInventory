@@ -581,5 +581,17 @@ def register_routes():
                            ss_fba_shipments._fba_plan_approval_issues,
                            ss_amazon_catalog._amazon_spapi_context)
 
+    from prep_unmatched import register as register_prep_unmatched
+    from . import prep_schema as unmatched_prep_schema, normalization as unmatched_normalization
+    register_prep_unmatched(ss_runtime.app,
+        db_connection=ss_database.db_connection,
+        normalize_upc=unmatched_normalization._normalize_upc,
+        reject_title=ss_warehouse_nameless._manual_title_rejection,
+        ensure_registry=ss_warehouse_receiving._ensure_custom_item_registry,
+        ensure_prep=unmatched_prep_schema._ensure_items_prep_tables,
+        amazon_context=ss_amazon_catalog._amazon_spapi_context,
+        ebay_request=ss_ebay_catalog._ebay_buy_api_request,
+        clear_cache=ss_runtime.cache.clear)
+
     from voice_note_routes import register as register_voice_notes
     register_voice_notes(ss_runtime.app, BASE_DIR)

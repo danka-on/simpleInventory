@@ -69,6 +69,17 @@
     .prep-fallback-body img{width:96px;height:96px;object-fit:contain;background:#fff;border-radius:8px;border:1px solid #eee;flex-shrink:0}
     .prep-fallback-title{font-weight:700;margin-bottom:4px}
     .prep-fallback-tried{font-size:0.8rem;color:#6b7280;margin-top:6px}
+    .prep-match-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px}
+    .prep-match{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:12px}
+    .prep-match>.btn{margin-top:10px}
+    .prep-intake-photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px;margin-top:14px}
+    .prep-photo-input,.prep-name-input{display:flex;flex-direction:column;gap:8px;font-weight:700;min-width:0}
+    .prep-photo-input{background:white;padding:12px;border-radius:10px;border:1px solid #e5e7eb}
+    .prep-photo-input span{font-weight:400;font-size:.85rem}
+    .prep-photo-input input{width:100%;min-width:0}
+    .prep-photo-input img{max-width:100%;height:140px;object-fit:contain}
+    .prep-name-input input{padding:12px;border:1px solid #d1d5db;border-radius:8px;font-size:1rem;min-width:0}
+    .prep-intake-status{color:#b42318;margin-top:8px}
     .prep-fallback-actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
     .muted{color:#666;font-size:0.95rem}
     #statusMsg{margin-top:10px;font-size:1rem}
@@ -626,6 +637,7 @@
     </div>
   </div>
 
+  <script src="/static/prep-unmatched.js?v=20260913a"></script>
   <script>
     // Loading overlay helpers
     function showPageLoading() {
@@ -2166,75 +2178,14 @@
       }
     }
 
-    let prepFallbackToken = 0;
-    function hidePrepFallback(){
-      prepFallbackToken++;
-      const card = document.getElementById('prepFallbackCard');
-      if(card){ card.classList.add('hidden'); card.innerHTML = ''; }
-    }
-    function escAttr(s){ return esc(s).replace(/"/g, '&quot;'); }
-    function prepFallbackTried(list){
-      if(!Array.isArray(list) || !list.length) return '';
-      return `<div class="prep-fallback-tried">Checked: ${list.map(t => esc(t.label + ': ' + t.result)).join(' · ')}</div>`;
-    }
-    async function showPrepFallback(upc){
-      const card = document.getElementById('prepFallbackCard');
-      if(!card || !upc) return;
-      const token = ++prepFallbackToken;
-      card.innerHTML = `<div class="prep-fallback-head">Not in BOL — checking backup catalogs for ${esc(upc)}…</div>`;
-      card.classList.remove('hidden');
-      let j = {};
-      try{
-        const r = await fetch('/api/items-prep/fallback-lookup?upc=' + encodeURIComponent(upc));
-        j = await r.json().catch(()=>({}));
-      }catch(e){
-        j = {error: 'Backup lookup failed'};
-      }
-      if(token !== prepFallbackToken) return;
-      if(!j.found || !j.candidate){
-        card.innerHTML = `<div class="prep-fallback-head">Not in BOL · ${esc(upc)}</div>
-          <div>${esc(j.message || j.error || 'No backup catalog knows this barcode.')}</div>${prepFallbackTried(j.tried)}
-          <div class="prep-fallback-actions"><button class="btn btn-gray" type="button" data-fallback="dismiss">Dismiss</button></div>`;
-        return;
-      }
-      const c = j.candidate;
-      const img = c.image_url ? `<img src="${escAttr(c.image_url)}" alt="" onerror="this.remove()">` : '';
-      card.innerHTML = `<div class="prep-fallback-head">Not in BOL — found in ${esc(c.source_label)}${j.cached ? ' (saved lookup)' : ''}</div>
-        <div class="prep-fallback-body">${img}<div><div class="prep-fallback-title">${esc(c.title)}</div><div class="muted">${esc(upc)}</div></div></div>
-        ${prepFallbackTried(j.tried)}
-        <div class="prep-fallback-actions">
-          <button class="btn btn-primary" type="button" data-fallback="use">Use this item</button>
-          <button class="btn btn-gray" type="button" data-fallback="dismiss">Dismiss</button>
-        </div>`;
-      card.dataset.upc = upc;
-      card.dataset.title = c.title || '';
-      card.dataset.image = c.image_url || '';
-      card.dataset.source = c.source || '';
-    }
-    document.getElementById('prepFallbackCard').addEventListener('click', async (ev) => {
-      const btn = ev.target.closest('[data-fallback]');
-      if(!btn) return;
-      const card = ev.currentTarget;
-      if(btn.dataset.fallback === 'dismiss'){ hidePrepFallback(); return; }
-      btn.disabled = true;
-      btn.textContent = 'Saving…';
-      try{
-        const r = await fetch('/api/items-prep/fallback-adopt', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({upc: card.dataset.upc, title: card.dataset.title, image_url: card.dataset.image, source: card.dataset.source})
-        });
-        const j = await r.json().catch(()=>({}));
-        if(!r.ok || !j.success) throw new Error(j.error || 'Could not save this item');
-        const upc = card.dataset.upc;
-        hidePrepFallback();
-        await lookup(upc);
-      }catch(e){
-        btn.disabled = false;
-        btn.textContent = 'Use this item';
-        alert(e.message);
-      }
+    const prepUnmatched = window.PrepUnmatched.create({
+      card: document.getElementById('prepFallbackCard'),
+      getLot: () => getActiveLotNumber(),
+      onAdopt: async (upc) => { await lookup(upc); },
+      onSkip: () => { const input = document.getElementById('manualUpc'); input.value = ''; input.focus(); }
     });
+    function hidePrepFallback(){ prepUnmatched.clear(); }
+    async function showPrepFallback(upc){ return prepUnmatched.show(upc); }
 
     async function lookup(upc){
       hidePrepFallback();
