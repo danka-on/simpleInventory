@@ -1697,8 +1697,16 @@ def api_fba_prep_resolve_fba_safety(session_id):
             conn.close()
 
 
+# Once a SKU has waited this long for Amazon, automatic polls recheck it at most
+# once per FBA_ENABLING_RECHECK_SECONDS; a manual Refresh still checks it now.
+FBA_ENABLING_PATIENT_SECONDS = 300
+FBA_ENABLING_RECHECK_SECONDS = 180
+
+
 def api_fba_prep_enable_fba_status(session_id):
     """Poll a small chunk of activating SKUs until Amazon assigns their FNSKUs."""
+    data = request.get_json(silent=True) or {}
+    manual = data.get('manual') is True
     conn = None
     try:
         conn = sqlite3.connect(str(ss_config.BASE_DIR / 'searchRack.db'), timeout=30.0)
@@ -1714,12 +1722,30 @@ def api_fba_prep_enable_fba_status(session_id):
             for item in items if isinstance(item, dict)
             and ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255)
         }
-        pending = list(dict.fromkeys(
-            ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255)
-            for item in items if isinstance(item, dict)
-            and ss_fba_schema._fba_trim(item.get('fba_enablement_status'), 40).lower() == 'enabling'
-            and ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255)
-        ))[:6]
+        now = datetime.datetime.now()
+        due = {}
+        next_wait = None
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            seller_sku = ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255)
+            if (not seller_sku or seller_sku.casefold() in due
+                    or ss_fba_schema._fba_trim(item.get('fba_enablement_status'), 40).lower() != 'enabling'):
+                continue
+            # Both stamps come from _listagent_now_iso (local time).
+            started = ss_normalization._parse_iso_utc_naive(item.get('fba_activation_started_at'))
+            checked = ss_normalization._parse_iso_utc_naive(item.get('fba_enablement_checked_at'))
+            waited = (now - started).total_seconds() if started else 0
+            if not manual and checked and waited >= FBA_ENABLING_PATIENT_SECONDS:
+                wait = FBA_ENABLING_RECHECK_SECONDS - (now - checked).total_seconds()
+                if wait > 0:
+                    next_wait = wait if next_wait is None else min(next_wait, wait)
+                    continue
+            due[seller_sku.casefold()] = (checked or datetime.datetime.min, seller_sku)
+        # Oldest check first, so every waiting SKU gets a turn instead of the
+        # same first six on every poll.
+        pending = [seller_sku for _, seller_sku in sorted(due.values(), key=lambda entry: entry[0])][:6]
+        failed_checks = set()
         results = {}
         if pending:
             listings_client = _fba_listings_client()
@@ -1756,11 +1782,12 @@ def api_fba_prep_enable_fba_status(session_id):
                             )
                     results[seller_sku.casefold()] = readiness
                 except Exception as exc:
+                    failed_checks.add(seller_sku.casefold())
                     ss_config.logger.warning('FBA enablement status check failed for %s: %s', seller_sku, exc)
                 if len(pending) > 1 and index < len(pending) - 1:
                     time.sleep(0.22)
 
-        if results:
+        if results or failed_checks:
             cur.execute('BEGIN IMMEDIATE')
             current = cur.execute("SELECT * FROM fba_prep_sessions WHERE id = ? AND status = 'open'", (session_id,)).fetchone()
             if current:
@@ -1769,9 +1796,12 @@ def api_fba_prep_enable_fba_status(session_id):
                 for item in items:
                     if not isinstance(item, dict):
                         continue
-                    result = results.get(ss_fba_schema._fba_trim(
-                        item.get('seller_sku') or item.get('msku'), 255
-                    ).casefold())
+                    sku_key = ss_fba_schema._fba_trim(item.get('seller_sku') or item.get('msku'), 255).casefold()
+                    if sku_key in failed_checks and sku_key not in results:
+                        # Stamp the attempt so a SKU whose check keeps erroring
+                        # rotates to the back instead of blocking the others.
+                        item['fba_enablement_checked_at'] = ss_listing_checks._listagent_now_iso()
+                    result = results.get(sku_key)
                     if not result:
                         continue
                     if result.get('_activation_retry_count') is not None:
@@ -1786,6 +1816,8 @@ def api_fba_prep_enable_fba_status(session_id):
         return jsonify({
             'success': True, 'enablement': _fba_enablement_progress(items),
             'session': ss_fba_inventory._fba_session_row_payload(row, include_items=True),
+            # When nothing was due, tell the page how long until the next SKU is.
+            'next_poll_seconds': int(next_wait) + 1 if not pending and next_wait is not None else None,
         })
     except Exception as exc:
         if conn is not None:

@@ -1526,7 +1526,8 @@ function createTopBanner(){
       if(state.inflight) return;
       state.inflight = true;
       try{
-        const resp = await fetch('/api/listing-helper/scan', { cache: 'no-store' });
+        // counts=1: the badge needs three numbers, not the ~2 MB alert lists.
+        const resp = await fetch('/api/listing-helper/scan?counts=1', { cache: 'no-store' });
         const data = await resp.json().catch(()=> ({}));
         if(resp.ok && data && data.success){
           const counts = data.counts || {};
@@ -1554,7 +1555,8 @@ function createTopBanner(){
     }catch(e){ refresh(true); }
 
     setInterval(() => refresh(false), 60 * 1000);
-    window.addEventListener('focus', () => refresh(true));
+    // Focus keeps the 60 s throttle: switching tabs on the iPad fired a full scan each time.
+    window.addEventListener('focus', () => refresh(false));
 
     window.ssNoWarehouseAlerts = { set: setCount, refresh };
     window.ssAlertsCount = window.ssNoWarehouseAlerts;

@@ -580,6 +580,45 @@ class FbaCountScanTest(unittest.TestCase):
         self.assertIn("X005ASUE9F", item["fba_activation_note"])
         self.assertEqual(payload["enablement"]["enabling"], 1)
 
+    def test_enablement_status_rotates_and_backs_off_long_waiting_skus(self):
+        import datetime as _dt
+        now = _dt.datetime.now()
+        long_ago = (now - _dt.timedelta(minutes=20)).isoformat()
+        items = [{"seller_sku": "RECENT-0", "quantity": 1, "fba_enablement_status": "enabling",
+                  "fba_activation_started_at": long_ago,
+                  "fba_enablement_checked_at": (now - _dt.timedelta(minutes=1)).isoformat()}]
+        items += [{"seller_sku": f"DUE-{n}", "quantity": 1, "fba_enablement_status": "enabling",
+                   "fba_activation_started_at": long_ago,
+                   "fba_enablement_checked_at": (now - _dt.timedelta(minutes=10 + n)).isoformat()}
+                  for n in range(8)]
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        db.execute("UPDATE fba_prep_sessions SET items_json=?, item_count=9, total_units=9 WHERE id=1", (json.dumps(items),))
+        db.commit()
+        db.close()
+        readiness = {"status": "enabling", "product_type": "HOME", "fnsku": "X00TEST123", "error": ""}
+
+        def poll(**kwargs):
+            with (patch.object(ss_config, "BASE_DIR", self.base_dir),
+                  patch.object(ss_fba_readiness, "_fba_listings_client", return_value=(Mock(), "SELLER", "ATVPDKIKX0DER")),
+                  patch.object(ss_fba_readiness.time, "sleep"),
+                  patch.object(ss_fba_readiness, "_fba_listing_readiness", return_value=readiness) as check):
+                response = self.client.post("/api/fba-prep/sessions/1/enable-fba-status", **kwargs)
+            self.assertEqual(response.status_code, 200)
+            return [call.args[0] for call in check.call_args_list], response.get_json()
+
+        checked, payload = poll()
+        self.assertEqual(checked, ["DUE-7", "DUE-6", "DUE-5", "DUE-4", "DUE-3", "DUE-2"])
+        checked, payload = poll()
+        self.assertEqual(checked, ["DUE-1", "DUE-0"])
+        # Every SKU was checked within the recheck window: no Amazon calls, and a wait hint.
+        checked, payload = poll()
+        self.assertEqual(checked, [])
+        self.assertTrue(0 < payload["next_poll_seconds"] <= 120)
+        # A manual Refresh ignores the backoff, oldest check first.
+        checked, payload = poll(json={"manual": True})
+        self.assertEqual(len(checked), 6)
+        self.assertEqual(checked[0], "RECENT-0")
+
     def test_enable_fba_explains_stale_seller_sku_not_found(self):
         db = sqlite3.connect(self.base_dir / "searchRack.db")
         db.execute("UPDATE fba_prep_sessions SET items_json=?, item_count=1, total_units=1 WHERE id=1", (

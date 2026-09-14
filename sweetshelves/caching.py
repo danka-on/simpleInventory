@@ -51,8 +51,7 @@ def _listing_helper_scan_cache_clear():
         ss_listing_alerts._listing_helper_scan_cache_state['payload'] = None
         ss_listing_alerts._listing_helper_scan_cache_state['ts'] = 0.0
     from . import listing_reconciliation
-    with listing_reconciliation._cache_lock:
-        listing_reconciliation._cache_state.update(payload=None, ts=0.0)
+    listing_reconciliation.invalidate_cache()
 
 
 def _invalidate_searchrack_cache():

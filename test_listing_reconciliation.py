@@ -406,6 +406,30 @@ class ListingReconciliationTests(unittest.TestCase):
         self.sql('sold.db',"INSERT INTO orders (barcode,quantity,store,paid_time) VALUES ('100000000001',1,'amazon',datetime('now'))")
         self.assertTrue(all(l['stock_status']=='out_of_stock' for l in self.scan()['listings']))
 
+    def test_concurrent_callers_share_one_rebuild_and_badge_tolerates_writes(self):
+        import threading, time
+        calls = []
+        def slow_build():
+            calls.append(1)
+            time.sleep(0.2)
+            return {'success': True, 'listings': [], 'unlisted': [], 'build': len(calls)}
+        with (patch.object(recon, 'build_reconciliation', side_effect=slow_build),
+              patch.object(recon.ss_listing_alerts.ss_sync, '_sync_manager_overdue_alert', return_value=None)):
+            threads = [threading.Thread(target=recon._cached_payload, args=(False,)) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(len(calls), 1)
+            # A warehouse write: the badge keeps its recent count, full views rebuild.
+            recon.ss_listing_alerts.ss_caching._listing_helper_scan_cache_clear()
+            badge = self.client.get('/api/listing-helper/scan?counts=1').get_json()
+            self.assertEqual(len(calls), 1)
+            self.assertNotIn('alerts', badge)
+            self.assertEqual(badge['counts']['total'], 0)
+            self.assertEqual(recon._cached_payload(False)['build'], 2)
+            self.assertEqual(recon._cached_payload(True)['build'], 3)
+
     def test_removed_cancelled_old_and_test_sales_do_not_reduce_available_stock(self):
         self.rack(1,'Lenox Mug','100000000001',quantity=5)
         self.ebay('STOCK','Lenox Mug','100000000001',qty='5')

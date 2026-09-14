@@ -53,7 +53,15 @@ STOP_WORDS = {
 }
 
 _cache_lock = threading.Lock()
-_cache_state = {'ts': 0.0, 'payload': None}
+# Held for a whole rebuild (10-40 s on the Pi) so concurrent callers wait for
+# one result instead of each rebuilding in parallel.
+_build_lock = threading.Lock()
+# generation bumps on every invalidation; a payload is current only while
+# built_generation still matches it.
+_cache_state = {'ts': 0.0, 'payload': None, 'started': 0.0, 'generation': 0, 'built_generation': -1}
+# The nav badge polls from every page, so it accepts a count this old even
+# after warehouse writes instead of forcing a rebuild after each one.
+BADGE_CACHE_SECONDS = 300
 
 
 # ---------------------------------------------------------------- identity --
@@ -714,17 +722,42 @@ def build_reconciliation():
 
 # ------------------------------------------------------------------ routes --
 
-def _cached_payload(force_refresh):
+def invalidate_cache():
+    """Mark the cached payload out of date; the nav badge may keep showing it."""
+    with _cache_lock:
+        _cache_state['generation'] = int(_cache_state.get('generation') or 0) + 1
+
+
+def _cache_lookup(max_age, allow_outdated, built_after=0.0):
     with _cache_lock:
         payload = _cache_state.get('payload')
-        fresh = payload and (time.time() - float(_cache_state.get('ts') or 0.0)) < CACHE_SECONDS
-        if fresh and not force_refresh:
+        if payload is None or float(_cache_state.get('started') or 0.0) < built_after:
+            return None
+        if not allow_outdated and _cache_state.get('built_generation') != _cache_state.get('generation'):
+            return None
+        return payload if time.time() - float(_cache_state.get('ts') or 0.0) < max_age else None
+
+
+def _cached_payload(force_refresh, *, max_age=CACHE_SECONDS, allow_outdated=False):
+    requested = time.time()
+    if not force_refresh:
+        payload = _cache_lookup(max_age, allow_outdated)
+        if payload is not None:
             return payload
-    payload = build_reconciliation()
-    with _cache_lock:
-        _cache_state['payload'] = payload
-        _cache_state['ts'] = time.time()
-    return payload
+    with _build_lock:
+        # A rebuild that finished while this caller waited serves it too; a
+        # forced refresh only accepts one that started after it asked.
+        payload = _cache_lookup(max_age, allow_outdated and not force_refresh,
+                                built_after=requested if force_refresh else 0.0)
+        if payload is not None:
+            return payload
+        with _cache_lock:
+            generation = _cache_state.get('generation')
+        started = time.time()
+        payload = build_reconciliation()
+        with _cache_lock:
+            _cache_state.update(payload=payload, ts=time.time(), started=started, built_generation=generation)
+        return payload
 
 
 def api_listing_reconciliation():
@@ -759,8 +792,7 @@ def api_listing_reconciliation():
                 return jsonify({'success': False, 'error': 'This listing changed during the search. Refresh the list.'}), 409
             _apply_ai_result(listing, result, fresh_index)
             listing['ai_search']['cached'] = was_cached
-            with _cache_lock:
-                _cache_state['ts'] = 0.0
+            invalidate_cache()
             return jsonify({'success': True, 'suggestions': listing['suggestions'], 'ai_search': listing['ai_search'], 'cached': was_cached})
         except ValueError as e:
             return jsonify({'success': False, 'error': str(e)}), 400
@@ -779,9 +811,16 @@ def listing_reconciliation_page():
     return redirect('/store-listing-helper' + ('?'+query if query else ''))
 
 
-def listing_alert_summary(sync_alert=None):
-    """Compatibility for the global Alerts screen: one stock calculation everywhere."""
-    payload = _cached_payload(str(request.args.get('refresh') or '').lower() in ('1','true','yes'))
+def listing_alert_summary(sync_alert=None, counts_only=False):
+    """Compatibility for the global Alerts screen: one stock calculation everywhere.
+
+    counts_only serves the nav badge: counts without the alert lists, from a
+    payload up to BADGE_CACHE_SECONDS old even after warehouse writes."""
+    refresh = str(request.args.get('refresh') or '').lower() in ('1','true','yes')
+    if counts_only:
+        payload = _cached_payload(refresh, max_age=BADGE_CACHE_SECONDS, allow_outdated=True)
+    else:
+        payload = _cached_payload(refresh)
     alerts = {k:[] for k in ('no_warehouse','quantity_alert','no_listings','listing_matches','sync_overdue')}
     for listing in payload['listings']:
         status = listing['stock_status']
@@ -808,4 +847,6 @@ def listing_alert_summary(sync_alert=None):
     counts = {k:len(v) for k,v in alerts.items()}
     counts['sync_overdue'] = int((alerts['sync_overdue'][0] or {}).get('overdue_count') or 0) if alerts['sync_overdue'] else 0
     counts['total'] = sum(counts[k] for k in ('no_warehouse','quantity_alert','no_listings','sync_overdue'))
+    if counts_only:
+        return {'success':True,'counts':counts}
     return {'success':True,'alerts':alerts,'counts':counts}

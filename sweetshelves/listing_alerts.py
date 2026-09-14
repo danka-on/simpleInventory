@@ -174,8 +174,11 @@ _listing_helper_scan_cache_state = {
 def api_listing_helper_scan():
     """Serve global alerts from the same Listings & Stock calculation."""
     from . import listing_reconciliation
+    counts_only = str(request.args.get('counts') or '').strip().lower() in ('1', 'true', 'yes')
     try:
-        return jsonify(listing_reconciliation.listing_alert_summary(ss_sync._sync_manager_overdue_alert()))
+        return jsonify(listing_reconciliation.listing_alert_summary(
+            ss_sync._sync_manager_overdue_alert(), counts_only=counts_only
+        ))
     except Exception as e:
         return jsonify({'success':False,'error':ss_errors._safe_error(e,'listing-stock-alerts')}),500
 
