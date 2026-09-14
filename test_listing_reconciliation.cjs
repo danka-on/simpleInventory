@@ -14,7 +14,8 @@ const {chromium} = require('playwright');
       image:'http://reconciliation.test/photo.svg', url:'https://www.ebay.com/itm/123', received:false, warehouse:[], match_kind:'',
       warehouse_qty:0, short_by:0,
       suggestions:[{searchrack_id:7, barcode:'762120414654', title:'Serving board', location:'A1', alternate_titles:['Cafe Custom Dream Mug'],
-        quantity:2, image:'http://reconciliation.test/photo.svg', reason:'same title listed on amazon', score:.95}],
+        quantity:2, image:'http://reconciliation.test/photo.svg', reason:'same title listed on amazon', score:.95,
+        claimed_by:'Amazon listing "Serving board <script>relist</script> WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW"'}],
     };
     const posts = [];
     let failLink = false;
@@ -73,6 +74,8 @@ const {chromium} = require('playwright');
     await page.getByRole('dialog').waitFor({state:'hidden'});
     assert.equal(await page.locator('#tileLive').innerText(),'1');
     assert.equal(await page.locator('#itemList script').count(),0);
+    // A row another listing already has is still offered, labelled with that listing (escaped).
+    assert.equal(await page.locator('.suggestion .claimed').innerText(),'Already matched: '+listing.suggestions[0].claimed_by);
     const finder = await page.getByRole('link',{name:'Find in warehouse'}).getAttribute('href');
     assert.equal(new URL(finder,'http://reconciliation.test').searchParams.get('listing_key'),'123');
     await page.locator('#storeFilter').selectOption('amazon');
@@ -133,6 +136,22 @@ const {chromium} = require('playwright');
     listing.suggestions.push({...listing.suggestions[0],searchrack_id:8,barcode:'882864344090'});
     await page.getByRole('button',{name:'Refresh',exact:true}).click();
     await page.getByRole('tab',{name:'Needs matching (2)',exact:true}).waitFor();
+    // At phone width a long "Already matched" line stays two lines tall; a tap shows all of it.
+    const claimed=page.locator('.item[data-key="123"] .suggestion .claimed').first();
+    assert.equal(await claimed.getAttribute('title'),listing.suggestions[0].claimed_by);
+    const clamped=await claimed.evaluate(e=>({shown:e.clientHeight,full:e.scrollHeight}));
+    assert.ok(clamped.full>clamped.shown && clamped.shown<=34,JSON.stringify(clamped));
+    await claimed.click();
+    assert.deepEqual(await claimed.evaluate(e=>[e.clientHeight,e.getAttribute('aria-expanded')]),[clamped.full,'true']);
+    // Keyboard users can read it too: Enter closes it again, Space reopens it without scrolling the page.
+    await claimed.focus();
+    await page.keyboard.press('Enter');
+    assert.deepEqual(await claimed.evaluate(e=>[e.clientHeight,e.getAttribute('aria-expanded')]),[clamped.shown,'false']);
+    const scrolled=await page.evaluate(()=>scrollY);
+    await page.keyboard.press('Space');
+    assert.deepEqual(await claimed.evaluate(e=>[e.clientHeight,e.getAttribute('aria-expanded')]),[clamped.full,'true']);
+    assert.equal(await page.evaluate(()=>scrollY),scrolled);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     const first=page.locator('.item[data-key="123"]');
     const second=page.locator('.item[data-key="456"]');
     await first.locator('[data-select-link]').nth(0).check();

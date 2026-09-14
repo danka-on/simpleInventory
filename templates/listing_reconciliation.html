@@ -189,6 +189,9 @@
         .suggestion .name{font-weight:700;font-size:13px;overflow-wrap:anywhere}
         .suggestion .why{font-size:11.5px;color:var(--r-muted);margin-top:1px;overflow-wrap:anywhere}
         .suggestion .why strong{color:var(--c-need)}
+        .suggestion .claimed{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;cursor:pointer}
+        .suggestion .claimed.open{display:block}
+        .suggestion .claimed b{color:var(--r-ink2);font-weight:700}
         .suggestion-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
         .pick-link{display:inline-flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;font-weight:700;color:var(--r-ink2);padding:4px 6px;border-radius:7px}
         .pick-link:hover{background:var(--r-panel)}
@@ -448,6 +451,7 @@ function suggestionBlocks(l){
             <div>
                 <div class="name">${esc(s.title || '(untitled rack row)')}</div>
                 <div class="why"><code>${esc(s.barcode)}</code> · ${s.location ? esc(s.location) : 'no location'} · qty ${s.quantity} · ${esc(s.reason)}</div>
+                ${s.claimed_by ? `<div class="why claimed" tabindex="0" role="button" aria-expanded="false" title="${esc(s.claimed_by)}"><b>Already matched:</b> ${esc(s.claimed_by)}</div>` : ''}
                 ${s.ai_verdict ? `<div class="why"><strong>${s.ai_verdict === 'likely' ? 'Claude: likely match' : 'Claude: possible match'}</strong> · Confirm against the item.</div>` : ''}
                 ${s.alternate_titles?.length ? `<div class="why">Saved names: ${s.alternate_titles.map(esc).join(' · ')}</div>` : ''}
             </div>
@@ -526,13 +530,22 @@ imagePreview.addEventListener('close', () => document.getElementById('previewIma
 document.getElementById('itemList').addEventListener('click', event => {
     const thumbnail = event.target.closest('.thumb, .suggestion img');
     if (thumbnail) openImagePreview(thumbnail);
+    // The "Already matched" line is clamped to two lines; phones have no hover title, so a tap opens it.
+    const claimed = event.target.closest('.suggestion .claimed');
+    if (claimed) toggleClaimed(claimed);
 });
 document.getElementById('itemList').addEventListener('keydown', event => {
     if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.thumb, .suggestion img')) {
         event.preventDefault();
         openImagePreview(event.target);
+    } else if ((event.key === 'Enter' || event.key === ' ') && event.target.matches('.suggestion .claimed')) {
+        event.preventDefault();  // Space would scroll the page
+        toggleClaimed(event.target);
     }
 });
+function toggleClaimed(line){
+    line.setAttribute('aria-expanded', line.classList.toggle('open'));
+}
 
 function render(){
     updateLinkSelection();

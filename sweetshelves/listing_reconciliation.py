@@ -8,7 +8,7 @@ it under exactly one state:
   accounted    the listing's UPC (exact, zero-padded or a -suffixed unit) is on
                the rack, or someone linked it to a rack row by hand
   suggested    no barcode hit, but the rack holds something whose name, maker
-               prefix or sister listing says it is probably this item
+               prefix or a listing with the same title says it is probably this item
   sold_out     the UPC was received at some point (raw BOL, BOL, archived rack
                rows) and is gone now: the listing most likely outlived its stock
   unaccounted  nothing anywhere knows this listing's code or name
@@ -18,10 +18,12 @@ Links are saved through the helper's existing listing_inventory_matches table
 so Ready to Ship and the Finder see the same answer.
 """
 
+import bisect
 import copy
-import difflib
 import hashlib
+import heapq
 import json
+import math
 import re
 import sqlite3
 import threading
@@ -32,6 +34,7 @@ import reconciliation_names as name_matching
 import reconciliation_ai as ai_matching
 import reconciliation_stock as stock_matching
 from collections import defaultdict
+from functools import lru_cache
 from flask import jsonify, redirect, render_template, request
 from urllib.parse import urlencode
 from . import database as ss_database, errors as ss_errors, listing_alerts as ss_listing_alerts
@@ -41,11 +44,45 @@ RECONCILE_ALERT_TYPE = 'reconcile'
 CACHE_SECONDS = 30
 SUGGESTION_LIMIT = 3
 # Below this the best candidate is more likely a sibling product than the item.
-SUGGEST_THRESHOLD = 0.55
+SUGGEST_THRESHOLD = 0.4
 # At or above this a lookalike outranks "this UPC was received and is gone".
 STRONG_SUGGESTION = 0.9
-# Tokens this common on the rack say nothing about which item a title means.
-RARE_TOKEN_LIMIT = 60
+# Rows, by summed rarity of the words they share with a listing, that get the full comparison.
+SHORTLIST_SIZE = 40
+# BOL text is cut at a fixed width ("Salad Pl"), runs words together and abbreviates:
+# a rack word that is a prefix or consonant skeleton of a listing word is partial evidence.
+PREFIX_CREDIT = .8
+ABBREVIATION_CREDIT = .7
+MIN_PREFIX = 2
+# A cut of 3+ letters reads as the item type the listing spells ("Bow", "PLT"); "Bo" and "Pl" start too many words.
+MIN_TYPED_CUT = 3
+# Weight of the title-word score against brand/type/color/piece agreement, and
+# how much of it comes from explaining the (short, truncated) rack title.
+TEXT_WEIGHT = 2.0
+RACK_COVERAGE_WEIGHT = .6
+# Any listing containing "Tree" fully explains a rack title that is just "Tree";
+# titles that short earn only the listing-side share.
+MIN_RACK_COVERAGE_TERMS = 2
+# Likewise one word the rack uses ("White") cannot explain a listing whose other words it never uses:
+# a listing with fewer checkable words earns only their part of the listing-side share.
+MIN_CHECKED_TERMS = 2
+# Listing words the rack never uses are ignored, so a rack title this short that the rest of the
+# listing explains ("Botanic Garden Portmeirion" for its teaspoons) says too little to be certain;
+# so does one naming a line word the listing lacks ("Berry" where the listing's own word is "Spice").
+SHORT_RACK_TERMS = 3
+# Heavier title-word weight lets a Raymond Bowl read like a Raymond Vase, so an
+# unrelated item type must cost more than the attribute blend alone charges.
+TYPE_CONFLICT_FACTOR = .4
+# A word on at most this many rack rows that is not a brand, type, color or size word names a
+# product line or model; each title naming one the other lacks marks a sibling of one family.
+LINE_WORD_LIMIT = 30
+SIBLING_PENALTY = .20
+# A borrowed name (see _history_names) may rank a row; only the rack's own names make it strong.
+BORROWED_NAME_CAP = STRONG_SUGGESTION - .01
+# Another listing, live or ended, with the same _title_key whose own code is on the rack most likely
+# is this very item: its rows keep their rank when a listing already has them, and are strong unless
+# this listing carries a barcode of its own (_RackIndex.twin_suggestions).
+TWIN_SCORE = .95
 
 STOP_WORDS = {
     'the', 'a', 'an', 'and', 'of', 'for', 'with', 'in', 'new', 'sealed', 'set', 'pack', 'oz',
@@ -98,17 +135,73 @@ def _listing_codes(listing):
     return codes
 
 
+def _plain(text):
+    text = str(text or '').casefold()
+    if not text.isascii():  # only non-ASCII text carries accents; the per-character pass is most of an index load
+        text = ''.join(c for c in unicodedata.normalize('NFKD', text) if not unicodedata.combining(c))
+    # 20"x20", 60X84 and 60 x 84 are one size: compare its numbers, not a glued word only one side has.
+    return re.sub(r'(?<=\d)["\'\u201d\s]*x\s*(?=\d)|\bx(?=\d)', ' x ', text)
+
+
+def _words(text):
+    return re.findall(r'[a-z0-9]+', _plain(text))
+
+
+@lru_cache(maxsize=16384)
+def _numbers(text):
+    # Split like the words, or 4x6 and 5x7 (whose one-digit words are dropped) would show no size to compare.
+    return frozenset(re.findall(r'\b\d+(?:\.\d+)?\b', _plain(text)))
+
+
 def _tokens(text):
-    text = unicodedata.normalize('NFKD', str(text or '').casefold())
-    text = ''.join(c for c in text if not unicodedata.combining(c))
-    return {
-        word for word in re.findall(r'[a-z0-9]+', text)
-        if len(word) > 1 and word not in STOP_WORDS
-    }
+    return {word for word in _words(text) if len(word) > 1 and word not in STOP_WORDS}
+
+
+def _stem(word):
+    """One key for singular and plural: Nutcrackers is a Nutcracker, Glasses a Glass."""
+    if len(word) > 4 and word.endswith('ies'):
+        return word[:-3] + 'y'
+    if len(word) > 4 and word.endswith(('sses', 'ches', 'shes', 'xes')):
+        return word[:-2]
+    if len(word) > 3 and word.endswith('s') and not word.endswith(('ss', 'us', 'is')):
+        return word[:-1]
+    return word
+
+
+def _terms(text):
+    return {_stem(word) for word in _tokens(text)}
+
+
+def _is_subsequence(short, word):
+    letters = iter(word)
+    return all(letter in letters for letter in short)
+
+
+# Stemmed like title terms; kind, colour, size and filler words never name a product line.
+_GENERIC_TERMS = frozenset(_stem(word) for word in name_matching.vocabulary_words() | name_matching.SIZES)
+
+
+# Marketplace noise around one title: a price, eBay's "1 x" quantity prefix.
+_LISTING_NOISE = re.compile(r'^\s*1\s*x\s+|\$\s?\d[\d,]*(?:\.\d+)?', re.IGNORECASE)
+
+
+# Count words tell a single from a set; the other stop words are marketplace filler.
+_TWIN_FILLER = STOP_WORDS - {'set', 'pack', 'pc', 'pcs', 'piece', 'lot'}
 
 
 def _title_key(text):
-    return ' '.join(str(text or '').lower().split())
+    """The words two listings of one item share, in any order, case or punctuation, price aside.
+
+    Sizes and counts are words too, so "Set of 4" is not a single and "Mug Set" is not a mug;
+    one letter stays a word, so a monogram or an S/M/L size tells variants apart. Word order
+    and repeats are free: a relist that moves "Amber" past "Set of 4" is the same title."""
+    return frozenset(word for word in _words(_LISTING_NOISE.sub(' ', str(text or ''))) if word not in _TWIN_FILLER)
+
+
+def _identity(listing):
+    """Every key a store knows this listing by; eBay SKU boxes hold storage notes."""
+    keys = {listing.get('listing_key'), listing.get('item_id'), None if listing.get('hint') else listing.get('sku')}
+    return {(listing['store'], str(key).strip().lower()) for key in keys if str(key or '').strip().lower() not in ('', 'none')}
 
 
 def _maker_prefix(code):
@@ -296,22 +389,22 @@ def _load_listings():
 
 
 def _load_fba_codes():
-    """Product keys of active FBA listings: their rack stock is listed, at Amazon."""
-    codes = set()
+    """Product keys of active FBA listings, each with a title: their rack stock is listed, at Amazon."""
+    codes = {}
     with ss_database.db_connection('amazonStore.db') as conn:
         cols = _columns(conn.cursor(), 'ITEMS')
         if 'fulfillment_channel' not in cols:
             return codes
         rows = conn.execute(
-            "SELECT UPC, ASIN, SKU FROM ITEMS"
+            "SELECT TITLE, UPC, ASIN, SKU FROM ITEMS"
             " WHERE LOWER(TRIM(COALESCE(STATUS, ''))) = 'active'"
-            " AND UPPER(TRIM(COALESCE(FULFILLMENT_CHANNEL, ''))) LIKE 'AMAZON%'"
+            " AND UPPER(TRIM(COALESCE(FULFILLMENT_CHANNEL, ''))) LIKE 'AMAZON%' ORDER BY ID"
         ).fetchall()
-    for row in rows:
-        for value in row:
+    for title, *values in rows:
+        for value in values:
             key = _product_key(value)
             if key:
-                codes.add(key)
+                codes.setdefault(key, title)
     return codes
 
 
@@ -373,38 +466,134 @@ def _load_name_evidence():
     return names
 
 
+def _load_store_titles():
+    """Every eBay and Amazon listing row, live or ended, FBA included: a listing's code names its product."""
+    listings = []
+    with ss_database.db_connection('ebayStore.db') as conn:
+        conn.row_factory = None
+        sku_expr = 'SKU' if 'sku' in _columns(conn.cursor(), 'INVENTORY') else "''"
+        for row_id, item_id, title, upc, sku, state in conn.execute(
+                f'SELECT ID, ItemID, Title, UPC, {sku_expr}, List_State FROM INVENTORY ORDER BY ID'):
+            item_id, sku = str(item_id or '').strip(), str(sku or '').strip()
+            listings.append({'store': 'ebay', 'listing_key': item_id or f'ebay_row:{row_id}', 'item_id': item_id,
+                             'title': ' '.join(str(title or '').split()), 'upc': str(upc or '').strip(), 'sku': sku,
+                             'hint': '' if not sku or _digit_runs(sku) or sku.lower() == 'none' else sku,
+                             'live': str(state or '').strip().lower() == 'active'})
+    with ss_database.db_connection('amazonStore.db') as conn:
+        conn.row_factory = None
+        for row_id, asin, sku, title, upc, status in conn.execute('SELECT ID, ASIN, SKU, TITLE, UPC, STATUS FROM ITEMS ORDER BY ID'):
+            asin, sku = str(asin or '').strip(), str(sku or '').strip()
+            listings.append({'store': 'amazon', 'listing_key': sku or asin or f'amazon_row:{row_id}', 'item_id': asin,
+                             'title': ' '.join(str(title or '').split()), 'upc': str(upc or '').strip(), 'sku': sku,
+                             'hint': '', 'live': str(status or '').strip().lower() == 'active'})
+    return listings
+
+
+def _history_names(store_titles):
+    """Fuller names a product carried on ended eBay listings, with the ItemIDs that carried each.
+
+    Rack titles are often BOL text cut at a fixed width while the marketplace kept the real
+    name. These only rank suggestions. eBay keeps an ended copy of a relisted item under the
+    same ItemID, so the ids stop a listing being matched by its own words. Sale, return and
+    rack-removal titles are not read: they can hold a listing's own title with nothing to tie
+    it to that listing, and measured no gain on top of ended listings."""
+    names = defaultdict(lambda: defaultdict(set))
+    for listing in store_titles:
+        item_id = listing['item_id'].lower()
+        if listing['store'] == 'ebay' and not listing['live'] and item_id and item_id != 'none' and len(_tokens(listing['title'])) >= 2:
+            for key in {_canon(code) for code in _listing_codes(listing)} - {''}:
+                names[key][listing['title']].add(item_id)
+    return names
+
+
 # ---------------------------------------------------------------- matching --
 
+# Words that describe rather than name a model; differing on these does not make a sister model.
+DESCRIPTIVE_WORDS = {_stem(word) for word in set(name_matching.COLORS).union(*name_matching.TYPES.values())}
+
+
 class _RackIndex:
-    def __init__(self, rows, catalog_titles):
+    def __init__(self, rows, catalog_titles, history_names=None):
         self.by_id = {row['id']: row for row in rows}
         self.by_exact = defaultdict(list)
         self.by_canon = defaultdict(list)
         self.by_prefix = defaultdict(set)
-        self.by_brand = defaultdict(set)
         self.tokens = {}
         self.variants = {}
-        self.token_rows = defaultdict(set)
+        self.variant_terms = {}
+        self.term_rows = defaultdict(set)
+        self.known_terms = set()
+        # (row, name position) of each borrowed name, by every ItemID that carried it.
+        self.owned = defaultdict(set)
         for row in rows:
             base = _base(row['barcode'])
             canon = _canon(base)
             row['catalog_title'] = catalog_titles.get(canon, '')
             self.variants[row['id']] = list(dict.fromkeys(t for t in [row['title'], *row.get('alternate_titles', []), row['catalog_title']] if t))
             row['display_title'] = next(iter(self.variants[row['id']]), '')
-            for title in self.variants[row['id']]:
-                for brand in name_matching.attributes(title)['brands']:
-                    self.by_brand[brand].add(row['id'])
+            known = {name_matching.normalized(title) for title in self.variants[row['id']]}
+            borrowed_names = {}
+            for title, owners in sorted((history_names or {}).get(_product_key(row['barcode']), {}).items()):
+                spelling = name_matching.normalized(title)
+                if spelling not in known:
+                    borrowed_names.setdefault(spelling, [title, set()])[1].update(owners)
+            names = [(title, frozenset(), False) for title in self.variants[row['id']]] + [
+                (title, frozenset(owners), True) for title, owners in borrowed_names.values()]
+            self.variant_terms[row['id']] = [(title, _terms(title), _numbers(title), owners, borrowed)
+                                             for title, owners, borrowed in names]
+            for position, (_, terms, _, owners, borrowed) in enumerate(self.variant_terms[row['id']]):
+                self.known_terms |= terms
+                # Borrowed words stay out of the word index and its rarity: a row's old names
+                # rescore it once its own words shortlist it, and never make rack words look common.
+                for term in terms if not borrowed else ():
+                    self.term_rows[term].add(row['id'])
+                for owner in owners:
+                    self.owned[owner].add((row['id'], position))
             self.by_exact[row['barcode'].lower()].append(row)
             if canon:
                 self.by_canon[canon].append(row)
             prefix = _maker_prefix(base)
             if prefix:
                 self.by_prefix[prefix].add(row['id'])
-            words = set().union(*(_tokens(t) for t in self.variants[row['id']]))
-            self.tokens[row['id']] = words
-            for word in words:
-                self.token_rows[word].add(row['id'])
-        self.df = {word: len(ids) for word, ids in self.token_rows.items()}
+            self.tokens[row['id']] = set().union(*(_tokens(t) for t in self.variants[row['id']]))
+        count = max(1, len(rows))
+        self.idf = {term: math.log(1 + count / len(ids)) for term, ids in self.term_rows.items()}
+        self.unknown_idf = math.log(1 + count)
+        self.vocab = sorted(self.idf)
+        self.abbreviations = defaultdict(list)
+        for term in self.vocab:
+            if len(term) >= 3 and term.isalpha() and not set(term[1:]) & set('aeiou'):
+                self.abbreviations[term[0]].append(term)
+        self._expansion_cache = {}
+        self._profiles = {}
+        self._query_profiles = {}
+        self._cover_cache = {}
+        self.twins = defaultdict(list)
+
+    def add_twins(self, listings):
+        """File each listing whose own code is on the rack under its _title_key."""
+        for listing in listings:
+            rows = self.barcode_match(listing)[0]
+            key = _title_key(listing['title']) if rows else None
+            if key:
+                self.twins[key].append((_identity(listing), listing, rows))
+
+    def twin_suggestions(self, listing):
+        """Rows held by other listings, live or ended, on either store, with this listing's _title_key.
+
+        A listing with a barcode of its own (not on the rack, or it would be accounted) may be another
+        variant sold under the same title: its twins' rows still rank, but below strong, so they never
+        outweigh what that barcode's own stock history says."""
+        own, found = _identity(listing), {}
+        score = BORROWED_NAME_CAP if _listing_codes(listing) else TWIN_SCORE
+        # Live listings first: when several lend one row, the reason names a listing that has it now.
+        for identity, other, rows in sorted(self.twins.get(_title_key(listing['title']), ()), key=lambda twin: not twin[1]['live']):
+            if identity & own:
+                continue  # a listing never vouches for itself, nor for its own ended copy
+            reason = f"same title as {'a live' if other['live'] else 'an ended'} {STORE_NAMES[other['store']]} listing"
+            for row in rows:
+                found.setdefault(row['id'], reason)
+        return [self._candidate(row_id, score, reason) for row_id, reason in found.items()]
 
     def barcode_match(self, listing):
         """Rack rows holding this listing's code, and how the spelling differed."""
@@ -418,47 +607,211 @@ class _RackIndex:
                 return rows, 'zero-pad'
         return [], ''
 
-    def _score(self, listing_tokens, listing_title, row):
+    def _expansions(self, term):
+        """Rack words that are a cut-short, run-together or abbreviated spelling of term."""
+        found = self._expansion_cache.get(term)
+        if found is None:
+            found = {}
+            if term.isalpha() and len(term) >= 4:
+                for end in range(MIN_PREFIX, len(term)):
+                    if term[:end] in self.idf:
+                        found[term[:end]] = PREFIX_CREDIT
+                at = bisect.bisect_left(self.vocab, term)
+                while at < len(self.vocab) and self.vocab[at].startswith(term):
+                    if self.vocab[at] != term:
+                        found[self.vocab[at]] = PREFIX_CREDIT
+                    at += 1
+                for short in self.abbreviations.get(term[0], ()):
+                    if short not in found and len(short) < len(term) and _is_subsequence(short, term):
+                        found[short] = ABBREVIATION_CREDIT
+            self._expansion_cache[term] = found
+        return found
+
+    def _text_score(self, query_terms, terms, brand=frozenset(), partial=None):
+        """Rarity-weighted share of each title the other explains; rare shared words dominate.
+
+        partial, when given, receives each rack term explained only by a cut-off, run-together or
+        abbreviated spelling, mapped to the listing term that explained it."""
+        rack_credit = {}
+        query_hit = query_total = 0.0
+        checked = 0
+        # Sorted: when two listing words share one partial rack word the first takes the credit,
+        # and set order changes with PYTHONHASHSEED on every restart.
+        for term in sorted(query_terms):
+            credit = 1.0 if term in terms else 0.0
+            if credit:
+                rack_credit[term] = 1.0
+            else:
+                for other, part in self._expansions(term).items():
+                    if other in terms and part > rack_credit.get(other, 0.0):
+                        rack_credit[other] = part
+                        credit = max(credit, part)
+                        if partial is not None:
+                            partial[other] = term
+            # Marketplace words the rack has never used cannot be checked either way.
+            if credit or term in self.idf:
+                weight = self.idf.get(term, self.unknown_idf)
+                query_total += weight
+                query_hit += weight * credit
+                checked += 1
+        # fsum is exact, so a set's iteration order cannot move a score across a threshold.
+        rack_total = math.fsum(self.idf.get(term, self.unknown_idf) for term in terms)
+        rack_hit = math.fsum(self.idf.get(term, self.unknown_idf) * credit for term, credit in rack_credit.items())
+        if partial:
+            for term in [term for term in partial if rack_credit[term] >= 1.0]:
+                del partial[term]
+        if not rack_total or not query_total:
+            return 0.0
+        # A rack title explained only by shared brand words ("Lenox x No Color") names a maker, not the
+        # item: it counts only as far as the less explained of the two titles.
+        if brand and rack_credit.keys() <= brand:
+            return min(rack_hit / rack_total, query_hit / query_total)
+        share = RACK_COVERAGE_WEIGHT if len(terms) >= MIN_RACK_COVERAGE_TERMS else 0.0
+        listing_share = query_hit / query_total
+        if checked < MIN_CHECKED_TERMS:
+            listing_share *= checked / len(query_terms)
+        return share * rack_hit / rack_total + (1 - share) * listing_share
+
+    def _cover(self, term):
+        """The term and the rack words that spell it cut short or abbreviated; 2-3 letter stubs are too vague to count."""
+        found = self._cover_cache.get(term)
+        if found is None:
+            found = self._cover_cache[term] = frozenset([term, *(other for other, credit in self._expansions(term).items()
+                                                                 if len(other) >= 4 or credit == ABBREVIATION_CREDIT)])
+        return found
+
+    def _profile(self, title, terms):
+        """Brand words, product-line words and the rare ones among them, once per rebuild."""
+        profile = self._profiles.get(title)
+        if profile is None:
+            brand = frozenset(_stem(word) for word in name_matching.brand_words(title))
+            line = frozenset(term for term in terms if len(term) >= 4 and term.isalpha()
+                             and term not in brand and term not in _GENERIC_TERMS)
+            rare = frozenset(term for term in line if 0 < len(self.term_rows.get(term, ())) <= LINE_WORD_LIMIT)
+            profile = self._profiles[title] = (brand, line, rare)
+        return profile
+
+    def _query_profile(self, title, terms):
+        """A listing's profile plus what its words cover on the rack, once per listing."""
+        found = self._query_profiles.get(title)
+        if found is None:
+            brand, _, rare = self._profile(title, terms)
+            found = self._query_profiles[title] = (brand, [self._cover(term) for term in sorted(rare)],
+                                                   frozenset().union(*map(self._cover, terms)))
+        return found
+
+    def _blocked(self, listing):
+        """Name positions, by row, of borrowed names that only ever came from this very listing."""
+        mine = {str(listing.get('item_id') or '').lower(), listing['listing_key'].lower()}
+        blocked = defaultdict(set)
+        for owner in mine:
+            for row_id, position in self.owned.get(owner, ()):
+                if self.variant_terms[row_id][position][3] <= mine:
+                    blocked[row_id].add(position)
+        return blocked
+
+    def _model_word(self, term, rack_known=True):
+        # A listing's long word may be a model name the rack only holds cut short ("Snowcrys").
+        return (term.isalpha() and len(term) >= 4 and term not in DESCRIPTIVE_WORDS
+                and (term in self.known_terms or (not rack_known and len(term) >= 6)))
+
+    def _sister_model(self, query_terms, terms):
+        """A sister model's full name shares the template words and differs in a model word
+        each way; it must not stand in for this row."""
+        return (any(self._model_word(term, rack_known=False) for term in query_terms - terms)
+                and any(self._model_word(term) for term in terms - query_terms))
+
+    def _score(self, listing_tokens, listing_title, row, relatives=None, blocked=()):
         if not listing_tokens:
             return 0.0
-        best = 0.0
+        best, relative = 0.0, False
+        stems = {word: _stem(word) for word in listing_tokens}
+        query_terms = set(stems.values())
         query_attributes = name_matching.attributes(listing_title)
-        for title in self.variants[row['id']]:
-            words = _tokens(title)
-            if not words:
+        listing_numbers = _numbers(listing_title)
+        query = self._query_profile(listing_title, query_terms)
+        unknown = any(len(term) >= 4 and term.isalpha() and term not in self.idf for term in query_terms)
+        for position, (title, terms, title_numbers, _, borrowed) in enumerate(self.variant_terms[row['id']]):
+            # A name that only ever came from this very listing is not evidence for it.
+            if not terms or position in blocked or (borrowed and self._sister_model(query_terms, terms)):
                 continue
-            shared = listing_tokens & words
-            # Word order, punctuation, and extra marketplace wording should not
-            # outweigh the actual product words. Character similarity is secondary.
-            coverage = len(shared) / min(len(listing_tokens), len(words))
-            jaccard = len(shared) / len(listing_tokens | words)
-            ratio = difflib.SequenceMatcher(None, _title_key(listing_title), _title_key(title)).ratio()
-            score = max(jaccard, .65 * coverage + .35 * ratio) if len(shared) >= 2 else jaccard
-            score, _ = name_matching.weighted_similarity(query_attributes, name_matching.attributes(title), score)
-            listing_numbers = set(re.findall(r'\b\d+(?:\.\d+)?\b', listing_title))
-            title_numbers = set(re.findall(r'\b\d+(?:\.\d+)?\b', title))
+            profile = self._profile(title, terms)
+            partial = {}
+            score = self._text_score(query_terms, terms, query[0] | profile[0], partial)
+            # Shared words as the listing spells them, so "Knives" still reads as a type word, not a product name.
+            shared = [word for word, stem in stems.items() if stem in terms]
+            cut = {short: word for short, word in partial.items() if MIN_TYPED_CUT <= len(short) < len(word)}
+            spelled = tuple(sorted({(word, cut[_stem(word)]) for word in _words(title) if _stem(word) in cut})) if cut else ()
+            score, _ = name_matching.weighted_similarity(query_attributes, name_matching.attributes(title, spelled), score,
+                                                         TEXT_WEIGHT, TYPE_CONFLICT_FACTOR,
+                                                         len(name_matching.name_words(shared)))
             if listing_numbers and title_numbers and listing_numbers != title_numbers:
                 # A different pack count/size must not become strong evidence
                 # that overrides the listing's own missing-stock history.
                 score = min(score, STRONG_SUGGESTION - .01)
-            best = max(best, score)
+            if unknown and (len(terms) <= SHORT_RACK_TERMS or not profile[2] <= query[2]):
+                score = min(score, STRONG_SUGGESTION - .01)
+            score, is_relative = self._sibling(score, query, terms, profile)
+            if borrowed:
+                score = min(score, BORROWED_NAME_CAP)
+            if score > best or (score == best and not is_relative):
+                best, relative = score, is_relative
+        if relative and relatives is not None:
+            relatives.add(row['id'])
         return round(best, 3)
 
-    def suggestions(self, listing, limit=SUGGESTION_LIMIT):
-        """Distinct product suggestions, best first; None returns all qualifying rows."""
+    def _sibling(self, score, query, terms, profile):
+        """Score after the sibling check, and whether the row is only a relative.
+
+        Siblings of one family share brand, type and most words; the rare line word each
+        names and the other cannot spell (Varnel vs Quellbrook) tells them apart.
+        """
+        if not (query[1] and profile[2]) or profile[2] <= query[2] \
+                or not any(cover.isdisjoint(terms) for cover in query[1]):
+            return score, False
+        penalized = score * (1 - SIBLING_PENALTY)
+        if penalized < SUGGEST_THRESHOLD <= score:
+            # Still listed below the lookalikes; one sharing no line word only fills an otherwise empty list.
+            return SUGGEST_THRESHOLD, profile[1].isdisjoint(query[2])
+        return min(penalized, STRONG_SUGGESTION - .01), False
+
+    def _shortlist(self, query_terms, claims=None, own=frozenset()):
+        """Rows sharing the rarest words, from one pass over the word index.
+
+        With claims (_claimed_rows), rows a listing other than own already has rank after
+        every free row, so they must not push a free row out of the full comparison: the
+        best SHORTLIST_SIZE free rows join the usual cut, which still keeps its claimed rows."""
+        weights = defaultdict(float)
+        # Sorted so float sums, and with them the cut at SHORTLIST_SIZE, are the same on every restart.
+        for term in sorted(query_terms):
+            matches = dict(self._expansions(term))
+            if term in self.idf:
+                matches[term] = 1.0
+            for other, credit in matches.items():
+                weight = credit * min(self.idf[other], self.idf.get(term, self.unknown_idf))
+                for row_id in self.term_rows[other]:
+                    weights[row_id] += weight
+        key = lambda row_id: (weights[row_id], -row_id)
+        top = heapq.nlargest(SHORTLIST_SIZE, weights, key=key)
+        taken = {row_id for row_id in weights.keys() & (claims or {}).keys() if not claims[row_id].keys() <= own}
+        if taken.intersection(top):
+            top = list(dict.fromkeys(top + heapq.nlargest(SHORTLIST_SIZE, weights.keys() - taken, key=key)))
+        return top
+
+    def suggestions(self, listing, limit=SUGGESTION_LIMIT, distinct=True, claims=None, twins=frozenset()):
+        """Distinct product suggestions, best first; None returns all qualifying rows.
+
+        distinct=False keeps every location of a product, so a caller can pick one;
+        claims (_claimed_rows) gives free rows their own shortlist places (_shortlist);
+        twins are claimed rows _all_suggestions keeps at their rank."""
         listing_tokens = _tokens(listing['title'])
-        scored = {}
-        rare = sorted(listing_tokens, key=lambda word: self.df.get(word, 10 ** 6))[:5]
-        candidates = set()
-        for word in rare:
-            if 0 < self.df.get(word, 0) <= RARE_TOKEN_LIMIT:
-                candidates |= self.token_rows[word]
-        listing_brands = set(name_matching.attributes(listing['title'])['brands'])
-        for brand in listing_brands:
-            candidates.update(self.by_brand.get(brand, ()))
+        scored, relatives = {}, set()
+        own = _owner_ids(listing)
+        blocked = self._blocked(listing)
+        candidates = self._shortlist({_stem(word) for word in listing_tokens}, claims, own)
         for row_id in candidates:
             row = self.by_id[row_id]
-            score = self._score(listing_tokens, listing['title'], row)
+            score = self._score(listing_tokens, listing['title'], row, relatives, blocked.get(row_id, ()))
             if score >= SUGGEST_THRESHOLD:
                 candidate_attributes = name_matching.attributes(row['display_title'])
                 _, reasons = name_matching.weighted_similarity(name_matching.attributes(listing['title']), candidate_attributes, score)
@@ -472,18 +825,24 @@ class _RackIndex:
                 # One shared word under the same maker prefix is just the brand name.
                 if len(shared) < 2:
                     continue
-                score = self._score(listing_tokens, listing['title'], self.by_id[row_id])
+                score = self._score(listing_tokens, listing['title'], self.by_id[row_id], relatives, blocked.get(row_id, ()))
                 if not score:
                     continue
                 if score < SUGGEST_THRESHOLD:
                     continue
                 scored[row_id] = (score, 'same barcode prefix, shares "' + '", "'.join(sorted(shared)[:2]) + '"')
+        # A relative (another line of the family, sharing no line word) only fills an otherwise empty list.
+        # Rows other listings have follow every free row, so only a free row or a twin empties it of
+        # relatives; dropping them for a claimed row would just put that row first.
+        if relatives and (twins or any(not (claims or {}).get(row_id, {}).keys() - own for row_id in scored.keys() - relatives)):
+            for row_id in relatives:
+                scored.pop(row_id, None)
         ranked = sorted(scored.items(), key=lambda item: (-item[1][0], item[0]))
         seen_barcodes = set()
         out = []
         for row_id, (score, reason) in ranked:
             barcode = _product_key(self.by_id[row_id]['barcode'])
-            if barcode in seen_barcodes:
+            if distinct and barcode in seen_barcodes:
                 continue  # the same item at another location adds nothing
             seen_barcodes.add(barcode)
             out.append(self._candidate(row_id, score, reason))
@@ -514,7 +873,11 @@ def _load_warehouse_index():
     for row in rack:
         keys = {barcode_key(row['barcode']), barcode_key(_base(row['barcode']))}
         row['alternate_titles'] = sorted({title for key in keys for title in name_evidence.get(key, [])})
-    index = _RackIndex(rack, catalog_titles)
+    # Only warehouse and BOL wording teaches brands: never listing titles or saved aliases.
+    name_matching.learn_brands([row['title'] for row in rack] + list(catalog_titles.values()))
+    store_titles = _load_store_titles()
+    index = _RackIndex(rack, catalog_titles, _history_names(store_titles))
+    index.add_twins(store_titles)
     return rack, index, received
 
 
@@ -523,16 +886,98 @@ def _product_key(barcode):
     return _canon(base) or base.lower()
 
 
-def _all_suggestions(index, listing, rows_by_title):
-    merged = {s['searchrack_id']:s for s in index.suggestions(listing, limit=None)}
-    for store, sister_rows in rows_by_title.get(_title_key(listing['title']), []):
-        if store != listing['store']:
-            for row in sister_rows:
-                merged[row['id']] = index._candidate(row['id'], .95, f'same title listed on {store}')
+STORE_NAMES = {'ebay': 'eBay', 'amazon': 'Amazon', 'fba': 'Amazon FBA'}
+
+
+def _listing_label(store, title):
+    title = ' '.join(str(title or '').split())
+    title = title if len(title) <= 60 else title[:59].rstrip() + '…'
+    return f'{STORE_NAMES.get(store, store)} listing' + (f' "{title}"' if title else '')
+
+
+def _owner_ids(listing):
+    """The claim owners that are this listing itself: its UPC match and its hand link."""
+    return {listing['listing_id'], f"{listing['store']}:{listing['listing_key'].lower()}"}
+
+
+def _claimed_rows(listings, index, links, matches=None, fba_codes=None):
+    """Rack rows an active listing already has: {row_id: {owner_id: label}}.
+
+    Owners: listing_id for a UPC match, 'store:listing_key' for a hand link,
+    'fba:<product key>' for FBA stock. A rebuild passes the barcode matches
+    (listing order) and FBA codes it already loaded instead of redoing them."""
+    if matches is None:
+        matches = [index.barcode_match(listing) for listing in listings]
+    claims = defaultdict(dict)
+    active = {}
+    for listing, (rows, _) in zip(listings, matches):
+        active[(listing['store'], listing['listing_key'].lower())] = listing
+        for row in rows:
+            claims[row['id']][listing['listing_id']] = _listing_label(listing['store'], listing['title'])
+    for (store, key), link in links.items():
+        listing = active.get((store, key))
+        row = index.by_id.get(_safe_int(link.get('searchrack_id'), 0))
+        # An ended listing's link holds no stock, and SQLite may reuse a deleted row's ID.
+        if not listing or not row or row['barcode'].lower() != str(link.get('inventory_barcode') or '').strip().lower():
+            continue
+        if listing['listing_id'] not in claims[row['id']]:
+            claims[row['id']][f'{store}:{key}'] = 'hand-linked to ' + _listing_label(store, listing['title'])
+    fba_codes = _load_fba_codes() if fba_codes is None else fba_codes
+    for row in index.by_id.values() if fba_codes else ():
+        key = _product_key(row['barcode'])
+        if key in fba_codes:
+            # Named like any other listing: the title shows whether that stock is this very product.
+            claims[row['id']][f'fba:{key}'] = _listing_label('fba', fba_codes[key])
+    return dict(claims)
+
+
+def _claim_label(claims, listing, row_id):
+    """Other active listings that already have a rack row, as one short line ('' if none).
+
+    The query listing's own UPC match and hand link never count against it."""
+    mine = _owner_ids(listing)
+    labels = list(dict.fromkeys(label for owner, label in (claims or {}).get(row_id, {}).items() if owner not in mine))
+    # Relists, the other store, FBA and hand links can pile onto one row; two names say enough.
+    return '; '.join(labels[:2]) + (f'; +{len(labels) - 2} more' if len(labels) > 2 else '')
+
+
+def _all_suggestions(index, listing, claims=None):
+    """One suggestion per product, best first.
+
+    With claims (_claimed_rows), rows another listing already has follow every free
+    candidate, order kept inside each group, labelled claimed_by. They are never
+    dropped: relists, duplicates and the same product on the other store share rows.
+    An exact twin keeps its rank (still labelled): a row lent by another listing, live or
+    ended, on either store, with the same _title_key is most likely this very item; a near
+    title ("Set of 4" added) lends nothing."""
+    lent = index.twin_suggestions(listing)
+    twins = {twin['searchrack_id'] for twin in lent}
+    locations = defaultdict(list)  # every qualifying row of a product, best first
+    for suggestion in index.suggestions(listing, limit=None, distinct=False, claims=claims, twins=twins):
+        locations[_product_key(suggestion['barcode'])].append(suggestion)
+    merged = {rows[0]['searchrack_id']: rows[0] for rows in locations.values()}
+    for twin in lent:
+        # The twin says why a row another listing has keeps its rank; a closer name keeps its score.
+        named = merged.get(twin['searchrack_id'], twin)
+        merged[twin['searchrack_id']] = dict(twin, score=max(twin['score'], named['score']))
     unique = {}
     for suggestion in sorted(merged.values(), key=lambda s:(-s['score'], s['searchrack_id'])):
         unique.setdefault(_product_key(suggestion['barcode']), suggestion)
-    return list(unique.values())
+    if claims is None:
+        return list(unique.values())
+    free, claimed = [], []
+    for key, suggestion in unique.items():
+        label = _claim_label(claims, listing, suggestion['searchrack_id'])
+        spare = next((s for s in locations.get(key, ()) if not _claim_label(claims, listing, s['searchrack_id'])), None) if label else None
+        if spare:
+            # A hand link holds one row, so another location of the same item can be free:
+            # offer that unit among the free candidates with the product's score (state never moves).
+            free.append(dict(spare, score=suggestion['score']))
+        elif label:
+            (free if suggestion['searchrack_id'] in twins else claimed).append(dict(suggestion, claimed_by=label))
+        else:
+            free.append(suggestion)
+    return free + claimed
 
 
 def _resolved(listing, index, links, dismissed):
@@ -559,29 +1004,30 @@ def _more_matches(data):
     links, dismissed = _load_user_decisions()
     if _resolved(listing, index, links, dismissed):
         return jsonify({'success':False, 'error':'This listing no longer needs matches. Refresh the list.'}), 409
-    rows_by_title = defaultdict(list)
-    for other in listings:
-        rows, _ = index.barcode_match(other)
-        if rows and other['title']:
-            rows_by_title[_title_key(other['title'])].append((other['store'], rows))
+    # Same claims as the rebuild, so rows other listings have stay last on every page.
+    claims = _claimed_rows(listings, index, links)
     seen_products = {_product_key(c) for c in seen_codes}
     seen_ids = set(seen_ids)
     seen_products.update(_product_key(index.by_id[i]['barcode']) for i in seen_ids if i in index.by_id)
-    remaining = [s for s in _all_suggestions(index, listing, rows_by_title)
+    remaining = [s for s in _all_suggestions(index, listing, claims=claims)
                  if s['searchrack_id'] not in seen_ids and _product_key(s['barcode']) not in seen_products]
     return jsonify({'success':True, 'suggestions':remaining[:SUGGESTION_LIMIT],
                     'has_more_suggestions':len(remaining) > SUGGESTION_LIMIT})
 
 
-def _apply_ai_result(listing, result, index):
+def _apply_ai_result(listing, result, index, claims=None):
     suggestions = []
     for match in result['matches']:
         row = index.by_id.get(match['searchrack_id'])
         if row is None:
             continue
-        score = index._score(_tokens(listing['title']), listing['title'], row)
+        score = index._score(_tokens(listing['title']), listing['title'], row, blocked=index._blocked(listing).get(row['id'], ()))
         candidate = index._candidate(row['id'], score, 'Claude: ' + match['reason'])
         candidate['ai_verdict'] = match['verdict']
+        # Claude's order stands, but a row another listing already has must say so before a link.
+        label = _claim_label(claims, listing, row['id'])
+        if label:
+            candidate['claimed_by'] = label
         suggestions.append(candidate)
     unique = {}
     for candidate in suggestions + listing['suggestions']:
@@ -616,17 +1062,14 @@ def build_reconciliation():
     listings = _load_listings()
     links, dismissed = _load_user_decisions()
 
-    # A sister listing on the other store can lend its rack rows to a listing
-    # that carries no UPC at all, when the titles are the same.
-    rows_by_title = defaultdict(list)
-    for listing in listings:
-        rows, _ = index.barcode_match(listing)
-        if rows and listing['title']:
-            rows_by_title[_title_key(listing['title'])].append((listing['store'], rows))
+    matches = [index.barcode_match(listing) for listing in listings]
+    fba_codes = _load_fba_codes()
+    # Rows another active listing already has stay suggestible but rank last.
+    claims = _claimed_rows(listings, index, links, matches, fba_codes)
 
     results = []
     totals = defaultdict(lambda: {'listings': 0, 'units': 0})
-    for listing in listings:
+    for listing, (rows, kind) in zip(listings, matches):
         entry = dict(listing)
         entry['attributes'] = name_matching.attributes(listing['title'])
         entry['hash'] = listing_hash(listing['store'], listing['listing_key'])
@@ -640,7 +1083,6 @@ def build_reconciliation():
         entry['match_kind'] = ''
 
         link = links.get((listing['store'], listing['listing_key'].lower()))
-        rows, kind = index.barcode_match(listing)
         if link:
             linked_row = index.by_id.get(_safe_int(link.get('searchrack_id'), 0))
             if linked_row and linked_row['barcode'].lower() != str(link.get('inventory_barcode') or '').strip().lower():
@@ -660,10 +1102,11 @@ def build_reconciliation():
         elif entry['hash'] in dismissed:
             entry['state'] = 'handled'
         else:
-            suggestions = _all_suggestions(index, listing, rows_by_title)
+            suggestions = _all_suggestions(index, listing, claims=claims)
             entry['suggestions'] = suggestions[:SUGGESTION_LIMIT]
             entry['has_more_suggestions'] = len(suggestions) > SUGGESTION_LIMIT
-            best = suggestions[0]['score'] if suggestions else 0.0
+            # Claimed rows rank last, so the strongest evidence can sit anywhere.
+            best = max((s['score'] for s in suggestions), default=0.0)
             # A listing whose own UPC was received and is gone most likely sold
             # out; a lookalike on the rack is then usually a sibling product, so
             # only near-certain evidence pulls it back into "needs a look".
@@ -686,13 +1129,13 @@ def build_reconciliation():
             if entry['state'] not in ('accounted', 'handled'):
                 evidence = ai_matching.cached(conn, entry, catalog)
                 if evidence:
-                    _apply_ai_result(entry, evidence, index)
+                    _apply_ai_result(entry, evidence, index, claims)
 
     orders, reviews, facebook = _stock_context()
     # Stock for an FBA listing is spoken for even though the listing itself is
     # not reconciled here, so it must not surface as "warehouse without listings".
     unlisted, stock_counts = stock_matching.apply(results, rack, orders,
-        {r['snapshot_hash'] for r in reviews}, facebook | _load_fba_codes(), _product_key)
+        {r['snapshot_hash'] for r in reviews}, facebook | set(fba_codes), _product_key)
     for row in unlisted:
         row['attributes'] = name_matching.attributes(row['title'])
     current_review_hashes = {l['review_hash'] for l in results+unlisted if l['stock_status'] == 'reviewed'}
@@ -706,7 +1149,7 @@ def build_reconciliation():
         'generated_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
         'claude_search_available': ai_matching.available(),
         'claude_catalog': catalog.info(),
-        'brand_names': name_matching.BRANDS,
+        'brand_names': name_matching.brand_names(),
         'type_names': {key: sorted(values) for key, values in name_matching.TYPES.items()},
         'color_names': sorted(name_matching.COLORS),
         'stock_counts': stock_counts,
@@ -832,7 +1275,8 @@ def api_listing_reconciliation():
             fresh_rack, fresh_index, _ = _load_warehouse_index()
             if ai_matching.Catalog(fresh_rack).digest != catalog.digest:
                 return jsonify({'success': False, 'error': 'Warehouse items changed during this search. Please try again.'}), 409
-            current = next((l for l in _load_listings() if l['store'] == listing['store']
+            fresh_listings = _load_listings()
+            current = next((l for l in fresh_listings if l['store'] == listing['store']
                             and l['listing_key'] == listing['listing_key']), None)
             links, dismissed = _load_user_decisions()
             link = links.get((listing['store'], listing['listing_key'].lower()))
@@ -841,7 +1285,7 @@ def api_listing_reconciliation():
             if (not current or ai_matching.fingerprint(current, catalog) != ai_matching.fingerprint(listing, catalog)
                     or listing['hash'] in dismissed or valid_link or fresh_index.barcode_match(current)[0]):
                 return jsonify({'success': False, 'error': 'This listing changed during the search. Refresh the list.'}), 409
-            _apply_ai_result(listing, result, fresh_index)
+            _apply_ai_result(listing, result, fresh_index, _claimed_rows(fresh_listings, fresh_index, links))
             listing['ai_search']['cached'] = was_cached
             invalidate_cache()
             return jsonify({'success': True, 'suggestions': listing['suggestions'], 'ai_search': listing['ai_search'], 'cached': was_cached})
