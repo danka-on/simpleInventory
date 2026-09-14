@@ -21,6 +21,7 @@ so Ready to Ship and the Finder see the same answer.
 import copy
 import difflib
 import hashlib
+import json
 import re
 import sqlite3
 import threading
@@ -59,9 +60,11 @@ _build_lock = threading.Lock()
 # generation bumps on every invalidation; a payload is current only while
 # built_generation still matches it.
 _cache_state = {'ts': 0.0, 'payload': None, 'started': 0.0, 'generation': 0, 'built_generation': -1}
-# The nav badge polls from every page, so it accepts a count this old even
-# after warehouse writes instead of forcing a rebuild after each one.
-BADGE_CACHE_SECONDS = 300
+# Alert source rows from the last Listings & Stock rebuild. The nav badge and
+# the Alerts screen read only this; opening Listings & Stock is the only thing
+# that starts a rebuild.
+_snapshot_lock = threading.Lock()
+_alert_snapshot = {'generated_at': None, 'listings': None, 'unlisted': None}
 
 
 # ---------------------------------------------------------------- identity --
@@ -326,6 +329,9 @@ def _ensure_alert_tables(conn):
             listing_title TEXT, searchrack_id INTEGER NOT NULL, inventory_barcode TEXT NOT NULL,
             inventory_location TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(store, listing_key))''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS listing_stock_snapshot (
+            id INTEGER PRIMARY KEY CHECK (id = 1), generated_at TEXT NOT NULL, rows_json TEXT NOT NULL)''')
 
 
 def _load_user_decisions():
@@ -728,27 +734,27 @@ def invalidate_cache():
         _cache_state['generation'] = int(_cache_state.get('generation') or 0) + 1
 
 
-def _cache_lookup(max_age, allow_outdated, built_after=0.0):
+def _cache_lookup(built_after=0.0):
     with _cache_lock:
         payload = _cache_state.get('payload')
         if payload is None or float(_cache_state.get('started') or 0.0) < built_after:
             return None
-        if not allow_outdated and _cache_state.get('built_generation') != _cache_state.get('generation'):
+        if _cache_state.get('built_generation') != _cache_state.get('generation'):
             return None
-        return payload if time.time() - float(_cache_state.get('ts') or 0.0) < max_age else None
+        return payload if time.time() - float(_cache_state.get('ts') or 0.0) < CACHE_SECONDS else None
 
 
-def _cached_payload(force_refresh, *, max_age=CACHE_SECONDS, allow_outdated=False):
+def _cached_payload(force_refresh):
+    """Listings & Stock only: the one place a rebuild may start."""
     requested = time.time()
     if not force_refresh:
-        payload = _cache_lookup(max_age, allow_outdated)
+        payload = _cache_lookup()
         if payload is not None:
             return payload
     with _build_lock:
         # A rebuild that finished while this caller waited serves it too; a
         # forced refresh only accepts one that started after it asked.
-        payload = _cache_lookup(max_age, allow_outdated and not force_refresh,
-                                built_after=requested if force_refresh else 0.0)
+        payload = _cache_lookup(built_after=requested if force_refresh else 0.0)
         if payload is not None:
             return payload
         with _cache_lock:
@@ -757,7 +763,52 @@ def _cached_payload(force_refresh, *, max_age=CACHE_SECONDS, allow_outdated=Fals
         payload = build_reconciliation()
         with _cache_lock:
             _cache_state.update(payload=payload, ts=time.time(), started=started, built_generation=generation)
+        _save_alert_snapshot(payload)
         return payload
+
+
+def _save_alert_snapshot(payload):
+    """Keep the rows alerts derive from, in memory and on disk so restarts keep them."""
+    listings = [l for l in payload.get('listings') or [] if l.get('stock_status') != 'in_stock']
+    unlisted = list(payload.get('unlisted') or [])
+    generated_at = payload.get('generated_at') or time.strftime('%Y-%m-%dT%H:%M:%S')
+    with _snapshot_lock:
+        _alert_snapshot.update(generated_at=generated_at, listings=listings, unlisted=unlisted)
+    try:
+        with ss_database.db_connection('listing_alerts.db') as conn:
+            _ensure_alert_tables(conn)
+            conn.execute('INSERT OR REPLACE INTO listing_stock_snapshot (id, generated_at, rows_json) VALUES (1, ?, ?)',
+                         (generated_at, json.dumps({'listings': listings, 'unlisted': unlisted})))
+    except sqlite3.Error as e:
+        print(f'Warning: could not save the Listings & Stock alert snapshot: {e}')
+
+
+def _load_alert_snapshot():
+    with _snapshot_lock:
+        if _alert_snapshot['listings'] is not None:
+            return dict(_alert_snapshot)
+    with ss_database.db_connection('listing_alerts.db') as conn:
+        _ensure_alert_tables(conn)
+        row = conn.execute('SELECT generated_at, rows_json FROM listing_stock_snapshot WHERE id = 1').fetchone()
+    if not row:
+        return None
+    rows = json.loads(row[1] or '{}')
+    with _snapshot_lock:
+        if _alert_snapshot['listings'] is None:  # a rebuild may have landed meanwhile
+            _alert_snapshot.update(generated_at=row[0], listings=rows.get('listings') or [],
+                                   unlisted=rows.get('unlisted') or [])
+        return dict(_alert_snapshot)
+
+
+def _alert_status(row, dismissed):
+    """Stock status with dismissals made since the snapshot applied, no rebuild."""
+    status = row.get('stock_status')
+    if row.get('state') == 'handled':
+        return status
+    base = row.get('reviewed_status') or ('unlisted' if row.get('state') == 'warehouse_unlisted' else status)
+    if base in ('in_stock', 'reviewed'):
+        return base
+    return 'reviewed' if row.get('review_hash') in dismissed else base
 
 
 def api_listing_reconciliation():
@@ -812,18 +863,20 @@ def listing_reconciliation_page():
 
 
 def listing_alert_summary(sync_alert=None, counts_only=False):
-    """Compatibility for the global Alerts screen: one stock calculation everywhere.
+    """Global Alerts screen and nav badge: the last Listings & Stock result, never a rebuild.
 
-    counts_only serves the nav badge: counts without the alert lists, from a
-    payload up to BADGE_CACHE_SECONDS old even after warehouse writes."""
-    refresh = str(request.args.get('refresh') or '').lower() in ('1','true','yes')
-    if counts_only:
-        payload = _cached_payload(refresh, max_age=BADGE_CACHE_SECONDS, allow_outdated=True)
-    else:
-        payload = _cached_payload(refresh)
+    Only opening Listings & Stock recalculates stock; dismissals made since then
+    are applied here. counts_only drops the alert lists for the badge."""
+    snapshot = _load_alert_snapshot()
+    if snapshot is None:
+        return {'success': False, 'not_built': True,
+                'error': 'Open Listings & Stock once to calculate stock alerts.'}
+    with ss_database.db_connection('listing_alerts.db') as conn:
+        _ensure_alert_tables(conn)
+        dismissed = {str(row[0]) for row in conn.execute('SELECT snapshot_hash FROM dismissed_alerts')}
     alerts = {k:[] for k in ('no_warehouse','quantity_alert','no_listings','listing_matches','sync_overdue')}
-    for listing in payload['listings']:
-        status = listing['stock_status']
+    for listing in snapshot['listings']:
+        status = _alert_status(listing, dismissed)
         if status == 'needs_matching':
             alerts['listing_matches'].append(listing)
         if status not in ('out_of_stock','short_stock'):
@@ -834,19 +887,17 @@ def listing_alert_summary(sync_alert=None, counts_only=False):
                     effective_qty=listing['available_qty'], overage=listing['available_short_by'],
                     warehouse_locations=listing['warehouse'], hash=listing['review_hash'], severity='red')
         alerts['no_warehouse' if status == 'out_of_stock' else 'quantity_alert'].append(item)
-    for row in payload['unlisted']:
-        if row['stock_status'] != 'unlisted':
+    for row in snapshot['unlisted']:
+        if _alert_status(row, dismissed) != 'unlisted':
             continue
         alerts['no_listings'].append(dict(upc=row['upc'],title=row['title'],image=row['image'],
             warehouse_qty=row['physical_qty'],warehouse_locations=row['warehouse'],hash=row['review_hash'],severity='yellow'))
-    if sync_alert:
-        with ss_database.db_connection('listing_alerts.db') as conn:
-            dismissed = conn.execute('SELECT 1 FROM dismissed_alerts WHERE snapshot_hash=?',(sync_alert.get('hash'),)).fetchone()
-        if not dismissed:
-            alerts['sync_overdue'].append(sync_alert)
+    if sync_alert and str(sync_alert.get('hash')) not in dismissed:
+        alerts['sync_overdue'].append(sync_alert)
     counts = {k:len(v) for k,v in alerts.items()}
     counts['sync_overdue'] = int((alerts['sync_overdue'][0] or {}).get('overdue_count') or 0) if alerts['sync_overdue'] else 0
     counts['total'] = sum(counts[k] for k in ('no_warehouse','quantity_alert','no_listings','sync_overdue'))
-    if counts_only:
-        return {'success':True,'counts':counts}
-    return {'success':True,'alerts':alerts,'counts':counts}
+    result = {'success':True,'generated_at':snapshot['generated_at'],'counts':counts}
+    if not counts_only:
+        result['alerts'] = alerts
+    return result

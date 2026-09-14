@@ -20,6 +20,7 @@ class ListingReconciliationTests(unittest.TestCase):
         self.stack.enter_context(patch.object(config, 'BASE_DIR', self.root))
         self.stack.enter_context(patch.object(DBmanager, 'BASE_DIR', str(self.root)))
         self.stack.enter_context(patch.dict(recon._cache_state, {'ts': 0.0, 'payload': None}))
+        self.stack.enter_context(patch.dict(recon._alert_snapshot, {'generated_at': None, 'listings': None, 'unlisted': None}))
         self.client = app.test_client()
         self.sql('searchRack.db', '''
             CREATE TABLE SEARCHRACK (ID INTEGER PRIMARY KEY, TITLE TEXT, BARCODE TEXT, ITEM_POSITION TEXT,
@@ -406,29 +407,54 @@ class ListingReconciliationTests(unittest.TestCase):
         self.sql('sold.db',"INSERT INTO orders (barcode,quantity,store,paid_time) VALUES ('100000000001',1,'amazon',datetime('now'))")
         self.assertTrue(all(l['stock_status']=='out_of_stock' for l in self.scan()['listings']))
 
-    def test_concurrent_callers_share_one_rebuild_and_badge_tolerates_writes(self):
+    def test_concurrent_page_loads_share_one_rebuild(self):
         import threading, time
         calls = []
         def slow_build():
             calls.append(1)
             time.sleep(0.2)
-            return {'success': True, 'listings': [], 'unlisted': [], 'build': len(calls)}
-        with (patch.object(recon, 'build_reconciliation', side_effect=slow_build),
-              patch.object(recon.ss_listing_alerts.ss_sync, '_sync_manager_overdue_alert', return_value=None)):
-            threads = [threading.Thread(target=recon._cached_payload, args=(False,)) for _ in range(4)]
+            return {'success': True, 'generated_at': '2026-09-14T10:00:00', 'listings': [], 'unlisted': [],
+                    'build': len(calls)}
+        def page_load():
+            with app.app_context():  # every real caller is a request
+                recon._cached_payload(False)
+        with patch.object(recon, 'build_reconciliation', side_effect=slow_build):
+            threads = [threading.Thread(target=page_load) for _ in range(4)]
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join()
             self.assertEqual(len(calls), 1)
-            # A warehouse write: the badge keeps its recent count, full views rebuild.
-            recon.ss_listing_alerts.ss_caching._listing_helper_scan_cache_clear()
-            badge = self.client.get('/api/listing-helper/scan?counts=1').get_json()
-            self.assertEqual(len(calls), 1)
-            self.assertNotIn('alerts', badge)
-            self.assertEqual(badge['counts']['total'], 0)
-            self.assertEqual(recon._cached_payload(False)['build'], 2)
-            self.assertEqual(recon._cached_payload(True)['build'], 3)
+            with app.app_context():
+                recon.ss_listing_alerts.ss_caching._listing_helper_scan_cache_clear()
+                self.assertEqual(recon._cached_payload(False)['build'], 2)
+                self.assertEqual(recon._cached_payload(True)['build'], 3)
+
+    def test_badge_and_alerts_screen_never_rebuild(self):
+        self.rack(1,'Lenox Mug','100000000001',quantity=3)
+        self.ebay('STOCK','Lenox Mug','100000000001',qty='3')
+        self.sql('sold.db',"INSERT INTO orders (barcode,quantity,store,paid_time) VALUES ('100000000001',2,'ebay',datetime('now'))")
+        badge = lambda: self.client.get('/api/listing-helper/scan?counts=1').get_json()
+        with patch.object(recon.ss_listing_alerts.ss_sync,'_sync_manager_overdue_alert',return_value=None):
+            with patch.object(recon, 'build_reconciliation') as build:
+                self.assertTrue(badge()['not_built'])
+                self.assertTrue(self.client.get('/api/listing-helper/scan?refresh=1').get_json()['not_built'])
+                build.assert_not_called()
+            payload = self.scan()  # opening Listings & Stock is the only rebuild
+            review_hash = next(l['review_hash'] for l in payload['listings'] if l['stock_status'] == 'short_stock')
+            # An app restart empties memory; the saved snapshot still serves the badge.
+            recon._alert_snapshot.update(generated_at=None, listings=None, unlisted=None)
+            with patch.object(recon, 'build_reconciliation') as build:
+                self.assertEqual(badge()['counts']['quantity_alert'], 1)
+                self.assertNotIn('alerts', badge())
+                # Dismissing and undismissing on the Alerts screen apply without a rebuild.
+                self.sql('listing_alerts.db',"INSERT INTO dismissed_alerts (alert_type,upc,snapshot_hash) VALUES ('quantity_alert','100000000001',?)",(review_hash,))
+                self.assertEqual(badge()['counts']['quantity_alert'], 0)
+                self.sql('listing_alerts.db','DELETE FROM dismissed_alerts')
+                full = self.client.get('/api/listing-helper/scan').get_json()
+                self.assertEqual(full['alerts']['quantity_alert'][0]['effective_qty'], 1)
+                self.assertEqual(full['generated_at'], payload['generated_at'])
+                build.assert_not_called()
 
     def test_removed_cancelled_old_and_test_sales_do_not_reduce_available_stock(self):
         self.rack(1,'Lenox Mug','100000000001',quantity=5)

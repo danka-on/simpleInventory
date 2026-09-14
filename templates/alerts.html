@@ -398,6 +398,7 @@
     <div class="header">
       <h1 data-i18n="alerts">Alerts</h1>
       <button class="btn refresh" id="refreshBtn"><i class="fas fa-sync-alt"></i> Refresh</button>
+      <span id="stockAsOf" style="font-size:12px;opacity:.7;margin-left:8px"></span>
     </div>
 
     <div class="tabs">
@@ -741,6 +742,11 @@
         if (!scanResp.ok || !scanData.success) throw new Error((scanData && scanData.error) ? scanData.error : 'Scan failed');
         if (!dismissedResp.ok || !dismissedData.success) throw new Error((dismissedData && dismissedData.error) ? dismissedData.error : 'Dismissed query failed');
 
+        const stockAsOf = document.getElementById('stockAsOf');
+        if (stockAsOf) {
+          const asOf = scanData.generated_at ? new Date(scanData.generated_at) : null;
+          stockAsOf.textContent = asOf && !isNaN(asOf) ? `Stock alerts as of ${asOf.toLocaleString()} (open Listings & Stock to update)` : '';
+        }
         const scanAlerts = (scanData.alerts || {});
         const syncOverdue = Array.isArray(scanAlerts.sync_overdue) ? scanAlerts.sync_overdue : [];
         const noWarehouse = Array.isArray(scanAlerts.no_warehouse) ? scanAlerts.no_warehouse : [];
