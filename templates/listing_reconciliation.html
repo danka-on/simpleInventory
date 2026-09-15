@@ -148,7 +148,7 @@
         .item[data-status="in_stock"]{--tone:var(--c-ok)}
         .item[data-status="unlisted"]{--tone:var(--c-unlisted)}
         .item[data-status="reviewed"]{--tone:var(--c-done);opacity:.9}
-        .thumb,.suggestion img{object-fit:cover;border:1px solid var(--r-line);background:var(--r-panel2);cursor:zoom-in;transition:transform .12s,box-shadow .12s,border-color .12s}
+        .thumb,.suggestion img{object-fit:cover;border:1px solid var(--r-line);background:var(--r-panel2);cursor:pointer;transition:transform .12s,box-shadow .12s,border-color .12s}
         .thumb:hover,.suggestion img:hover,.thumb:focus-visible,.suggestion img:focus-visible{transform:scale(1.05);border-color:var(--c-need);box-shadow:0 4px 14px rgba(0,0,0,.18);outline:none}
         .thumb{width:104px;height:104px;border-radius:10px}
         .body{min-width:0}
@@ -213,8 +213,8 @@
         #reviewHistory p{margin:4px 0}
 
         /* Image preview */
-        .image-preview{border:0;border-radius:12px;padding:48px 12px 12px;background:#111827;color:white;max-width:96vw;max-height:96vh;overflow:auto;cursor:zoom-out}
-        .image-preview::backdrop{background:rgba(0,0,0,.85);cursor:zoom-out}
+        .image-preview{border:0;border-radius:12px;padding:48px 12px 12px;background:#111827;color:white;max-width:96vw;max-height:96vh;overflow:auto}
+        .image-preview::backdrop{background:rgba(0,0,0,.85)}
         .image-preview img{display:block;width:92vw;height:84vh;object-fit:contain;margin:auto}
         .image-preview .close-preview{position:absolute;right:10px;top:8px}
 
