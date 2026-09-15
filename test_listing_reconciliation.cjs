@@ -72,6 +72,17 @@ const {chromium} = require('playwright');
     await page.getByRole('dialog').waitFor({state:'visible'});
     await page.getByRole('button',{name:'Close image preview'}).click();
     await page.getByRole('dialog').waitFor({state:'hidden'});
+    assert.ok((await page.locator('.thumb').first().boundingBox()).width>=100,'Listing photos are large');
+    assert.ok((await page.locator('.suggestion img').first().boundingBox()).width>=76,'Suggestion photos are large');
+    // A click anywhere, even on the enlarged photo itself, closes it.
+    await page.locator('.suggestion img').first().click();
+    await page.getByRole('dialog').waitFor({state:'visible'});
+    await page.locator('#previewImage').click();
+    await page.getByRole('dialog').waitFor({state:'hidden'});
+    await page.locator('.thumb').first().click();
+    await page.getByRole('dialog').waitFor({state:'visible'});
+    await page.mouse.click(5,5);
+    await page.getByRole('dialog').waitFor({state:'hidden'});
     assert.equal(await page.locator('#tileLive').innerText(),'1');
     assert.equal(await page.locator('#itemList script').count(),0);
     // A row another listing already has is still offered, labelled with that listing (escaped).
@@ -139,8 +150,8 @@ const {chromium} = require('playwright');
     // At phone width a long "Already matched" line stays two lines tall; a tap shows all of it.
     const claimed=page.locator('.item[data-key="123"] .suggestion .claimed').first();
     assert.equal(await claimed.getAttribute('title'),listing.suggestions[0].claimed_by);
-    const clamped=await claimed.evaluate(e=>({shown:e.clientHeight,full:e.scrollHeight}));
-    assert.ok(clamped.full>clamped.shown && clamped.shown<=34,JSON.stringify(clamped));
+    const clamped=await claimed.evaluate(e=>({shown:e.clientHeight,full:e.scrollHeight,line:parseFloat(getComputedStyle(e).lineHeight)}));
+    assert.ok(clamped.full>clamped.shown && clamped.shown<=2*clamped.line+1,JSON.stringify(clamped));
     await claimed.click();
     assert.deepEqual(await claimed.evaluate(e=>[e.clientHeight,e.getAttribute('aria-expanded')]),[clamped.full,'true']);
     // Keyboard users can read it too: Enter closes it again, Space reopens it without scrolling the page.
