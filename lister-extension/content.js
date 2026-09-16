@@ -368,80 +368,157 @@
     return { ok: false, reason: 'no photo uploader found on this page. Drag the photo onto the page instead.' };
   }
 
-  // -- guided fill: highlight what still needs a value, jump with Next or Tab ---------------------
+  // -- guided fill: a checklist overlay of what the listing still needs, colour coded ----------------
+  //   red   = the store or we require it and it is empty (title, price, quantity, condition, photos...)
+  //   amber = one of our fields that is empty but optional
+  //   green = has a value
+  // Tab jumps to the next open field, Ctrl+Enter inserts the suggestion, Esc closes the overlay.
+
+  const CORE_TARGETS = new Set(['title', 'price', 'quantity', 'sku', 'upc', 'description', 'conditionDescription']);
+  const REQUIRED_TARGETS = new Set(['title', 'price', 'quantity']);
+  const TARGET_LABELS = { title: 'Title', price: 'Price', quantity: 'Quantity', sku: 'SKU / custom label', upc: 'UPC', asin: 'ASIN', brand: 'Brand', conditionDescription: 'Condition description', description: 'Description', condition: 'Condition', photos: 'Photos' };
+
+  function photoState() {
+    // eBay shows "0/25" (or 0/24, 0/12) above the photo box; Seller Central shows its own counters.
+    const text = document.body ? document.body.innerText.slice(0, 20000) : '';
+    const counter = text.match(/\b(\d{1,2})\s*\/\s*(12|24|25)\b/);
+    const input = fileInputs()[0];
+    if (!counter && !input) return null;
+    const count = counter ? Number(counter[1]) : 0;
+    const zone = dropZone() || (input && input.closest('section, div')) || null;
+    return { count, zone, el: zone || input };
+  }
 
   function guideNeeded({ values = {}, store = '', aspects = {} } = {}) {
     const elements = collect();
     const descriptors = elements.map(describe);
-    const assigned = M.assign(descriptors, Object.keys(M.TARGETS).filter(t => valueFor(t, values, store) !== ''));
+    const assigned = M.assign(descriptors, Object.keys(M.TARGETS));
     const byIndex = {};
     for (const [target, hit] of Object.entries(assigned)) byIndex[hit.index] = target;
     const aspectHits = M.matchAspects(descriptors, aspects);
     for (const [aspect, hit] of Object.entries(aspectHits)) byIndex[hit.index] = 'aspect:' + aspect;
-    const needed = [];
+    const rows = [];
     descriptors.forEach((d, index) => {
       const target = byIndex[index] || '';
-      const required = M.isRequired(d) || /condition/.test(M.normalize(d.labelText));
-      if (!M.isEmptyValue(d) || (!required && !target)) return;
+      const conditionSelect = !target && d.tag === 'select' && /condition/.test(M.normalize(d.labelText + ' ' + d.ariaLabel + ' ' + d.name));
+      const required = M.isRequired(d) || REQUIRED_TARGETS.has(target) || conditionSelect;
+      if (!required && !target) return;
       let suggestion = '';
       if (target.startsWith('aspect:')) suggestion = ((aspects || {})[target.slice(7)] || [])[0] || '';
       else if (target) suggestion = valueFor(target, values, store);
-      else if (/condition/.test(M.normalize(d.labelText)) && values.condition) suggestion = (M.conditionLabels(values.condition, store) || [])[0] || '';
-      needed.push({ index, target, required, label: d.labelText || d.ariaLabel || d.placeholder || d.name || d.id || d.tag, suggestion: String(suggestion || ''), tag: d.tag });
+      else if (conditionSelect && values.condition) suggestion = (M.conditionLabels(values.condition, store) || [])[0] || '';
+      rows.push({ index, target: target || (conditionSelect ? 'condition' : ''), required, done: !M.isEmptyValue(d),
+        label: (target && TARGET_LABELS[target]) || d.labelText || d.ariaLabel || d.placeholder || d.name || d.id || d.tag,
+        suggestion: String(suggestion || ''), tag: d.tag, kind: 'field' });
     });
-    return { elements, needed };
+    const photos = photoState();
+    if (photos) rows.unshift({ index: -1, target: 'photos', required: true, done: photos.count > 0, label: 'Photos', suggestion: 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
+    // Required first, then our fields, keeping page order inside each group.
+    rows.sort((a, b) => Number(b.required) - Number(a.required));
+    return { elements, rows };
   }
 
-  function guideStyle(el, on) {
+  function guideElement(row) {
+    return row.kind === 'photos' ? row.el : guide.elements[row.index];
+  }
+
+  function guideStyle(row, state) {
+    const el = guideElement(row);
+    if (!el) return;
     try {
-      if (on) {
-        el.dataset.ssGuidePrev = el.style.outline || '';
-        el.style.outline = '3px solid #f59e0b';
-        el.style.outlineOffset = '2px';
-      } else {
-        el.style.outline = el.dataset.ssGuidePrev || '';
-        el.style.outlineOffset = '';
-        delete el.dataset.ssGuidePrev;
-      }
+      if (el.dataset.ssGuidePrev === undefined) el.dataset.ssGuidePrev = el.style.outline || '';
+      const colour = state === 'done' ? '#16a34a' : (state === 'required' ? '#dc2626' : '#f59e0b');
+      el.style.outline = (state === 'done' ? '2px solid ' : '3px solid ') + colour;
+      el.style.outlineOffset = '2px';
+      if (state === 'done') setTimeout(() => { if (el.dataset.ssGuideDone === '1') { el.style.outline = el.dataset.ssGuidePrev || ''; el.style.outlineOffset = ''; } }, 2500);
+      el.dataset.ssGuideDone = state === 'done' ? '1' : '';
     } catch { /* ignore */ }
   }
 
-  function guideChip() {
-    if (guide.chip) return guide.chip;
-    const chip = document.createElement('div');
-    chip.style.cssText = 'position:fixed;z-index:2147483647;background:#1b2a24;color:#fff;font:13px system-ui,sans-serif;padding:8px 10px;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.3);max-width:360px;display:flex;flex-direction:column;gap:6px';
-    chip.innerHTML = '<div data-ss="text"></div><div style="display:flex;gap:6px;flex-wrap:wrap"><button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit">Use suggestion (Ctrl+Enter)</button><button data-ss="next" style="background:#334155;color:#fff;border:0;border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit">Next (Tab)</button><button data-ss="done" style="background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit">Done (Esc)</button></div>';
-    chip.querySelector('[data-ss="use"]').onclick = () => guideUse();
-    chip.querySelector('[data-ss="next"]').onclick = () => guideNext();
-    chip.querySelector('[data-ss="done"]').onclick = () => { guideStop(); notifyGuide(); };
-    document.documentElement.appendChild(chip);
-    guide.chip = chip;
-    return chip;
+  function guideUnstyle(row) {
+    const el = guideElement(row);
+    if (!el) return;
+    try { el.style.outline = el.dataset.ssGuidePrev || ''; el.style.outlineOffset = ''; delete el.dataset.ssGuidePrev; delete el.dataset.ssGuideDone; } catch { /* ignore */ }
+  }
+
+  function guidePanel() {
+    if (guide.panel) return guide.panel;
+    const panel = document.createElement('div');
+    panel.id = 'ss-lister-guide';
+    panel.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:#0f172a;color:#f8fafc;font:13px/1.4 system-ui,sans-serif;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.45);overflow:hidden';
+    panel.innerHTML = `
+      <div data-ss="head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e293b;cursor:pointer">
+        <span style="width:10px;height:10px;border-radius:50%;background:#0a9c6c;flex:none"></span>
+        <b data-ss="title" style="flex:1">Sweet Shelves Lister</b>
+        <button data-ss="collapse" title="Collapse" style="background:transparent;border:0;color:#cbd5e1;font-size:16px;cursor:pointer;padding:0 4px">–</button>
+        <button data-ss="done" title="Close the overlay (Esc)" style="background:transparent;border:0;color:#cbd5e1;font-size:16px;cursor:pointer;padding:0 4px">×</button>
+      </div>
+      <div data-ss="bar" style="height:5px;background:#334155"><div data-ss="fill" style="height:100%;width:0;background:linear-gradient(90deg,#f59e0b,#16a34a);transition:width .3s"></div></div>
+      <div data-ss="body" style="overflow:auto;padding:6px 0"></div>
+      <div data-ss="foot" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid #334155;background:#111827">
+        <button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:600">Use suggestion (Ctrl+Enter)</button>
+        <button data-ss="next" style="background:#334155;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
+      </div>`;
+    panel.querySelector('[data-ss="use"]').onclick = () => guideUse();
+    panel.querySelector('[data-ss="next"]').onclick = () => guideNext();
+    panel.querySelector('[data-ss="done"]').onclick = () => { guideStop(); notifyGuide(); };
+    panel.querySelector('[data-ss="collapse"]').onclick = event => { event.stopPropagation(); guide.collapsed = !guide.collapsed; guideRender(); };
+    panel.querySelector('[data-ss="head"]').onclick = () => { if (guide.collapsed) { guide.collapsed = false; guideRender(); } };
+    document.documentElement.appendChild(panel);
+    guide.panel = panel;
+    return panel;
+  }
+
+  function guidePointer() {
+    if (guide.pointer) return guide.pointer;
+    const tag = document.createElement('div');
+    tag.style.cssText = 'position:absolute;z-index:2147483646;background:#dc2626;color:#fff;font:600 12px system-ui,sans-serif;padding:4px 10px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.3);pointer-events:none;max-width:320px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    document.documentElement.appendChild(tag);
+    guide.pointer = tag;
+    return tag;
   }
 
   function guideRender() {
     if (!guide) return;
-    const current = guide.needed[guide.index];
-    const chip = guideChip();
-    if (!current) {
-      chip.querySelector('[data-ss="text"]').innerHTML = '<b>All required fields have a value.</b>';
-      chip.querySelector('[data-ss="use"]').style.display = 'none';
-      chip.style.left = '16px'; chip.style.bottom = '16px'; chip.style.top = 'auto';
-      return;
+    const open = guide.rows.filter(r => !r.done);
+    const requiredOpen = open.filter(r => r.required);
+    const current = guide.rows[guide.index];
+    const panel = guidePanel();
+    const total = guide.rows.length;
+    const done = total - open.length;
+    panel.querySelector('[data-ss="title"]').textContent = open.length
+      ? `${open.length} to fill · ${requiredOpen.length} required`
+      : 'Everything on the checklist has a value';
+    panel.querySelector('[data-ss="fill"]').style.width = (total ? Math.round(done / total * 100) : 100) + '%';
+    panel.querySelector('[data-ss="body"]').style.display = guide.collapsed ? 'none' : '';
+    panel.querySelector('[data-ss="foot"]').style.display = guide.collapsed ? 'none' : '';
+    panel.querySelector('[data-ss="collapse"]').textContent = guide.collapsed ? '+' : '–';
+    const body = panel.querySelector('[data-ss="body"]');
+    body.innerHTML = guide.rows.map((row, i) => {
+      const colour = row.done ? '#16a34a' : (row.required ? '#dc2626' : '#f59e0b');
+      const isCurrent = current === row;
+      return `<div data-ss-row="${i}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;${isCurrent ? 'background:#1e293b;' : ''}">
+        <span style="width:10px;height:10px;border-radius:50%;background:${colour};flex:none"></span>
+        <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.required && !row.done ? ' <span style="color:#fca5a5;font-size:11px">required</span>' : ''}
+          ${!row.done && row.suggestion ? `<div style="color:#cbd5e1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}</span>
+        <span style="color:${colour};font-weight:700">${row.done ? '✓' : (row.required ? '!' : '·')}</span></div>`;
+    }).join('') || '<div style="padding:10px 12px;color:#cbd5e1">No listing fields found on this page yet.</div>';
+    for (const el of body.querySelectorAll('[data-ss-row]')) el.onclick = () => guideGo(Number(el.dataset.ssRow));
+    panel.querySelector('[data-ss="use"]').style.display = current && !current.done && current.suggestion && current.kind === 'field' ? '' : 'none';
+    for (const row of guide.rows) guideStyle(row, row.done ? 'done' : (row.required ? 'required' : 'optional'));
+    const pointer = guidePointer();
+    const el = current ? guideElement(current) : null;
+    if (el && !current.done) {
+      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); if (current.kind === 'field') el.focus({ preventScroll: true }); } catch { /* ignore */ }
+      const rect = el.getBoundingClientRect();
+      pointer.style.display = '';
+      pointer.style.background = current.required ? '#dc2626' : '#f59e0b';
+      pointer.textContent = `${current.label}${current.suggestion ? ' → ' + current.suggestion.slice(0, 60) : ''}`;
+      pointer.style.left = Math.max(8, rect.left + window.scrollX) + 'px';
+      pointer.style.top = Math.max(0, rect.top + window.scrollY - 30) + 'px';
+    } else {
+      pointer.style.display = 'none';
     }
-    const el = guide.elements[current.index];
-    chip.querySelector('[data-ss="text"]').innerHTML = `<b>${guide.index + 1}/${guide.needed.length} · ${escapeHtml(current.label)}</b>${current.required ? ' <span style="color:#fbbf24">required</span>' : ''}` +
-      (current.suggestion ? `<div style="color:#cbd5e1;margin-top:2px">Suggested: ${escapeHtml(current.suggestion.slice(0, 140))}</div>` : '<div style="color:#cbd5e1;margin-top:2px">No suggestion; type it.</div>');
-    chip.querySelector('[data-ss="use"]').style.display = current.suggestion ? '' : 'none';
-    try {
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      el.focus({ preventScroll: true });
-    } catch { /* ignore */ }
-    const rect = el.getBoundingClientRect();
-    const top = rect.bottom + 8;
-    chip.style.top = (top + 90 > window.innerHeight ? Math.max(8, rect.top - 90) : top) + 'px';
-    chip.style.bottom = 'auto';
-    chip.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 380)) + 'px';
   }
 
   function escapeHtml(value) {
@@ -453,20 +530,20 @@
   }
 
   function guideState() {
-    if (!guide) return { active: false, needed: [], index: -1 };
-    return { active: true, index: guide.index, needed: guide.needed.map(n => ({ ...n })) };
+    if (!guide) return { active: false, needed: [], rows: [], index: -1 };
+    const rows = guide.rows.map(r => ({ index: r.index, target: r.target, required: r.required, done: r.done, label: r.label, suggestion: r.suggestion, kind: r.kind }));
+    return { active: true, index: guide.index, rows, needed: rows.filter(r => !r.done), open: rows.filter(r => !r.done).length, total: rows.length };
   }
 
   function guideStart(options) {
     guideStop();
-    const { elements, needed } = guideNeeded(options || {});
-    guide = { elements, needed, index: -1, options: options || {}, chip: null };
-    for (const n of needed) guideStyle(elements[n.index], true);
+    const { elements, rows } = guideNeeded(options || {});
+    guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, collapsed: false };
     const handlers = {
       key(event) {
         if (!guide) return;
         if (event.key === 'Escape') { guideStop(); notifyGuide(); return; }
-        const onGuided = guide.needed.some(n => guide.elements[n.index] === event.target || guide.elements[n.index].contains(event.target));
+        const onGuided = guide.rows.some(r => r.kind === 'field' && (guide.elements[r.index] === event.target || guide.elements[r.index].contains(event.target)));
         if (event.key === 'Tab' && !event.shiftKey && (onGuided || event.target === document.body)) {
           event.preventDefault(); event.stopPropagation(); guideNext();
         } else if (event.key === 'Tab' && event.shiftKey && onGuided) {
@@ -475,28 +552,33 @@
           event.preventDefault(); guideUse();
         }
       },
+      change() { clearTimeout(guide?.timer); if (guide) guide.timer = setTimeout(() => { if (guide) { guideRefresh(); guideRender(); notifyGuide(); } }, 250); },
     };
     document.addEventListener('keydown', handlers.key, true);
+    document.addEventListener('input', handlers.change, true);
+    document.addEventListener('change', handlers.change, true);
     guide.handlers = handlers;
-    if (needed.length) guideNext(); else guideRender();
+    guide.ticker = setInterval(() => { if (guide) { guideRefresh(); guideRender(); } }, 2000);
+    if (rows.some(r => !r.done)) guideNext(); else { guideRender(); notifyGuide(); }
     return guideState();
   }
 
   function guideRefresh() {
-    // Values typed meanwhile drop out of the list; keep the position sensible.
     if (!guide) return guideState();
-    const stillNeeded = guide.needed.filter(n => M.isEmptyValue(describe(guide.elements[n.index])));
-    for (const n of guide.needed) if (!stillNeeded.includes(n)) guideStyle(guide.elements[n.index], false);
-    guide.needed = stillNeeded;
-    if (guide.index >= guide.needed.length) guide.index = guide.needed.length - 1;
+    for (const row of guide.rows) {
+      if (row.kind === 'photos') { const photos = photoState(); row.done = Boolean(photos && photos.count > 0); if (photos) row.el = photos.el; }
+      else row.done = !M.isEmptyValue(describe(guide.elements[row.index]));
+    }
     return guideState();
   }
 
   function guideNext() {
     if (!guide) return guideState();
     guideRefresh();
-    if (!guide.needed.length) { guide.index = -1; guideRender(); notifyGuide(); return guideState(); }
-    guide.index = (guide.index + 1) % guide.needed.length;
+    const open = guide.rows.map((r, i) => (r.done ? -1 : i)).filter(i => i >= 0);
+    if (!open.length) { guide.index = -1; guideRender(); notifyGuide(); return guideState(); }
+    const after = open.find(i => i > guide.index);
+    guide.index = after !== undefined ? after : open[0];
     guideRender();
     notifyGuide();
     return guideState();
@@ -505,8 +587,8 @@
   function guideGo(index) {
     if (!guide) return guideState();
     guideRefresh();
-    if (!guide.needed.length) { guideRender(); return guideState(); }
-    guide.index = ((index % guide.needed.length) + guide.needed.length) % guide.needed.length;
+    if (!guide.rows.length) { guideRender(); return guideState(); }
+    guide.index = ((index % guide.rows.length) + guide.rows.length) % guide.rows.length;
     guideRender();
     notifyGuide();
     return guideState();
@@ -514,22 +596,28 @@
 
   function guideUse() {
     if (!guide) return guideState();
-    const current = guide.needed[guide.index];
-    if (!current || !current.suggestion) return guideState();
+    const current = guide.rows[guide.index];
+    if (!current || !current.suggestion || current.kind !== 'field') return guideState();
     const el = guide.elements[current.index];
     const options = {};
     if (current.target === 'description') options.html = (guide.options.values || {}).descriptionHtml || '';
     if (current.target.startsWith('aspect:')) options.labels = (guide.options.aspects || {})[current.target.slice(7)] || [current.suggestion];
-    if (/condition/.test(M.normalize(current.label)) && !current.target) options.labels = M.conditionLabels((guide.options.values || {}).condition, guide.options.store) || [current.suggestion];
+    if (current.target === 'condition') options.labels = M.conditionLabels((guide.options.values || {}).condition, guide.options.store) || [current.suggestion];
     if (setField(el, current.suggestion, options)) flash(el);
     return guideNext();
   }
 
   function guideStop() {
     if (!guide) return false;
-    for (const n of guide.needed) guideStyle(guide.elements[n.index], false);
-    if (guide.handlers) document.removeEventListener('keydown', guide.handlers.key, true);
-    if (guide.chip) guide.chip.remove();
+    for (const row of guide.rows) guideUnstyle(row);
+    if (guide.handlers) {
+      document.removeEventListener('keydown', guide.handlers.key, true);
+      document.removeEventListener('input', guide.handlers.change, true);
+      document.removeEventListener('change', guide.handlers.change, true);
+    }
+    clearInterval(guide.ticker); clearTimeout(guide.timer);
+    if (guide.panel) guide.panel.remove();
+    if (guide.pointer) guide.pointer.remove();
     guide = null;
     return true;
   }

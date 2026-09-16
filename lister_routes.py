@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.1'
+VERSION = '0.2.2'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -1334,6 +1334,75 @@ class Lister:
         return {'id': choice_id, 'upc': upc, 'platform': platform, 'step': step, 'chosen': chosen, 'suggested': suggested,
                 'agreed': bool(suggested) and suggested.strip().lower() == chosen.strip().lower(), 'learned': learned}
 
+    # -- title / description from the notes (Claude Haiku, same key the Listing Agent uses) -------
+
+    def generate(self, upc, *, kind, values, base_url='http://localhost/'):
+        """A listing title (<= 80 chars) or an HTML description built from the item's values and prep notes."""
+        upc = self.format_upc12(upc)
+        if kind not in ('title', 'description'):
+            raise ListerError('kind must be title or description')
+        api_key = os.getenv('ANTHROPIC_API_KEY', '').strip()
+        if not api_key:
+            raise ListerError('Text generation needs server setup: add ANTHROPIC_API_KEY to the Pi .env and restart the service.', 503)
+        values = values if isinstance(values, dict) else {}
+        title = _text(values.get('title'), 200)
+        if not title:
+            raise ListerError('a title is required')
+        notes = [_text(n, 400) for n in (values.get('notes') or []) if _text(n)]
+        aspects = values.get('aspects') if isinstance(values.get('aspects'), dict) else {}
+        aspect_lines = '\n'.join(f'- {k}: {", ".join(v) if isinstance(v, list) else v}' for k, v in aspects.items() if k and v)
+        facts = [
+            f'Current title: {title}',
+            f"Inventory description: {_text(values.get('systemTitle'), 200)}" if _text(values.get('systemTitle')) else '',
+            f"Brand: {_text(values.get('brand'), 80)}" if _text(values.get('brand')) else '',
+            f"Category: {_text(values.get('categoryPath'), 200)}" if _text(values.get('categoryPath')) else '',
+            f"Condition: {_text(values.get('condition'), 40)}" if _text(values.get('condition')) else '',
+            f"Condition notes from the warehouse: {_text(values.get('conditionDescription'), 800)}" if _text(values.get('conditionDescription')) else '',
+            ('Prep notes:\n' + '\n'.join('- ' + n for n in notes)) if notes else '',
+            f'UPC: {_base_upc(upc)}' if upc else '',
+            f'Item specifics:\n{aspect_lines}' if aspect_lines else '',
+        ]
+        facts_text = '\n'.join(f for f in facts if f)
+        if kind == 'title':
+            prompt = ('Write one eBay listing title of at most 80 characters for this product: brand first, then the product, '
+                      'key attributes (size, color, count, material) and nothing else. No quotes, no emojis, no ALL CAPS, '
+                      'no words like "wow" or "look". Reply with the title only.\n\n' + facts_text)
+        else:
+            prompt = ('Write an eBay listing description for this product in plain HTML using only h2, p, ul and li tags. '
+                      'Be concise and factual, highlight the key features, and state the condition honestly using the warehouse '
+                      'condition notes (mention any flaw plainly). Do not include a price, shipping terms, or the word eBay. '
+                      'Reply with the HTML only.\n\n' + facts_text)
+        import requests
+        try:
+            response = requests.post(
+                'https://api.anthropic.com/v1/messages',
+                headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+                json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 900 if kind == 'description' else 120,
+                      'messages': [{'role': 'user', 'content': prompt}]},
+                timeout=45,
+            )
+        except requests.RequestException:
+            raise ListerError('The text service could not be reached. Try again in a moment.', 504)
+        if response.status_code >= 400:
+            try:
+                message = ((response.json().get('error') or {}).get('message') or '')[:200]
+            except Exception:
+                message = response.text[:200]
+            raise ListerError(f'Text generation failed (HTTP {response.status_code}). {message}'.strip(), 502)
+        result = response.json()
+        text = _text(((result.get('content') or [{}])[0].get('text') or ''))
+        text = re.sub(r'^```[^\n]*\n?', '', text).rstrip('`').strip()
+        if not text:
+            raise ListerError('The text service returned nothing.', 502)
+        try:
+            from ai_usage import record as record_ai_usage
+            record_ai_usage('anthropic', 'claude-haiku-4-5-20251001', f'Lister {kind}', result)
+        except Exception:
+            pass
+        if kind == 'title':
+            return {'kind': kind, 'title': text.strip('"\'').splitlines()[0][:80]}
+        return {'kind': kind, 'descriptionHtml': text, 'descriptionText': html_to_text(text)}
+
     # -- voice notes ---------------------------------------------------------------------------
 
     def analyze_voice(self, media_id, *, reanalyze=False):
@@ -1708,6 +1777,15 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:mark-existing')
 
+    def api_lister_queue_generate(upc):
+        try:
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            result = lister.generate(upc, kind=_text(data.get('kind')).lower(), values=data.get('values') or {}, base_url=base_url())
+            return jsonify({'success': True, **result})
+        except Exception as e:
+            return failure(e, 'lister:generate')
+
     def api_lister_learn():
         try:
             guard_mutation()
@@ -1767,6 +1845,7 @@ def register(app, deps):
     app.add_url_rule('/api/lister/queue/<upc>/prepare', 'api_lister_queue_prepare', api_lister_queue_prepare, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/skip', 'api_lister_queue_skip', api_lister_queue_skip, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/mark-existing', 'api_lister_queue_mark_existing', api_lister_queue_mark_existing, methods=['POST'])
+    app.add_url_rule('/api/lister/queue/<upc>/generate', 'api_lister_queue_generate', api_lister_queue_generate, methods=['POST'])
     app.add_url_rule('/api/lister/learn', 'api_lister_learn', api_lister_learn, methods=['POST'])
     app.add_url_rule('/api/lister/voice/<int:media_id>/analyze', 'api_lister_voice_analyze', api_lister_voice_analyze, methods=['POST'])
     app.add_url_rule('/api/lister/photos/ai', 'api_lister_photo_ai', api_lister_photo_ai, methods=['POST'])

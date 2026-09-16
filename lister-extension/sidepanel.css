@@ -120,9 +120,27 @@ h3 .grow { flex: 1; }
 .qr { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
 .qr img { width: 120px; height: 120px; background: #fff; border-radius: 8px; padding: 4px; }
 .needs { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; }
-.needs li { display: flex; gap: 6px; align-items: center; padding: 3px 0; border-top: 1px dashed var(--line); cursor: pointer; }
-.needs li.current { color: var(--amber); font-weight: 600; }
+.needs li { display: flex; gap: 8px; align-items: center; padding: 4px 6px; border-top: 1px dashed var(--line); cursor: pointer; border-left: 4px solid var(--line); }
+.needs li.req { border-left-color: var(--red); }
+.needs li.opt { border-left-color: var(--amber); }
+.needs li.done { border-left-color: var(--green); color: var(--muted); }
+.needs li.current { background: var(--chip); font-weight: 600; }
 .needs li .sug { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.needs li .mark { font-weight: 700; }
+.needs li.req .mark { color: var(--red); } .needs li.opt .mark { color: var(--amber); } .needs li.done .mark { color: var(--green); }
+.progress { height: 6px; background: var(--chip); border-radius: 999px; overflow: hidden; margin: 6px 0; }
+.progress i { display: block; height: 100%; background: linear-gradient(90deg, var(--amber), var(--green)); }
+/* locked on a listing page: the item view takes over */
+.lock { display: none; align-items: center; gap: 8px; margin: 8px 8px 0; padding: 8px 12px; border-radius: 12px; background: var(--green); color: var(--green-ink); font-weight: 600; }
+.lock.on { display: flex; }
+.lock .grow { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lock button { background: rgba(255,255,255,.18); border-color: transparent; color: inherit; }
+body.locked .storebar { display: none; }
+body.locked .detail .head img, body.locked .detail .head .noimg { width: 96px; height: 96px; }
+body.locked .detail .head { grid-template-columns: 96px 1fr; }
+body.locked .detail .head .name { font-size: 15px; }
+body.locked .photos { grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); }
+body.locked .note { font-size: 13px; }
 .report { margin: 8px 0 0; padding: 0; list-style: none; font-size: 12px; }
 .report li { display: flex; gap: 6px; padding: 3px 0; border-top: 1px dashed var(--line); }
 .report .ok::before { content: "✓"; color: var(--green); font-weight: 700; }

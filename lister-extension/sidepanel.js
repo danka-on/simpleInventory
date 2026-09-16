@@ -292,7 +292,15 @@
       state.platform = state.page.store; remember();
       await loadQueue();
     }
-    renderPage(); renderDetail(); renderConfirm();
+    // On the listing form the current item locks in and its details take over the panel;
+    // leaving that page (success, another site) brings the queue back.
+    const onForm = state.page.kind === 'listing-form' || state.page.kind === 'offer-form';
+    if (onForm && current() && !state.locked) { state.locked = current().upc; state.view = 'item'; }
+    else if (!onForm && state.locked && !(state.page.store && ASSIST_KINDS.has(state.page.kind))) {
+      state.locked = null;
+      if (state.page.kind !== 'listing-success' && state.page.kind !== 'offer-success') state.view = 'list';
+    }
+    renderStoreBar(); renderPage(); renderDetail(); renderConfirm();
     await maybeAutoSearch();
     await maybeAssist();
     await maybeAutoFill();
@@ -321,6 +329,27 @@
       state.assist = result.state; renderPage();
     } catch (error) {
       state.assist = null;
+    }
+  }
+
+  // Title / description written by Claude from the item's values, condition and prep notes.
+  async function generate(info, kind) {
+    const v = values(info);
+    state.genBusy = kind; renderDetail();
+    try {
+      const notes = [...(info.notes || []).map(n => n.english || n.text), ...(info.voiceNotes || []).map(n => n.english), info.defect].filter(Boolean);
+      const data = await api('/api/lister/queue/' + encodeURIComponent(info.upc) + '/generate', { method: 'POST', body: { kind, values: {
+        title: v.title, systemTitle: info.title, brand: v.brand, categoryPath: v.categoryPath, condition: v.condition,
+        conditionDescription: v.conditionDescription, notes, aspects: info.fields.aspects || {},
+      } } });
+      const edits = state.edits[info.upc] = { ...(state.edits[info.upc] || {}) };
+      if (kind === 'title') edits.title = data.title;
+      else { edits.descriptionText = data.descriptionText; edits.descriptionHtml = data.descriptionHtml; }
+      toast(kind === 'title' ? 'Title written: ' + data.title : 'Description written from the item and its notes');
+    } catch (error) {
+      toast('AI ' + kind + ': ' + error.message, true);
+    } finally {
+      state.genBusy = ''; renderDetail();
     }
   }
 
@@ -662,7 +691,11 @@
     }
     $('viewList').classList.toggle('active', state.view === 'list');
     $('viewItem').classList.toggle('active', state.view === 'item');
-    $('listCard').hidden = state.view !== 'list';
+    $('listCard').hidden = state.view !== 'list' || Boolean(state.locked);
+    const locked = state.locked ? state.items.find(it => it.upc === state.locked) : null;
+    document.body.classList.toggle('locked', Boolean(state.locked));
+    $('lock').classList.toggle('on', Boolean(state.locked));
+    if (state.locked) $('lockTitle').textContent = `Listing: ${locked?.title || state.locked}`;
   }
 
   function renderPage() {
@@ -786,10 +819,13 @@
         <button id="pickBtn" class="mini" type="button" ${store ? '' : 'disabled'}>Pick a field…</button>
         <button id="prepareBtn" class="mini" type="button" ${preparing ? 'disabled' : ''} title="Rebuild title, price, category, specifics and description">${info.proposal?.ready ? 'Re-prepare' : 'Prepare'}</button>
       </div>
-      ${g?.active ? `<ul class="needs">${g.needed.length ? g.needed.map((n, i) => `<li class="${i === g.index ? 'current' : ''}" data-go="${i}"><span>${esc(n.label)}${n.required ? ' *' : ''}</span><span class="sug">${esc(n.suggestion || 'type it')}</span></li>`).join('') : '<li class="muted">Everything required has a value.</li>'}</ul>` : ''}
+      ${g?.active ? `<div class="progress" title="${esc(g.total - g.open)} of ${esc(g.total)} filled"><i style="width:${g.total ? Math.round((g.total - g.open) / g.total * 100) : 100}%"></i></div>
+        <ul class="needs">${(g.rows || []).length ? g.rows.map((n, i) => `<li class="${n.done ? 'done' : (n.required ? 'req' : 'opt')} ${i === g.index ? 'current' : ''}" data-go="${i}"><span class="mark">${n.done ? '✓' : (n.required ? '!' : '·')}</span><span>${esc(n.label)}</span><span class="sug">${n.done ? '' : esc(n.suggestion || 'type it')}</span></li>`).join('') : '<li class="muted">No listing fields found on this page yet.</li>'}</ul>` : ''}
       ${report ? renderReport(report) : ''}
 
-      <h3>Listing values <span class="muted">(${esc(info.fields.source === 'proposal' ? 'prepared' : 'from inventory')})</span></h3>
+      <h3>Listing values <span class="muted">(${esc(info.fields.source === 'proposal' ? 'prepared' : 'from inventory')})</span><span class="grow"></span>
+        <button id="genTitle" class="mini" type="button" ${state.genBusy ? 'disabled' : ''} title="Write an 80-character title from the item and its notes">${state.genBusy === 'title' ? '…' : 'AI title'}</button>
+        <button id="genDescription" class="mini" type="button" ${state.genBusy ? 'disabled' : ''} title="Write the description from the item, its condition and prep notes">${state.genBusy === 'description' ? '…' : 'AI description'}</button></h3>
       <label>Title<input id="fTitle" maxlength="80" value="${esc(v.title)}"></label><div class="counter"><span id="titleCount">${(v.title || '').length}</span>/80</div>
       <div class="grid">
         <label>Price (${esc(v.currency || 'USD')})<input id="fPrice" type="number" step="0.01" min="0" value="${esc(v.price ?? '')}"></label>
@@ -843,6 +879,8 @@
     for (const li of el.querySelectorAll('li[data-go]')) li.onclick = () => guide('go', { index: Number(li.dataset.go) });
     $('pickBtn').onclick = () => startPick();
     $('prepareBtn').onclick = () => { state.prepareAsked.delete(info.upc); void maybePrepare(info, { force: true }); };
+    $('genTitle').onclick = () => generate(info, 'title');
+    $('genDescription').onclick = () => generate(info, 'description');
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
     for (const button of el.querySelectorAll('button[data-usenote]')) button.onclick = () => {
@@ -1054,6 +1092,7 @@
     $('connStatus').onclick = () => { state.connected = null; renderHeader(); void connect().then(() => loadQueue()); };
     $('storeEbay').onclick = () => setPlatform('ebay');
     $('storeAmazon').onclick = () => setPlatform('amazon');
+    $('unlock').onclick = () => { state.locked = null; setView('list'); renderStoreBar(); };
     $('viewList').onclick = () => setView('list');
     $('viewItem').onclick = () => setView('item');
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };

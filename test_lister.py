@@ -601,6 +601,39 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(bol[UPC]['listed_ebay'], 1, 'a box the user ticked stays')
         self.assertEqual(self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]['status'], 'queued')
 
+    def test_generate_writes_title_and_description_from_the_notes(self):
+        calls = []
+
+        class FakeResponse:
+            status_code = 200
+
+            def __init__(self, text):
+                self._text = text
+
+            def json(self):
+                return {'content': [{'text': self._text}], 'usage': {'input_tokens': 5, 'output_tokens': 5}}
+
+        def fake_post(url, **kwargs):
+            calls.append(kwargs['json']['messages'][0]['content'])
+            return FakeResponse('```html\n<h2>Lenox plate</h2><p>Small chip on the rim.</p>\n```' if 'description' in kwargs['json']['messages'][0]['content'][:60] else '"Lenox Butterfly Meadow Dinner Plate 10.75 in"')
+
+        import requests
+        with patch.object(requests, 'post', fake_post), patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-claude'}):
+            title = self.client.post(f'/api/lister/queue/{UPC}-1/generate', json={'kind': 'title', 'values': {'title': 'Lenox plate', 'notes': ['chip on rim'], 'brand': 'Lenox'}})
+            self.assertEqual(title.status_code, 200, title.get_json())
+            self.assertEqual(title.get_json()['title'], 'Lenox Butterfly Meadow Dinner Plate 10.75 in')
+            desc = self.client.post(f'/api/lister/queue/{UPC}-1/generate', json={'kind': 'description', 'values': {'title': 'Lenox plate', 'conditionDescription': 'Small chip on the rim', 'notes': ['box opened'], 'aspects': {'Material': ['Porcelain']}}})
+            self.assertEqual(desc.status_code, 200, desc.get_json())
+            self.assertEqual(desc.get_json()['descriptionHtml'], '<h2>Lenox plate</h2><p>Small chip on the rim.</p>')
+            self.assertEqual(desc.get_json()['descriptionText'], 'Lenox plate\n\nSmall chip on the rim.')
+            self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/generate', json={'kind': 'poem', 'values': {'title': 'x'}}).status_code, 400)
+            self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/generate', json={'kind': 'title', 'values': {}}).status_code, 400)
+        self.assertIn('chip on rim', calls[0])
+        self.assertIn('Small chip on the rim', calls[1])
+        self.assertIn('Material: Porcelain', calls[1])
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': ''}):
+            self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/generate', json={'kind': 'title', 'values': {'title': 'x'}}).status_code, 503)
+
     def test_qr_endpoint_renders_or_explains(self):
         res = self.client.get('/api/lister/qr?text=https://pi.example/items-to-list/mobile-photos?upc=1')
         self.assertIn(res.status_code, (200, 501))

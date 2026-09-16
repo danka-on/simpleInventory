@@ -106,10 +106,20 @@ assert.equal(sellLike.matchId, '168611515264');
 assert.equal(M.detectPage('https://www.ebay.com/sl/prelist/identify?sr=sug&title=761323062839').kind, 'listing-match');
 assert.equal(M.detectPage('https://www.ebay.com/sl/list?mode=AddItem&itemId=168611515264&mode=SellLikeItem').listingId, '', 'SellLikeItem never yields our id');
 assert.equal(M.detectPage('https://www.ebay.com/sl/list?mode=AddItem&draftId=5').listingId, '');
-assert.deepEqual(M.prelistCondition('USED_GOOD')[0], 'Used');
-assert.deepEqual(M.prelistCondition('NEW_OTHER')[0], 'Open box');
-assert.deepEqual(M.prelistCondition('NEW'), ['New']);
-assert.equal(M.prelistCondition('FOR_PARTS_OR_NOT_WORKING')[0], 'For parts or not working');
+// Both radio sets eBay shows on "Confirm details": New/Open box/Used/For parts, and Brand New/Like New/Very Good/Good/Acceptable.
+const radioPick = (condition, offered) => M.prelistCondition(condition).find(label => offered.includes(label));
+const setA = ['New', 'Open box', 'Used', 'For parts or not working'];
+const setB = ['Brand New', 'Like New', 'Very Good', 'Good', 'Acceptable'];
+assert.equal(radioPick('USED_GOOD', setA), 'Used');
+assert.equal(radioPick('USED_GOOD', setB), 'Good');
+assert.equal(radioPick('USED_EXCELLENT', setB), 'Like New');
+assert.equal(radioPick('USED_ACCEPTABLE', setB), 'Acceptable');
+assert.equal(radioPick('NEW_OTHER', setA), 'Open box');
+assert.equal(radioPick('NEW_OTHER', setB), 'Like New');
+assert.equal(radioPick('NEW', setA), 'New');
+assert.equal(radioPick('NEW', setB), 'Brand New');
+assert.equal(radioPick('FOR_PARTS_OR_NOT_WORKING', setA), 'For parts or not working');
+assert.equal(radioPick('FOR_PARTS_OR_NOT_WORKING', setB), 'Acceptable');
 const ranked = M.rankCandidates([
   'Salt and Pepper Shakers Table Decoration Meal Condiment Container Hug Design',
   'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set',

@@ -308,13 +308,19 @@
     return store === 'amazon' ? entry.amazon : entry.ebay;
   }
 
-  // eBay's prelist "Confirm details" step offers four radio buttons; map our condition onto them.
+  // eBay's prelist "Confirm details" step offers radios: either New / Open box / Used / For parts,
+  // or Brand New / Like New / Very Good / Good / Acceptable. Best label first, then fallbacks.
   function prelistCondition(condition) {
     const value = String(condition || '').toUpperCase();
-    if (value === 'NEW') return ['New'];
-    if (value === 'NEW_OTHER' || value === 'NEW_WITH_DEFECTS') return ['Open box', 'New (Other)', 'New'];
-    if (value === 'FOR_PARTS_OR_NOT_WORKING') return ['For parts or not working', 'For parts'];
-    if (value.startsWith('USED')) return ['Used', 'Pre-owned'];
+    if (value === 'NEW') return ['New', 'Brand New'];
+    if (value === 'NEW_OTHER') return ['Open box', 'New (Other)', 'Like New', 'New', 'Brand New'];
+    if (value === 'NEW_WITH_DEFECTS') return ['Open box', 'Very Good', 'Like New', 'New'];
+    if (value === 'FOR_PARTS_OR_NOT_WORKING') return ['For parts or not working', 'For parts', 'Acceptable'];
+    if (value === 'USED_EXCELLENT') return ['Like New', 'Used', 'Pre-owned', 'Very Good'];
+    if (value === 'USED_VERY_GOOD') return ['Very Good', 'Used', 'Pre-owned', 'Good'];
+    if (value === 'USED_GOOD') return ['Good', 'Used', 'Pre-owned', 'Very Good'];
+    if (value === 'USED_ACCEPTABLE') return ['Acceptable', 'Used', 'Pre-owned', 'Good'];
+    if (value.startsWith('USED')) return ['Used', 'Pre-owned', 'Good'];
     return [];
   }
 

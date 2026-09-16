@@ -58,6 +58,7 @@ const confirmPage = `<!doctype html><title>Confirm details | eBay</title><h2>Con
 
 const ebayForm = `<!doctype html><title>Create your listing | eBay</title>
 <h1>Create your listing</h1>
+<h2>PHOTOS &amp; VIDEO</h2><p>0/25</p><div class="uploader-dropzone">Drag and drop files</div>
 <label for="title">Title *</label><input id="title" maxlength="80">
 <label for="subtitle">Subtitle</label><input id="subtitle" maxlength="55">
 <label for="upc">UPC</label><input id="upc" name="upc">
@@ -220,13 +221,22 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(filled.desc.includes('Butterfly Meadow'), 'description editor received the HTML');
     assert.equal(filled.search, '', 'the site search box is untouched');
     assert.ok(filled.events.includes('title') && filled.events.includes('price'), 'React-style input events fired');
-    assert.ok(filled.colorOutline.includes('rgb(245, 158, 11)'), 'the empty required Color field is highlighted by the guide');
+    assert.ok(filled.colorOutline.includes('rgb(220, 38, 38)'), 'the empty required Color field is outlined red by the guide, got: ' + filled.colorOutline);
     await panel.waitForFunction(() => document.querySelectorAll('.needs li').length >= 1, null, { timeout: 15000 });
-    assert.ok((await panel.textContent('.needs')).includes('Color'));
+    const rows = await panel.$$eval('.needs li', els => els.map(li => ({ label: li.children[1].textContent, cls: li.className })));
+    const photosRow = rows.find(r => r.label === 'Photos');
+    assert.ok(photosRow && photosRow.cls.includes('req'), 'photos (0/25) are a required, open row: ' + JSON.stringify(rows));
+    assert.ok(rows.find(r => r.label.startsWith('Color'))?.cls.includes('req'), 'the empty required Color field is red: ' + JSON.stringify(rows));
+    assert.ok(rows.find(r => r.label === 'Title')?.cls.includes('done'), 'the filled title is green');
+    assert.ok(rows.find(r => r.label === 'Price')?.cls.includes('done'), 'the filled price is green');
+    assert.ok(await store.$eval('#ss-lister-guide', el => el.textContent.includes('required')), 'the overlay on the page lists what is required');
+    // The item is locked in on the listing page: the queue is hidden and the item view is up.
+    assert.ok(await panel.$eval('#lock', el => el.classList.contains('on')));
+    assert.ok(await panel.$eval('#listCard', el => el.hidden));
+    assert.ok(!(await panel.$eval('#detail', el => el.hidden)));
     assert.ok(calls.events.length >= 1 && calls.events[0].event === 'helper_filled' && calls.events[0].proposal_id === 7, 'fill reported to the proposal timeline');
 
-    // Photos reach the page's uploader through the file input.
-    await panel.click('#viewItem');
+    // Photos reach the page's uploader through the file input (the item view is already up: locked).
     detail.photos.push({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/own.jpg', source: 'listing', id: 1, name: 'own.jpg' });
     await panel.click('#photoRefresh');
     await panel.waitForSelector('.photo');
