@@ -613,7 +613,8 @@
   }
 
   function guideStart(options) {
-    guideStop();
+    // Already up on this page (the URL changed, the fill ran again): refresh in place, never jump back to the first row.
+    if (guide) { guide.options = options || guide.options; guideRefresh(); guideRender(false); notifyGuide(); return guideState(); }
     const { elements, rows } = guideNeeded(options || {});
     guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, collapsed: false };
     const handlers = {

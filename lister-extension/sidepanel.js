@@ -404,7 +404,8 @@
     const page = state.page;
     if (!state.settings.autoFill || !item || !page?.store) return;
     if (!(page.kind === 'listing-form' || page.kind === 'offer-form')) return;
-    const key = tabKey('fill|' + item.upc);
+    // Once per tab and item: eBay rewrites the form URL while editing (draft id), which must not refill.
+    const key = (state.tab?.id || 0) + '|' + page.store + '|' + item.upc;
     if (state.autoFilled.has(key)) return;
     state.autoFilled.add(key);
     await fillPage({ auto: true });
