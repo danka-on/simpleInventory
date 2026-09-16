@@ -168,6 +168,12 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     const store = await context.newPage();
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
     await store.bringToFront();
+    // Nothing happens by itself on the search page; clicking the item in the queue searches its UPC.
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('search for the product'), null, { timeout: 15000 });
+    await store.waitForTimeout(1500);
+    assert.ok(store.url().includes('/sl/prelist/suggest'), 'no search without a click');
+    await panel.click('#viewList');
+    await panel.click('.item[data-upc="883049370897-1"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=883049370897/, { timeout: 20000 });
     assert.ok(!store.url().includes('%2D1'), 'the store search uses the catalog UPC without the -suffix');
 
@@ -266,12 +272,11 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.waitForFunction(() => document.querySelector('.item[data-upc="883049370897-1"]').classList.contains('listed'), null, { timeout: 15000 });
     assert.ok(!(await panel.$eval('#lock', el => el.classList.contains('on'))), 'the lock is released after the listing is recorded');
 
-    // Back on the search page the next queued item is searched by itself...
-    await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
-    await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
-    // ...and picking an item from the queue while the search page is open searches it again at once.
+    // Back on the search page nothing is searched until an item is clicked in the queue.
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
     await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('search for the product'), null, { timeout: 15000 });
+    await store.waitForTimeout(1500);
+    assert.ok(store.url().includes('/sl/prelist/suggest'), 'the next queued item is not searched by itself');
     await panel.click('#viewList');
     await panel.click('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });

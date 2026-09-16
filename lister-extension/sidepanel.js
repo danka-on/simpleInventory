@@ -14,7 +14,7 @@
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoSearch: true, autoGuide: true, autoLink: true, autoPrepare: true };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true };
   const CONDITIONS = ['NEW', 'NEW_OTHER', 'NEW_WITH_DEFECTS', 'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE', 'FOR_PARTS_OR_NOT_WORKING'];
   const VALUE_LABELS = {
     title: 'Title', price: 'Price', quantity: 'Quantity', sku: 'SKU / custom label', upc: 'UPC', asin: 'ASIN',
@@ -375,7 +375,8 @@
     const item = current();
     const page = state.page;
     if (!item || !page?.store || page.kind !== 'listing-start') return;
-    const wanted = force || state.pendingSearch?.upc === item.upc || state.settings.autoSearch;
+    // Only on purpose: the user clicked an item or pressed Start. Opening the panel on the search page does nothing by itself.
+    const wanted = force || state.pendingSearch?.upc === item.upc;
     if (!wanted) return;
     const key = tabKey('search|' + item.upc);
     if (!force && state.searched.has(key)) return;
@@ -764,6 +765,7 @@
         renderItems(); renderDetail(); renderConfirm();
         void loadDetail(state.currentUpc).then(() => maybeAssist());
         // Picked while the store's search page is open: search this UPC right away.
+        state.pendingSearch = { upc: state.currentUpc, platform: state.platform };
         void maybeAutoSearch({ force: true });
       };
     }
@@ -1074,7 +1076,7 @@
     $('settingsBtn').onclick = () => {
       const s = $('settings'); s.hidden = !s.hidden;
       $('setServer').value = state.settings.server; $('setActor').value = state.settings.actor;
-      for (const key of ['autoFill', 'autoSearch', 'autoGuide', 'autoLink', 'autoPrepare']) $('set' + key[0].toUpperCase() + key.slice(1)).checked = state.settings[key] !== false;
+      for (const key of ['autoFill', 'autoGuide', 'autoLink', 'autoPrepare']) $('set' + key[0].toUpperCase() + key.slice(1)).checked = state.settings[key] !== false;
     };
     $('saveSettings').onclick = async () => {
       let server = $('setServer').value.trim() || DEFAULTS.server;
@@ -1083,7 +1085,7 @@
         const granted = await chrome.permissions.contains({ origins: [server + '/*'] }) || await chrome.permissions.request({ origins: [server + '/*'] });
         if (!granted) { toast('Site access to that server was not granted', true); return; }
       } catch { /* permission API unavailable for this origin pattern; fetch will report */ }
-      await saveSettings({ server, actor: $('setActor').value.trim(), autoFill: $('setAutoFill').checked, autoSearch: $('setAutoSearch').checked,
+      await saveSettings({ server, actor: $('setActor').value.trim(), autoFill: $('setAutoFill').checked,
         autoGuide: $('setAutoGuide').checked, autoLink: $('setAutoLink').checked, autoPrepare: $('setAutoPrepare').checked });
       $('settings').hidden = true; state.connected = null; renderHeader();
       await connect(); await loadQueue();
