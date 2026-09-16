@@ -31,7 +31,7 @@
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
-    voiceBusy: new Set(), qrOpen: false, toastAction: null,
+    voiceBusy: new Set(), qrOpen: true, toastAction: null,
   };
 
   const $ = id => document.getElementById(id);
@@ -235,6 +235,7 @@
     if (!missing.length) return;
     const merged = [currentNote, ...missing].filter(Boolean).join('\n');
     item.fields.conditionDescription = merged;
+    item.fields.conditionDescriptionSource = 'notes';
     if (!(item.fields.descriptionText || '').includes(missing[0])) item.fields.descriptionText = [item.fields.descriptionText, 'Condition: ' + missing.join(' ')].filter(Boolean).join('\n\n');
     delete edits.conditionDescription;
   }
@@ -336,7 +337,7 @@
   // Title / description written by Claude from the item's values, condition and prep notes.
   async function generate(info, kind) {
     const v = values(info);
-    state.genBusy = kind; renderDetail();
+    state.genBusy = kind; renderPage();
     try {
       const notes = [...(info.notes || []).map(n => n.english || n.text), ...(info.voiceNotes || []).map(n => n.english), info.defect].filter(Boolean);
       const data = await api('/api/lister/queue/' + encodeURIComponent(info.upc) + '/generate', { method: 'POST', body: { kind, values: {
@@ -346,11 +347,12 @@
       const edits = state.edits[info.upc] = { ...(state.edits[info.upc] || {}) };
       if (kind === 'title') edits.title = data.title;
       else { edits.descriptionText = data.descriptionText; edits.descriptionHtml = data.descriptionHtml; }
-      toast(kind === 'title' ? 'Title written: ' + data.title : 'Description written from the item and its notes');
+      const pushed = await pushValue(info, kind);
+      toast((kind === 'title' ? 'Title written: ' + data.title : 'Description written from the item and its notes') + (pushed ? ' (on the page)' : ''));
     } catch (error) {
       toast('AI ' + kind + ': ' + error.message, true);
     } finally {
-      state.genBusy = ''; renderDetail();
+      state.genBusy = ''; renderPage(); renderDetail();
     }
   }
 
@@ -441,7 +443,9 @@
       let response;
       if (action === 'start') {
         if (!info) return;
-        response = await pageMessage({ type: 'guide-start', options: { values: values(info), store: state.page.store, aspects: info.fields.aspects || {} } });
+        const v = values(info);
+        const noteFields = v.conditionDescriptionSource === 'notes' && v.conditionDescription ? ['conditionDescription'] : [];
+        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields } });
         if (!silent && !response.state.needed.length) toast('Nothing left to fill on this page');
       } else if (action === 'go') response = await pageMessage({ type: 'guide-go', index });
       else response = await pageMessage({ type: 'guide-' + action });
@@ -703,8 +707,12 @@
   function renderPage() {
     const page = state.page || {};
     const el = $('pageCard');
+    const item = current();
+    const info = detail();
     if (!page.store) {
-      el.innerHTML = `<div class="store"><span class="badge none">no store page</span><span class="muted small">Pick an item, then <b>Start on ${storeName(state.platform)}</b>. The panel searches the UPC, fills the form and records the listing.</span></div>`;
+      el.innerHTML = `<div class="store"><span class="badge none">no store page</span><span class="grow muted small">Pick an item, then start the listing. The panel searches the UPC, fills the form and records the listing.</span></div>
+        ${item ? `<div class="actions"><button id="startBtn" class="primary" type="button">Start on ${storeName(state.platform)}</button></div>` : ''}`;
+      if ($('startBtn')) $('startBtn').onclick = () => startOn(state.platform);
       return;
     }
     const kindText = {
@@ -720,15 +728,45 @@
     if (page.listingId && page.store === 'ebay') chips.push(`Item # <code>${esc(page.listingId)}</code>`);
     if (page.asin) chips.push(`ASIN <code>${esc(page.asin)}</code>`);
     if (page.sku) chips.push(`SKU <code>${esc(page.sku)}</code>`);
-    if (page.upc) chips.push(`UPC on page <code>${esc(page.upc)}</code>`);
+    const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
+    const g = state.guide;
+    const busy = Boolean(state.busy) || Boolean(state.genBusy);
+    const actions = item ? [
+      page.kind === 'listing-start' ? `<button id="searchBtn" class="primary" type="button" title="Type the UPC into the store's product search">Search UPC</button>` : '',
+      !onForm && page.kind !== 'listing-start' && !ASSIST_KINDS.has(page.kind) ? `<button id="startBtn" type="button">Start on ${storeName(state.platform)}</button>` : '',
+      onForm ? `<button id="fillBtn" class="primary" type="button" ${busy ? 'disabled' : ''}>${state.busy === 'fill' ? 'Filling…' : 'Fill page'}</button>` : '',
+      onForm ? `<button id="guideBtn" type="button" title="Checklist overlay on the page: red = required and empty, green = filled">${g?.active ? 'Next field' : 'Checklist'}</button>` : '',
+      onForm && g?.active ? '<button id="guideStop" class="mini" type="button">Hide</button>' : '',
+      onForm && info ? `<button id="genTitle" class="mini" type="button" ${busy ? 'disabled' : ''} title="Write an 80-character title from the item and its notes, into the page">${state.genBusy === 'title' ? '…' : 'AI title'}</button>` : '',
+      onForm && info ? `<button id="genDescription" class="mini" type="button" ${busy ? 'disabled' : ''} title="Write the description from the item, its condition and prep notes, into the page">${state.genBusy === 'description' ? '…' : 'AI description'}</button>` : '',
+      `<button id="pickBtn" class="mini" type="button" title="Click a field on the store page and choose which value goes in">Pick a field…</button>`,
+    ].filter(Boolean).join('') : '';
     el.innerHTML = `
       <div class="store"><span class="badge ${page.store}">${storeName(page.store)}</span>
-        <span class="grow">${esc(kindText)}${page.fieldCount != null ? ` <span class="muted small">· ${page.fieldCount} fields</span>` : ''}</span>
+        <span class="grow">${esc(kindText)}${g?.active && onForm ? ` <span class="muted small">· ${esc(g.open)} of ${esc(g.total)} left</span>` : ''}</span>
         <button id="pageRefresh" class="icon" type="button" title="Re-read page">↻</button></div>
       ${chips.length ? `<div class="chips">${chips.join('')}</div>` : ''}
       ${assistLine}
+      ${actions ? `<div class="actions">${actions}</div>` : ''}
       ${page.error ? `<div class="flag warn">Page script: ${esc(page.error)}</div>` : ''}`;
     $('pageRefresh').onclick = () => refreshTab();
+    if ($('startBtn')) $('startBtn').onclick = () => startOn(state.platform);
+    if ($('searchBtn')) $('searchBtn').onclick = () => { state.pendingSearch = { upc: item.upc, platform: state.platform }; void searchUpc(); };
+    if ($('fillBtn')) $('fillBtn').onclick = () => fillPage();
+    if ($('guideBtn')) $('guideBtn').onclick = () => guide(g?.active ? 'next' : 'start');
+    if ($('guideStop')) $('guideStop').onclick = () => guide('stop');
+    if ($('genTitle')) $('genTitle').onclick = () => generate(info, 'title');
+    if ($('genDescription')) $('genDescription').onclick = () => generate(info, 'description');
+    if ($('pickBtn')) $('pickBtn').onclick = () => startPick();
+  }
+
+  // Put one value on the store page (after an AI text or a note was applied) without a full re-fill.
+  async function pushValue(info, target) {
+    if (!state.page?.store || !(state.page.kind === 'listing-form' || state.page.kind === 'offer-form')) return false;
+    try {
+      const result = await pageMessage({ type: 'fill', options: { values: values(info), store: state.page.store, targets: [target], aspects: {}, learned: state.learned[state.page.store + ':' + (state.page.kind || '')] || {} } });
+      return (result.report.filled || []).some(f => f.target === target);
+    } catch { return false; }
   }
 
   function renderItems() {
@@ -786,15 +824,28 @@
     }
     const v = values(info);
     const store = state.page?.store || '';
-    const canFill = Boolean(store) && (state.page.kind === 'listing-form' || state.page.kind === 'offer-form');
-    const canSearch = Boolean(store) && state.page.kind === 'listing-start';
-    const aspects = Object.entries(info.fields.aspects || {});
     const preparing = info.preparing?.running;
     const notes = info.notes || [];
     const voice = info.voiceNotes || [];
     const photos = info.photos || [];
+    const listingPhotos = photos.filter(p => p.source === 'listing' || p.source === 'ai');
+    const prepPhotos = photos.filter(p => p.source === 'prep');
+    const catalogPhotos = photos.filter(p => p.source === 'catalog');
     const existing = (info.existing || {})[state.platform] || [];
     const linkedHere = (info.links || []).find(l => l.platform === state.platform);
+    const aspects = Object.entries(info.fields.aspects || {});
+    const prep = info.prepStatus || {};
+    const stock = info.inventory || {};
+    const storeChip = platform => {
+      const linked = (info.links || []).some(l => l.platform === platform) || info.queue?.listed?.[platform];
+      const onStore = ((info.existing || {})[platform] || []).length > 0;
+      if (linked) return `<span class="chip ok">${storeName(platform)}: listed ✓</span>`;
+      if (onStore) return `<span class="chip warn" title="The store already carries this UPC">${storeName(platform)}: on store</span>`;
+      if (info.queue?.skipped?.includes(platform)) return `<span class="chip">${storeName(platform)}: skipped</span>`;
+      return `<span class="chip info">${storeName(platform)}: not listed</span>`;
+    };
+    const tile = p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
+        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}><span class="src">${esc(p.source === 'prep' ? 'condition' : p.source)}</span></div>`;
     const copyAll = [
       `Title: ${v.title}`, `Price: ${money(v.price)} ${v.currency || ''}`.trim(), `Quantity: ${v.quantity ?? ''}`, `SKU: ${v.sku}`, `UPC: ${v.upc}`,
       `Condition: ${v.condition}${v.conditionDescription ? ' - ' + v.conditionDescription : ''}`, v.brand ? `Brand: ${v.brand}` : '',
@@ -802,108 +853,68 @@
       aspects.length ? 'Item specifics: ' + aspects.map(([k, vals]) => `${k}=${vals.join('/')}`).join('; ') : '',
       '', v.descriptionText || '',
     ].filter((line, i, arr) => line !== '' || (arr[i + 1] || '') !== '').join('\n');
-    const report = state.report;
-    const g = state.guide;
     el.innerHTML = `
-      <div class="head">${(photos[0] || {}).url || item.thumb ? `<img src="${esc((photos[0] || {}).url || item.thumb)}" alt="">` : '<div class="noimg"></div>'}
+      <div class="head">${(listingPhotos[0] || prepPhotos[0] || photos[0] || {}).url || item.thumb ? `<img src="${esc((listingPhotos[0] || prepPhotos[0] || photos[0] || {}).url || item.thumb)}" alt="">` : '<div class="noimg"></div>'}
         <div><div class="name">${esc(v.title || item.title || item.upc)}</div>
-          <div class="muted small">${esc(info.upc)}${info.suffixed ? ` · <b>unit ${esc(info.upc.split('-')[1])}</b> (SKU keeps the suffix)` : ''}${info.inventory?.positions?.length ? ' · rack ' + esc(info.inventory.positions.join(', ')) : ''}${info.inventory?.quantity ? ' · ' + esc(info.inventory.quantity) + ' in stock' : ''}${info.cost != null ? ' · cost $' + money(info.cost) : ''}</div>
+          <div class="muted small">${esc(info.upc)}${info.suffixed ? ` · <b>unit ${esc(info.upc.split('-')[1])}</b>` : ''}${info.cost != null ? ' · cost $' + money(info.cost) : ''}${v.price != null ? ' · price $' + esc(money(v.price)) : ''} · qty ${esc(v.quantity ?? '?')}</div>
+          <div class="chips">
+            ${prep.status ? `<span class="chip ${prep.status === 'good' ? 'ok' : (prep.status === 'bad' ? 'bad' : 'warn')}" title="${esc(prep.reason || '')}">status: ${esc(prep.status.toUpperCase())}</span>` : ''}
+            <span class="chip ${stock.quantity ? 'ok' : 'warn'}" title="Warehouse rows with stock">stock: ${esc(stock.quantity ?? 0)}${stock.positions?.length ? ' · ' + esc(stock.positions.join(', ')) : ''}</span>
+            ${storeChip('ebay')}${storeChip('amazon')}
+          </div>
           <div class="chips">${preparing ? '<span class="chip"><span class="spin"></span> preparing title, price, specifics…</span>' : (info.proposal?.ready ? '<span class="chip ok">prepared</span>' : `<span class="chip warn">basic values only</span>`)}
-            ${info.preparing?.error ? `<span class="chip bad" title="${esc(info.preparing.error)}">prepare failed</span>` : ''}
-            ${linkedHere ? `<span class="chip ok">listed on ${storeName(state.platform)} ${linkedHere.url ? `<a href="${esc(linkedHere.url)}" target="_blank" rel="noopener">↗</a>` : ''}</span>` : ''}</div>
+            <button id="prepareBtn" class="mini" type="button" ${preparing ? 'disabled' : ''} title="Rebuild title, price, category, specifics and description">${info.proposal?.ready ? 'Re-prepare' : 'Prepare'}</button>
+            ${info.preparing?.error ? `<span class="chip bad" title="${esc(info.preparing.error)}">prepare failed</span>` : ''}</div>
         </div></div>
-      ${(info.proposal?.flags || []).filter(f => f.level === 'block' || f.level === 'warn').slice(0, 4).map(f => `<div class="flag ${esc(f.level)}">${esc(f.message)}</div>`).join('')}
+      ${(info.proposal?.flags || []).filter(f => (f.level === 'block' || f.level === 'warn') && !/^Prepped:/i.test(f.message || '')).slice(0, 3).map(f => `<div class="flag ${esc(f.level)}">${esc(f.message)}</div>`).join('')}
       ${existing.length && !linkedHere ? `<div class="flag warn">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}.
         <button id="markExisting" class="mini" type="button">Use that listing</button> ${item.storeUrl ? `<a href="${esc(item.storeUrl)}" target="_blank" rel="noopener">open</a>` : ''}</div>` : ''}
-      <div class="actions">
-        <button id="startBtn" class="primary" type="button">Start on ${storeName(state.platform)}</button>
-        <button id="searchBtn" type="button" ${canSearch ? '' : 'disabled'} title="Type the UPC into the store's product search">Search UPC</button>
-        <button id="fillBtn" type="button" ${canFill && !state.busy ? '' : 'disabled'}>${state.busy === 'fill' ? 'Filling…' : 'Fill page'}</button>
-        <button id="guideBtn" type="button" ${canFill ? '' : 'disabled'} title="Highlight fields that still need a value; Tab jumps between them">${g?.active ? 'Next field' : 'Guide me'}</button>
-        ${g?.active ? '<button id="guideStop" type="button">Stop</button>' : ''}
-        <button id="pickBtn" class="mini" type="button" ${store ? '' : 'disabled'}>Pick a field…</button>
-        <button id="prepareBtn" class="mini" type="button" ${preparing ? 'disabled' : ''} title="Rebuild title, price, category, specifics and description">${info.proposal?.ready ? 'Re-prepare' : 'Prepare'}</button>
-      </div>
-      ${g?.active ? `<div class="progress" title="${esc(g.total - g.open)} of ${esc(g.total)} filled"><i style="width:${g.total ? Math.round((g.total - g.open) / g.total * 100) : 100}%"></i></div>
-        <ul class="needs">${(g.rows || []).length ? g.rows.map((n, i) => `<li class="${n.done ? 'done' : (n.required ? 'req' : 'opt')} ${i === g.index ? 'current' : ''}" data-go="${i}"><span class="mark">${n.done ? '✓' : (n.required ? '!' : '·')}</span><span>${esc(n.label)}</span><span class="sug">${n.done ? '' : esc(n.suggestion || 'type it')}</span></li>`).join('') : '<li class="muted">No listing fields found on this page yet.</li>'}</ul>` : ''}
-      ${report ? renderReport(report) : ''}
 
-      <h3>Listing values <span class="muted">(${esc(info.fields.source === 'proposal' ? 'prepared' : 'from inventory')})</span><span class="grow"></span>
-        <button id="genTitle" class="mini" type="button" ${state.genBusy ? 'disabled' : ''} title="Write an 80-character title from the item and its notes">${state.genBusy === 'title' ? '…' : 'AI title'}</button>
-        <button id="genDescription" class="mini" type="button" ${state.genBusy ? 'disabled' : ''} title="Write the description from the item, its condition and prep notes">${state.genBusy === 'description' ? '…' : 'AI description'}</button></h3>
-      <label>Title<input id="fTitle" maxlength="80" value="${esc(v.title)}"></label><div class="counter"><span id="titleCount">${(v.title || '').length}</span>/80</div>
-      <div class="grid">
-        <label>Price (${esc(v.currency || 'USD')})<input id="fPrice" type="number" step="0.01" min="0" value="${esc(v.price ?? '')}"></label>
-        <label>Quantity${v.listableQuantity != null ? ` <span class="muted">(max ${esc(v.listableQuantity)})</span>` : ''}<input id="fQuantity" type="number" step="1" min="1" value="${esc(v.quantity ?? '')}"></label>
-        <label>SKU / custom label<input id="fSku" value="${esc(v.sku)}"></label>
-        <label>UPC (store search)<input id="fUpc" value="${esc(v.upc)}"></label>
-        <label>Condition<select id="fCondition">${CONDITIONS.map(c => `<option value="${c}" ${c === v.condition ? 'selected' : ''}>${c.replace(/_/g, ' ')}</option>`).join('')}</select></label>
-        <label>Brand<input id="fBrand" value="${esc(v.brand)}"></label>
-      </div>
-      ${info.condition?.reason ? `<div class="muted small">${esc(info.condition.reason)}</div>` : ''}
-      <label>Condition description<textarea id="fConditionDescription" rows="2">${esc(v.conditionDescription)}</textarea></label>
-      <label>Description (plain text; eBay gets the HTML version)<textarea id="fDescription">${esc(v.descriptionText)}</textarea></label>
+      <h3>Photos <span class="muted">(${listingPhotos.length})</span><span class="grow"></span><button id="addPhoto" class="mini" type="button">${state.qrOpen ? 'Hide QR' : '+ Photo'}</button><button id="photoSelectAll" class="mini" type="button">${state.selectedPhotos.size ? 'Clear' : 'Select all'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
+      ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to add photos of this unit, then press ↻.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
+      ${listingPhotos.length ? `<div class="photos">${listingPhotos.map(tile).join('')}</div>` : '<div class="muted small">No listing photos yet. Scan the QR code to add some from the phone, or use the condition photos below.</div>'}
       <div class="row tight">
-        ${v.lots?.length ? `<span class="chip">Lot ${esc(v.lots.join(', '))}</span>` : ''}
-        ${v.categoryPath ? `<span class="chip" title="eBay category ${esc(v.categoryId)}">${esc(v.categoryPath)}</span>` : ''}
-        ${v.amazonCondition ? `<span class="chip" title="Amazon condition">${esc(v.amazonCondition)}</span>` : ''}
-      </div>
-      ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
-
-      <h3>Prep notes <span class="grow"></span>${notes.length || voice.length || info.defect ? '' : '<span class="muted">none</span>'}</h3>
-      ${info.defect ? `<div class="note"><b>BOL reason:</b> ${esc(info.defect)}</div>` : ''}
-      ${notes.map(n => `<div class="note">${esc(n.english || n.text)}${n.english && n.english !== n.text ? `<div class="lt">${esc(n.text)}</div>` : ''}<div class="when">${esc((n.createdAt || '').slice(0, 16).replace('T', ' '))}</div></div>`).join('')}
-      ${voice.map(n => `<div class="note"><b>Voice note</b> ${n.status === 'complete' ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span> transcribing…' : `<button class="mini" data-transcribe="${n.id}" type="button">Transcribe</button>`)}
-        ${n.english ? `<div>${esc(n.english)}</div>` : ''}${n.lithuanian ? `<div class="lt">${esc(n.lithuanian)}</div>` : ''}${n.error && !n.english ? `<div class="flag warn">${esc(n.error)}</div>` : ''}
-        <audio controls preload="none" src="${esc(n.url)}"></audio>${n.english ? `<div class="row tight"><button class="mini" data-usenote="${n.id}" type="button">Use as condition note</button><button class="mini" data-transcribe="${n.id}" data-again="1" type="button">Redo</button></div>` : ''}</div>`).join('')}
-
-      <h3>Photos <span class="muted">(${photos.length})</span><span class="grow"></span><button id="photoSelectAll" class="mini" type="button">${state.selectedPhotos.size ? 'Clear' : 'Select own'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
-      ${photos.length ? `<div class="photos" id="photoGrid">${photos.map(p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
-        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}><span class="src">${esc(p.source)}</span></div>`).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo to take some with the phone.</div>'}
-      <div class="row tight">
-        <button id="sendPhotos" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all own photos) into the page's photo uploader">${state.busy === 'photos' ? 'Sending…' : 'Send to page'}</button>
+        <button id="sendPhotos" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? 'Sending…' : 'Send to page'}</button>
         <button id="aiPhotos" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? esc(state.aiBusy) : 'AI photoshop'}</button>
-        <button id="addPhoto" type="button">${state.qrOpen ? 'Hide QR' : '+ Photo'}</button>
         <button id="copyPhotos" class="mini" type="button">Copy URLs</button>
       </div>
       <details ${state.aiPrompt ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(state.aiPrompt || info.aiPhotoPrompt || '')}</textarea><button id="aiPromptReset" class="mini" type="button">Reset to default</button></details>
-      ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to take photos of this unit. They land in Item Prep; press ↻ here afterwards.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
 
+      <h3>From prep: condition photos &amp; notes <span class="grow"></span>${prepPhotos.length || notes.length || voice.length || info.defect ? '' : '<span class="muted">none</span>'}</h3>
+      ${prepPhotos.length ? `<div class="photos">${prepPhotos.map(tile).join('')}</div>` : ''}
+      ${voice.map(n => `<div class="note"><b>Voice note</b> ${n.status === 'complete' ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span> transcribing…' : `<button class="mini" data-transcribe="${n.id}" type="button">Transcribe</button>`)}
+        ${n.english ? `<div>${esc(n.english)}</div>` : ''}${n.lithuanian ? `<div class="lt">${esc(n.lithuanian)}</div>` : ''}${n.error && !n.english ? `<div class="flag warn">${esc(n.error)}</div>` : ''}
+        <audio controls preload="none" src="${esc(n.url)}"></audio>${n.english ? `<div class="row tight"><button class="mini" data-usenote="${n.id}" type="button">Use as condition note</button><button class="mini" data-transcribe="${n.id}" data-again="1" type="button">Redo</button></div>` : ''}</div>`).join('')}
+      ${info.defect ? `<div class="note"><b>BOL reason:</b> ${esc(info.defect)}</div>` : ''}
+      ${notes.map(n => `<div class="note">${esc(n.english || n.text)}${n.english && n.english !== n.text ? `<div class="lt">${esc(n.text)}</div>` : ''}<div class="when">${esc((n.createdAt || '').slice(0, 16).replace('T', ' '))}</div></div>`).join('')}
+      ${v.conditionDescription ? `<div class="note" style="border-left:4px solid var(--blue)"><b>Condition note on the listing${v.conditionDescriptionSource === 'notes' ? ' (from the prep notes — read it once)' : ''}:</b> ${esc(v.conditionDescription)}</div>` : ''}
+
+      ${catalogPhotos.length ? `<details><summary>Catalog images (${catalogPhotos.length})</summary><div class="photos">${catalogPhotos.map(tile).join('')}</div></details>` : ''}
+      ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
       <div class="row"><button id="copyAllBtn" class="mini" type="button">Copy all values</button><button id="openAgent" class="link" type="button">Open in Listing Agent</button><button id="openItems" class="link" type="button">Items to List</button></div>
       <details><summary>Text for manual paste</summary><pre class="copyall">${esc(copyAll)}</pre></details>`;
 
-    const bind = (id, key, transform = x => x) => { const input = $(id); if (!input) return; input.oninput = () => { state.edits[info.upc] = { ...(state.edits[info.upc] || {}), [key]: transform(input.value) }; if (key === 'title') $('titleCount').textContent = input.value.length; renderConfirmValuesOnly(); }; };
-    bind('fTitle', 'title'); bind('fPrice', 'price', x => x === '' ? null : Number(x)); bind('fQuantity', 'quantity', x => x === '' ? null : Number(x));
-    bind('fSku', 'sku'); bind('fUpc', 'upc'); bind('fBrand', 'brand'); bind('fConditionDescription', 'conditionDescription'); bind('fDescription', 'descriptionText');
-    $('fCondition').onchange = () => { state.edits[info.upc] = { ...(state.edits[info.upc] || {}), condition: $('fCondition').value }; };
-    $('startBtn').onclick = () => startOn(state.platform);
-    $('searchBtn').onclick = () => searchUpc();
-    $('fillBtn').onclick = () => fillPage();
-    $('guideBtn').onclick = () => guide(g?.active ? 'next' : 'start');
-    if ($('guideStop')) $('guideStop').onclick = () => guide('stop');
-    for (const li of el.querySelectorAll('li[data-go]')) li.onclick = () => guide('go', { index: Number(li.dataset.go) });
-    $('pickBtn').onclick = () => startPick();
     $('prepareBtn').onclick = () => { state.prepareAsked.delete(info.upc); void maybePrepare(info, { force: true }); };
-    $('genTitle').onclick = () => generate(info, 'title');
-    $('genDescription').onclick = () => generate(info, 'description');
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
-    for (const button of el.querySelectorAll('button[data-usenote]')) button.onclick = () => {
+    for (const button of el.querySelectorAll('button[data-usenote]')) button.onclick = async () => {
       const note = voice.find(n => n.id === Number(button.dataset.usenote));
       if (!note) return;
-      const currentNote = $('fConditionDescription').value;
+      const currentNote = values(info).conditionDescription || '';
       const next = currentNote.includes(note.english) ? currentNote : [currentNote, note.english].filter(Boolean).join('\n');
-      $('fConditionDescription').value = next; $('fConditionDescription').dispatchEvent(new Event('input'));
-      toast('Condition note updated');
+      state.edits[info.upc] = { ...(state.edits[info.upc] || {}), conditionDescription: next, conditionDescriptionSource: 'notes' };
+      const pushed = await pushValue(info, 'conditionDescription');
+      toast(pushed ? 'Condition note updated on the page' : 'Condition note updated');
+      renderDetail();
     };
     $('photoSelectAll').onclick = () => { if (state.selectedPhotos.size) state.selectedPhotos = new Set(); else state.selectedPhotos = new Set(photos.filter(p => p.source !== 'catalog').map(p => p.url)); renderDetail(); };
     $('photoRefresh').onclick = () => { delete state.details[info.upc]; void loadDetail(info.upc, { force: true }); };
     for (const box of el.querySelectorAll('input[data-select]')) box.onchange = () => { if (box.checked) state.selectedPhotos.add(box.dataset.select); else state.selectedPhotos.delete(box.dataset.select); box.closest('.photo').classList.toggle('selected', box.checked); };
-    for (const tile of el.querySelectorAll('.photo')) {
-      tile.onclick = event => { if (event.target.matches('input')) return; const box = tile.querySelector('input'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); };
-      tile.onmouseenter = () => { void photoFile(tile.dataset.url).catch(() => {}); };
-      tile.ondragstart = event => {
-        const url = tile.dataset.url;
+    for (const tileEl of el.querySelectorAll('.photo')) {
+      tileEl.onclick = event => { if (event.target.matches('input')) return; const box = tileEl.querySelector('input'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); };
+      tileEl.onmouseenter = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
+      tileEl.ondragstart = event => {
+        const url = tileEl.dataset.url;
         const cached = state.photoFiles[url];
         event.dataTransfer.effectAllowed = 'copy';
         event.dataTransfer.setData('text/uri-list', url);
@@ -926,16 +937,7 @@
   }
 
   function renderGuideOnly() {
-    if (state.view === 'item') renderDetail();
-  }
-
-  function renderReport(report) {
-    const rows = [];
-    for (const f of report.filled || []) rows.push(`<li class="ok"><span>${esc(VALUE_LABELS[f.target] || f.target)}</span><span class="muted">→ ${esc(f.label || '')}${f.learned ? ' (taught)' : ''}</span></li>`);
-    for (const a of report.aspects || []) rows.push(`<li class="${a.ok ? 'ok' : 'bad'}"><span>${esc(a.aspect)}: ${esc(a.value)}</span><span class="muted">${a.ok ? '→ ' + esc(a.label || '') : 'no matching option'}</span></li>`);
-    for (const s of report.skipped || []) rows.push(`<li class="bad"><span>${esc(VALUE_LABELS[s.target] || s.target)}</span><span class="muted">${esc(s.reason || '')}</span></li>`);
-    for (const u of report.unmatched || []) rows.push(`<li class="miss"><span>${esc(VALUE_LABELS[u] || u)}</span><span class="muted">no field found — use Pick a field</span></li>`);
-    return `<details open><summary>Fill report</summary><ul class="report">${rows.join('')}</ul></details>`;
+    renderPage();
   }
 
   async function startPick() {

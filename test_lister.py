@@ -437,6 +437,8 @@ class ListerTestCase(unittest.TestCase):
             conn.execute('''CREATE TABLE voice_note_analysis (media_id INTEGER PRIMARY KEY, fingerprint TEXT, lithuanian TEXT,
                             english TEXT, updated_at REAL, lease_until REAL, token TEXT, error TEXT)''')
             conn.execute("INSERT INTO voice_note_analysis VALUES (41, 'f', 'subraižytas', 'scratched on the back', 1, 0, '', '')")
+            conn.execute('CREATE TABLE items_prep_status (id INTEGER PRIMARY KEY, upc TEXT, lot_number TEXT, status TEXT, reason TEXT, note TEXT, updated_at TEXT, quantity INTEGER)')
+            conn.execute("INSERT INTO items_prep_status (upc, lot_number, status, reason, updated_at, quantity) VALUES (?, 'L-1', 'bad', 'chip', '2026-09-15', 1)", (UPC + '-1',))
             conn.commit()
         with self.app.app_context():
             listing_queue._listagent_add_photo(UPC + '-1', image_path='listingagent_uploads/own.jpg')
@@ -452,6 +454,8 @@ class ListerTestCase(unittest.TestCase):
         self.assertIn('chip on rim', fields['conditionDescription'])
         self.assertIn('box opened, item unused', fields['conditionDescription'])
         self.assertIn('scratched on the back', fields['conditionDescription'])
+        self.assertEqual(fields['conditionDescriptionSource'], 'notes')
+        self.assertEqual((item['prepStatus']['status'], item['prepStatus']['reason']), ('bad', 'chip'))
         self.assertEqual(fields['images'][0], 'https://pi.example/static/listingagent_uploads/own.jpg')
         self.assertEqual([p['source'] for p in item['photos']], ['listing', 'prep', 'catalog'])
         self.assertEqual([v['status'] for v in item['voiceNotes']], ['complete', 'pending'])

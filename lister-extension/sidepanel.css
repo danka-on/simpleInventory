@@ -124,6 +124,8 @@ h3 .grow { flex: 1; }
 .needs li.req { border-left-color: var(--red); }
 .needs li.opt { border-left-color: var(--amber); }
 .needs li.done { border-left-color: var(--green); color: var(--muted); }
+.needs li.notes { border-left-color: var(--blue); }
+.needs li.notes .mark, .needs li.notes .sug { color: var(--blue); }
 .needs li.current { background: var(--chip); font-weight: 600; }
 .needs li .sug { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .needs li .mark { font-weight: 700; }

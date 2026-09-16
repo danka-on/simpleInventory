@@ -40,7 +40,8 @@
       any: ['condition description', 'condition note', 'condition notes', 'describe the condition', 'seller notes',
         'offer condition note'],
       not: [],
-      types: ['text', 'textarea', ''],
+      types: ['text', 'textarea', 'contenteditable', ''],
+      ownLabelOnly: true,  // never by nearby text: the item description editor sits under a "Condition" heading on eBay
     },
     description: {
       any: ['description', 'item description', 'product description', 'listing description', 'details'],
@@ -107,6 +108,7 @@
     let score = 0;
     let hit = false;
     for (const [field, weight] of WEIGHTS) {
+      if (spec.ownLabelOnly && field === 'nearbyText') continue;
       const text = normalize(descriptor[field]);
       if (!text) continue;
       for (const word of spec.any) {

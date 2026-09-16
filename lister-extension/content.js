@@ -389,7 +389,7 @@
     return { count, zone, el: zone || input };
   }
 
-  function guideNeeded({ values = {}, store = '', aspects = {} } = {}) {
+  function guideNeeded({ values = {}, store = '', aspects = {}, noteFields = [] } = {}) {
     const elements = collect();
     const descriptors = elements.map(describe);
     const assigned = M.assign(descriptors, Object.keys(M.TARGETS));
@@ -398,8 +398,10 @@
     const aspectHits = M.matchAspects(descriptors, aspects);
     for (const [aspect, hit] of Object.entries(aspectHits)) byIndex[hit.index] = 'aspect:' + aspect;
     const rows = [];
+    const noteSet = new Set(noteFields || []);
     descriptors.forEach((d, index) => {
       const target = byIndex[index] || '';
+      if (target === 'upc') return;  // filled silently; not part of the checklist
       const conditionSelect = !target && d.tag === 'select' && /condition/.test(M.normalize(d.labelText + ' ' + d.ariaLabel + ' ' + d.name));
       const required = M.isRequired(d) || REQUIRED_TARGETS.has(target) || conditionSelect;
       if (!required && !target) return;
@@ -409,7 +411,9 @@
       else if (conditionSelect && values.condition) suggestion = (M.conditionLabels(values.condition, store) || [])[0] || '';
       rows.push({ index, target: target || (conditionSelect ? 'condition' : ''), required, done: !M.isEmptyValue(d),
         label: (target && TARGET_LABELS[target]) || d.labelText || d.ariaLabel || d.placeholder || d.name || d.id || d.tag,
-        suggestion: String(suggestion || ''), tag: d.tag, kind: 'field' });
+        suggestion: String(suggestion || ''), tag: d.tag, kind: 'field',
+        value: target === 'quantity' || target === 'price' ? String(d.value || '') : '',
+        fromNotes: noteSet.has(target) });
     });
     const photos = photoState();
     if (photos) rows.unshift({ index: -1, target: 'photos', required: true, done: photos.count > 0, label: 'Photos', suggestion: 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
@@ -427,9 +431,10 @@
     if (!el) return;
     try {
       if (el.dataset.ssGuidePrev === undefined) el.dataset.ssGuidePrev = el.style.outline || '';
-      const colour = state === 'done' ? '#16a34a' : (state === 'required' ? '#dc2626' : '#f59e0b');
+      const colour = state === 'notes' ? '#2563eb' : (state === 'done' ? '#16a34a' : (state === 'required' ? '#dc2626' : '#f59e0b'));
       el.style.outline = (state === 'done' ? '2px solid ' : '3px solid ') + colour;
       el.style.outlineOffset = '2px';
+      // A filled field fades back; one filled from the prep notes keeps its blue outline as a reminder to read it.
       if (state === 'done') setTimeout(() => { if (el.dataset.ssGuideDone === '1') { el.style.outline = el.dataset.ssGuidePrev || ''; el.style.outlineOffset = ''; } }, 2500);
       el.dataset.ssGuideDone = state === 'done' ? '1' : '';
     } catch { /* ignore */ }
@@ -478,7 +483,8 @@
     return tag;
   }
 
-  function guideRender() {
+  // scroll=true only for an explicit jump (click, Next, Tab); refreshes never move the page.
+  function guideRender(scroll = false) {
     if (!guide) return;
     const open = guide.rows.filter(r => !r.done);
     const requiredOpen = open.filter(r => r.required);
@@ -495,22 +501,24 @@
     panel.querySelector('[data-ss="collapse"]').textContent = guide.collapsed ? '+' : '–';
     const body = panel.querySelector('[data-ss="body"]');
     body.innerHTML = guide.rows.map((row, i) => {
-      const colour = row.done ? '#16a34a' : (row.required ? '#dc2626' : '#f59e0b');
+      const fromNotes = row.fromNotes && row.done;
+      const colour = fromNotes ? '#2563eb' : (row.done ? '#16a34a' : (row.required ? '#dc2626' : '#f59e0b'));
       const isCurrent = current === row;
       return `<div data-ss-row="${i}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;${isCurrent ? 'background:#1e293b;' : ''}">
         <span style="width:10px;height:10px;border-radius:50%;background:${colour};flex:none"></span>
-        <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.required && !row.done ? ' <span style="color:#fca5a5;font-size:11px">required</span>' : ''}
-          ${!row.done && row.suggestion ? `<div style="color:#cbd5e1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}</span>
-        <span style="color:${colour};font-weight:700">${row.done ? '✓' : (row.required ? '!' : '·')}</span></div>`;
+        <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.value ? ` <span style="color:#e2e8f0;font-weight:700">· ${escapeHtml(row.value)}</span>` : ''}${row.required && !row.done ? ' <span style="color:#fca5a5;font-size:11px">required</span>' : ''}
+          ${!row.done && row.suggestion ? `<div style="color:#cbd5e1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}
+          ${fromNotes ? '<div style="color:#93c5fd;font-size:11px">Filled from the warehouse prep notes. Read it once before listing.</div>' : ''}</span>
+        <span style="color:${colour};font-weight:700">${row.done ? (fromNotes ? 'ⓘ' : '✓') : (row.required ? '!' : '·')}</span></div>`;
     }).join('') || '<div style="padding:10px 12px;color:#cbd5e1">No listing fields found on this page yet.</div>';
     for (const el of body.querySelectorAll('[data-ss-row]')) el.onclick = () => guideGo(Number(el.dataset.ssRow));
     panel.querySelector('[data-ss="use"]').style.display = current && !current.done && current.suggestion && current.kind === 'field' ? '' : 'none';
-    for (const row of guide.rows) guideStyle(row, row.done ? 'done' : (row.required ? 'required' : 'optional'));
+    for (const row of guide.rows) guideStyle(row, row.done ? (row.fromNotes ? 'notes' : 'done') : (row.required ? 'required' : 'optional'));
     const pointer = guidePointer();
     const el = current ? guideElement(current) : null;
     if (el) {
       // A green (filled) row still takes the user to that spot when clicked.
-      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); if (current.kind === 'field') el.focus({ preventScroll: true }); } catch { /* ignore */ }
+      if (scroll) { try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); if (current.kind === 'field') el.focus({ preventScroll: true }); } catch { /* ignore */ } }
       const rect = el.getBoundingClientRect();
       pointer.style.display = '';
       pointer.style.background = current.done ? '#16a34a' : (current.required ? '#dc2626' : '#f59e0b');
@@ -532,7 +540,7 @@
 
   function guideState() {
     if (!guide) return { active: false, needed: [], rows: [], index: -1 };
-    const rows = guide.rows.map(r => ({ index: r.index, target: r.target, required: r.required, done: r.done, label: r.label, suggestion: r.suggestion, kind: r.kind }));
+    const rows = guide.rows.map(r => ({ index: r.index, target: r.target, required: r.required, done: r.done, label: r.label, suggestion: r.suggestion, kind: r.kind, value: r.value || '', fromNotes: Boolean(r.fromNotes) }));
     return { active: true, index: guide.index, rows, needed: rows.filter(r => !r.done), open: rows.filter(r => !r.done).length, total: rows.length };
   }
 
@@ -566,9 +574,24 @@
 
   function guideRefresh() {
     if (!guide) return guideState();
+    // eBay adds fields late (the condition description appears once a used condition is chosen):
+    // rebuild the checklist when the page's fields changed, keeping the current row by target.
+    const fresh = collect();
+    if (fresh.length !== guide.elements.length || fresh.some((el, i) => el !== guide.elements[i])) {
+      const currentTarget = guide.rows[guide.index]?.target;
+      const built = guideNeeded(guide.options);
+      for (const row of built.rows) guideUnstyle(row);
+      for (const row of guide.rows) guideUnstyle(row);
+      guide.elements = built.elements; guide.rows = built.rows;
+      guide.index = currentTarget ? guide.rows.findIndex(r => r.target === currentTarget) : -1;
+    }
     for (const row of guide.rows) {
       if (row.kind === 'photos') { const photos = photoState(); row.done = Boolean(photos && photos.count > 0); if (photos) row.el = photos.el; }
-      else row.done = !M.isEmptyValue(describe(guide.elements[row.index]));
+      else {
+        const d = describe(guide.elements[row.index]);
+        row.done = !M.isEmptyValue(d);
+        if (row.target === 'quantity' || row.target === 'price') row.value = String(d.value || '');
+      }
     }
     return guideState();
   }
@@ -580,7 +603,7 @@
     if (!open.length) { guide.index = -1; guideRender(); notifyGuide(); return guideState(); }
     const after = open.find(i => i > guide.index);
     guide.index = after !== undefined ? after : open[0];
-    guideRender();
+    guideRender(true);
     notifyGuide();
     return guideState();
   }
@@ -590,7 +613,7 @@
     guideRefresh();
     if (!guide.rows.length) { guideRender(); return guideState(); }
     guide.index = ((index % guide.rows.length) + guide.rows.length) % guide.rows.length;
-    guideRender();
+    guideRender(true);
     notifyGuide();
     return guideState();
   }
@@ -645,10 +668,8 @@
       const text = clip(el.textContent).slice(0, MAX_TEXT * 3);
       if (/ > .+ > /.test(text) && text.length < 220) out.push({ el, text });
     }
-    // Keep the innermost element for each distinct text.
-    const seen = new Map();
-    for (const entry of out) if (!seen.has(entry.text) || seen.get(entry.text).el.contains(entry.el)) seen.set(entry.text, entry);
-    return [...seen.values()];
+    // Only the innermost matches: a wrapper whose text also holds the dialog title is not a path.
+    return out.filter(entry => !out.some(other => other !== entry && entry.el !== other.el && entry.el.contains(other.el)));
   }
 
   function matchCards() {

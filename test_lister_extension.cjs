@@ -131,6 +131,17 @@ assert.equal(M.categoryScore('Home & Garden > Kitchen, Dining & Bar > Kitchen To
 assert.ok(M.categoryScore('Collectibles > Kitchen & Home > Kitchen Tools & Gadgets > Salt & Pepper Shakers', 'Home & Garden > Kitchen, Dining & Bar > Kitchen Tools & Gadgets > Salt & Pepper') < 0.5);
 assert.ok(M.categoryScore('Home & Garden > Major Appliances > Washer & Dryer Parts', 'Home & Garden > Kitchen, Dining & Bar > Salt & Pepper') < 0.3);
 
+// The condition description is matched by its own label only, never by a nearby "Condition" heading,
+// and eBay's editor for it may be a contenteditable box.
+assert.equal(M.scoreTarget('conditionDescription', field({ tag: 'div', contenteditable: true, nearbyText: 'Condition description' })), 0, 'nearby text alone never makes a condition description');
+assert.ok(M.scoreTarget('conditionDescription', field({ tag: 'div', contenteditable: true, ariaLabel: 'Condition description' })) > 0, 'a labelled contenteditable does');
+const withEditor = M.assign([
+  field({ tag: 'div', contenteditable: true, ariaLabel: 'Item description', nearbyText: 'Condition' }),
+  field({ tag: 'textarea', ariaLabel: 'Condition description' }),
+]);
+assert.equal(withEditor.description.index, 0);
+assert.equal(withEditor.conditionDescription.index, 1, 'the condition description row points at the condition field, not the item description editor');
+
 // --- success wording, required fields, the product search box ---------------------------------
 assert.ok(M.successInfo('ebay', 'Congratulations! Your item is listed. View listing').success);
 assert.ok(!M.successInfo('ebay', 'Create your listing. Title. Price.').success);

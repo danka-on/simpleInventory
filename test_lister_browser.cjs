@@ -27,8 +27,9 @@ const detail = {
     quantity: 1, condition: 'USED_GOOD', amazonCondition: 'used_good', conditionDescription: 'Small chip on the rim',
     descriptionHtml: '<p>Lenox <b>Butterfly Meadow</b> dinner plate.</p>', descriptionText: 'Lenox Butterfly Meadow dinner plate.',
     categoryId: '36027', categoryPath: 'Home & Garden > Dinnerware', brand: 'Lenox', aspects: { Brand: ['Lenox'], Material: ['Porcelain'] },
-    images: [], lots: ['L-1'], racks: ['A-3'], listableQuantity: 1, source: 'proposal',
+    images: [], lots: ['L-1'], racks: ['A-3'], listableQuantity: 1, source: 'proposal', conditionDescriptionSource: 'notes',
   },
+  prepStatus: { status: 'bad', reason: 'chip', updatedAt: '2026-09-15', quantity: 1 },
   condition: { condition: 'USED_GOOD', conditionDescription: 'Small chip on the rim', reason: 'prep notes mention a flaw', assumed: false },
   notes: [{ id: 5, text: 'LT: nuotrauka | EN: Small chip on the rim', english: 'Small chip on the rim', createdAt: '2026-09-15T10:00:00' }],
   defect: '', voiceNotes: [], videos: [], photos: [], inventory: { quantity: 1, positions: ['B-1'], rows: [] }, cost: 4.5, bol: {},
@@ -105,6 +106,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       if (url.pathname === '/api/lister/queue/012345678905') return json({ success: true, item: { ...detail, upc: '012345678905', baseUpc: '012345678905', suffixed: false, proposal: {}, fields: { ...detail.fields, source: 'inventory', sku: '012345678905', upc: '012345678905' } } });
       if (url.pathname === '/api/lister/photos/fetch') return json({ success: true, name: 'own.jpg', mime: 'image/jpeg', base64: '/9j/4AAQ' });
       if (url.pathname.startsWith('/static/')) return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
+      if (url.pathname === '/api/lister/qr') return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>' });
       assert.equal(request.headers()['x-sweet-shelves-lister'], '1', 'mutations carry the extension header: ' + url.pathname);
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
       if (url.pathname.endsWith('/skip')) { calls.skip.push(request.postDataJSON()); return json({ success: true, queue: 'queued' }); }
@@ -154,13 +156,15 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.deepEqual(calls.skip[0].platform, 'ebay');
     assert.equal(await panel.$eval('.item.current', el => el.dataset.upc), UPC + '-1', 'the current item is untouched');
 
-    // Item view shows the prep note, the prepared values and the suffixed SKU.
+    // Item view: unit, prep status, stock, store status, the condition note flagged as coming from prep, the QR code.
     await panel.click('#viewItem');
-    await panel.waitForSelector('#fTitle');
-    assert.equal(await panel.$eval('#fSku', el => el.value), UPC + '-1');
-    assert.equal(await panel.$eval('#fUpc', el => el.value), UPC);
-    assert.ok((await panel.textContent('#detail')).includes('Small chip on the rim'));
-    assert.ok((await panel.textContent('#detail')).includes('unit 1'));
+    await panel.waitForSelector('#prepareBtn');
+    const detailText = await panel.textContent('#detail');
+    for (const expected of ['unit 1', 'status: BAD', 'stock: 1', 'B-1', 'eBay: not listed', 'Amazon: not listed', 'Small chip on the rim', 'from the prep notes']) {
+      assert.ok(detailText.includes(expected), 'item view shows "' + expected + '"');
+    }
+    assert.ok(!detailText.includes('Prepped:'), 'no "Prepped: ..." sentence');
+    assert.ok(await panel.$('.qr img'), 'the phone QR code is shown with the photos');
 
     // On eBay's prelist page the panel types the UPC and submits the search by itself.
     // (Opened from Playwright rather than the Start button: a tab the extension opens starts
@@ -228,22 +232,29 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.equal(filled.search, '', 'the site search box is untouched');
     assert.ok(filled.events.includes('title') && filled.events.includes('price'), 'React-style input events fired');
     assert.ok(filled.colorOutline.includes('rgb(220, 38, 38)'), 'the empty required Color field is outlined red by the guide, got: ' + filled.colorOutline);
-    await panel.waitForFunction(() => document.querySelectorAll('.needs li').length >= 1, null, { timeout: 15000 });
-    const rows = await panel.$$eval('.needs li', els => els.map(li => ({ label: li.children[1].textContent, cls: li.className })));
-    const photosRow = rows.find(r => r.label === 'Photos');
-    assert.ok(photosRow && photosRow.cls.includes('req'), 'photos (0/25) are a required, open row: ' + JSON.stringify(rows));
-    assert.ok(rows.find(r => r.label.startsWith('Color'))?.cls.includes('req'), 'the empty required Color field is red: ' + JSON.stringify(rows));
-    assert.ok(rows.find(r => r.label === 'Title')?.cls.includes('done'), 'the filled title is green');
-    assert.ok(rows.find(r => r.label === 'Price')?.cls.includes('done'), 'the filled price is green');
-    assert.ok(await store.$eval('#ss-lister-guide', el => el.textContent.includes('required')), 'the overlay on the page lists what is required');
+    // The checklist overlay on the page: red = required and empty, green = filled, blue = from the prep notes.
+    await store.waitForFunction(() => document.querySelectorAll('#ss-lister-guide [data-ss-row]').length >= 1, null, { timeout: 15000 });
+    const rows = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(row => ({ text: row.textContent.replace(/\s+/g, ' ').trim(), dot: row.querySelector('span').style.background })));
+    const rowFor = name => rows.find(r => r.text.startsWith(name));
+    assert.ok(rowFor('Photos') && rowFor('Photos').dot.includes('220, 38, 38'), 'photos (0/25) are a required, open (red) row: ' + JSON.stringify(rows));
+    assert.ok(rowFor('Color').dot.includes('220, 38, 38'), 'the empty required Color field is red');
+    assert.ok(rowFor('Title').dot.includes('22, 163, 74'), 'the filled title is green');
+    assert.ok(rowFor('Quantity').text.includes('· 1'), 'the quantity row shows the entered quantity: ' + rowFor('Quantity').text);
+    assert.ok(!rowFor('UPC'), 'the UPC is not on the checklist');
+    assert.ok(rowFor('Condition description').dot.includes('37, 99, 235') && rowFor('Condition description').text.includes('prep notes'), 'the note-sourced condition description is blue with a disclaimer');
+    assert.ok((await panel.textContent('#pageCard')).includes('of'), 'the store card shows the checklist progress');
     // Re-reading the page while the guide is up must not throw (0.2.2 did: "reading 'length'").
     await panel.click('#pageRefresh');
     await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 10000 });
     assert.ok(!(await panel.textContent('#pageCard')).includes('Page script:'), await panel.textContent('#pageCard'));
-    // Clicking a green (filled) row still jumps to that field.
-    await panel.click('.needs li.done');
+    // Clicking a green (filled) row still jumps to that field; the condition description row goes to its own field.
+    const titleIndex = rows.findIndex(r => r.text.startsWith('Title'));
+    await store.click(`#ss-lister-guide [data-ss-row="${titleIndex}"]`);
     await store.waitForFunction(() => document.activeElement && document.activeElement.id === 'title', null, { timeout: 10000 });
-    assert.equal(await store.evaluate(() => document.activeElement.id), 'title');
+    const cdIndex = rows.findIndex(r => r.text.startsWith('Condition description'));
+    await store.click(`#ss-lister-guide [data-ss-row="${cdIndex}"]`);
+    await store.waitForFunction(() => document.activeElement && document.activeElement.id === 'cd', null, { timeout: 10000 });
+    assert.equal(await store.evaluate(() => document.activeElement.id), 'cd');
     // The item is locked in on the listing page: the queue is hidden and the item view is up.
     assert.ok(await panel.$eval('#lock', el => el.classList.contains('on')));
     assert.ok(await panel.$eval('#listCard', el => el.hidden));

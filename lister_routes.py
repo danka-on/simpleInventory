@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.2'
+VERSION = '0.2.6'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -1031,6 +1031,22 @@ class Lister:
         data = rv.get_json(silent=True) if hasattr(rv, 'get_json') else (rv or {})
         return (data or {}).get('item') or {} if (data or {}).get('success') else {}
 
+    def _prep_status(self, upc):
+        """Item Prep's verdict for this unit: {'status': 'good'|'bad'|..., 'reason', 'updatedAt'} or {}."""
+        variants = list(self._variants(upc))
+        try:
+            with self.db('bol.db') as conn:
+                cur = conn.cursor()
+                if not self._has_table(cur, 'items_prep_status'):
+                    return {}
+                cur.execute(f"SELECT status, reason, updated_at, quantity FROM items_prep_status WHERE upc IN ({','.join('?' for _ in variants)}) ORDER BY COALESCE(updated_at, '') DESC, id DESC LIMIT 1", tuple(variants))
+                row = _row(cur.fetchone())
+        except sqlite3.Error:
+            return {}
+        if not row:
+            return {}
+        return {'status': _text(row.get('status')).lower(), 'reason': _text(row.get('reason'), 300), 'updatedAt': row.get('updated_at') or '', 'quantity': row.get('quantity')}
+
     def _voice_analysis(self, media_ids):
         """English/Lithuanian text already produced for prep voice notes (voice_note_analysis in bol.db)."""
         out = {}
@@ -1138,6 +1154,8 @@ class Lister:
         fields['amazonCondition'] = AMAZON_CONDITIONS.get(fields['condition'], '')
         if not fields.get('conditionDescription') and condition['conditionDescription']:
             fields['conditionDescription'] = condition['conditionDescription']
+            fields['conditionDescriptionSource'] = 'notes'  # the panel flags it: read once before listing
+        prep_status = self._prep_status(upc)
         if not fields.get('images'):
             fields['images'] = [p['url'] for p in photos if p['source'] != 'catalog'][:12] or [p['url'] for p in photos][:12]
         if not fields.get('descriptionText'):
@@ -1184,6 +1202,7 @@ class Lister:
                       'skipped': skipped},
             'proposal': {k: proposal[k] for k in ('id', 'status', 'ready', 'updatedAt', 'flags') if k in proposal},
             'learned': learned,
+            'prepStatus': prep_status,
             'preparing': self._job_state(upc),
             'mobilePhotosUrl': base_url.rstrip('/') + '/items-to-list/mobile-photos?upc=' + upc + '&return=%2Fitems-to-list',
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
