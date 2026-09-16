@@ -468,7 +468,18 @@
       state.assist = message.state; renderPage();
     } else if (message?.type === 'ss-lister-choice') {
       void recordChoice(message);
+    } else if (message?.type === 'ss-lister-dropped') {
+      toast(message.ok ? `Dropped ${message.name} into the page's uploader` : 'Drop failed: ' + message.reason, !message.ok);
     }
+  });
+
+  // The page script asks for a dragged photo's bytes when they were not cached before the drag.
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message?.type !== 'ss-lister-photo-bytes') return false;
+    photoFile(message.url)
+      .then(f => sendResponse({ ok: true, name: f.name, type: f.type, base64: f.base64 }))
+      .catch(error => sendResponse({ ok: false, reason: error.message || 'could not load the photo' }));
+    return true;
   });
 
   // -- confirm & link (automatic on the success page, manual through the card) --------------------
@@ -913,12 +924,16 @@
     for (const tileEl of el.querySelectorAll('.photo')) {
       tileEl.onclick = event => { if (event.target.matches('input')) return; const box = tileEl.querySelector('input'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); };
       tileEl.onmouseenter = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
+      tileEl.onmousedown = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
       tileEl.ondragstart = event => {
         const url = tileEl.dataset.url;
         const cached = state.photoFiles[url];
+        const photo = photos.find(p => p.url === url) || {};
         event.dataTransfer.effectAllowed = 'copy';
         event.dataTransfer.setData('text/uri-list', url);
         event.dataTransfer.setData('text/plain', url);
+        // The page script turns this into a real file where it lands (a File cannot cross from the panel).
+        event.dataTransfer.setData('application/x-sweetshelves-photo', JSON.stringify({ url, name: cached?.name || photo.name || 'photo.jpg', type: cached?.type || 'image/jpeg', base64: cached?.base64 || '' }));
         if (cached) {
           event.dataTransfer.setData('DownloadURL', `${cached.type}:${cached.name}:${url}`);
           try { event.dataTransfer.items.add(cached.file); } catch { /* the page gets the URL instead */ }

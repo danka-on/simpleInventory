@@ -368,6 +368,74 @@
     return { ok: false, reason: 'no photo uploader found on this page. Drag the photo onto the page instead.' };
   }
 
+  // -- drag and drop from the side panel ---------------------------------------------------------------
+  // A drag out of an extension page cannot carry a File into a web page; the panel puts a JSON
+  // description of the photo on the drag instead, and this bridge turns the drop into a real file
+  // for the uploader nearest to where it landed.
+
+  const PHOTO_MIME = 'application/x-sweetshelves-photo';
+
+  function photoFromDrag(dataTransfer) {
+    try {
+      const raw = dataTransfer.getData(PHOTO_MIME);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  }
+
+  async function photoBytes(entry) {
+    if (entry.base64) return entry;
+    // Not cached in the panel yet: ask it for the bytes (it fetches them with the sign-in cookie).
+    const reply = await chrome.runtime.sendMessage({ type: 'ss-lister-photo-bytes', url: entry.url });
+    if (!reply?.ok) throw new Error(reply?.reason || 'could not load the photo');
+    return { ...entry, name: reply.name, type: reply.type, base64: reply.base64 };
+  }
+
+  function uploaderNear(target) {
+    let node = target;
+    for (let depth = 0; node && depth < 8; depth++) {
+      const input = node.querySelector ? node.querySelector('input[type=file]') : null;
+      if (input && !input.disabled) return input;
+      node = node.parentElement;
+    }
+    return fileInputs()[0] || null;
+  }
+
+  async function handlePhotoDrop(event) {
+    const entry = photoFromDrag(event.dataTransfer);
+    if (!entry) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      const photo = await photoBytes(entry);
+      const files = toFiles([photo]);
+      if (!files.length) throw new Error('empty photo');
+      const transfer = new DataTransfer();
+      transfer.items.add(files[0]);
+      const input = uploaderNear(event.target);
+      if (input) {
+        input.files = transfer.files;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        const zone = (event.target.closest && event.target.closest('[class*="drop" i], [class*="upload" i], [class*="photo" i]')) || dropZone();
+        if (!zone) throw new Error('no photo uploader near the drop');
+        for (const type of ['dragenter', 'dragover', 'drop']) zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
+      }
+      chrome.runtime.sendMessage({ type: 'ss-lister-dropped', ok: true, name: files[0].name }).catch(() => {});
+    } catch (error) {
+      chrome.runtime.sendMessage({ type: 'ss-lister-dropped', ok: false, reason: String(error && error.message || error) }).catch(() => {});
+    }
+    return true;
+  }
+
+  function installDropBridge() {
+    const isOurs = event => Array.from(event.dataTransfer?.types || []).includes(PHOTO_MIME);
+    document.addEventListener('dragover', event => { if (isOurs(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }, true);
+    document.addEventListener('dragenter', event => { if (isOurs(event)) event.preventDefault(); }, true);
+    document.addEventListener('drop', event => { if (isOurs(event)) void handlePhotoDrop(event); }, true);
+  }
+  installDropBridge();
+
   // -- guided fill: a checklist overlay of what the listing still needs, colour coded ----------------
   //   red   = the store or we require it and it is empty (title, price, quantity, condition, photos...)
   //   amber = one of our fields that is empty but optional

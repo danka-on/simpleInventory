@@ -269,6 +269,25 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 15000 });
     assert.deepEqual(await store.evaluate(() => window.photoNames), ['own.jpg']);
 
+    // A photo dragged from the panel arrives on the page as our JSON drag type (a File cannot cross
+    // from an extension page); the page script turns it into a real file for the uploader it landed on.
+    await store.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.setData('application/x-sweetshelves-photo', JSON.stringify({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/dragged.jpg', name: 'dragged.jpg', type: 'image/jpeg', base64: '/9j/4AAQ' }));
+      const zone = document.querySelector('.uploader-dropzone');
+      zone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+      zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    });
+    await store.waitForFunction(() => Array.isArray(window.photoNames) && window.photoNames.includes('dragged.jpg'), null, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('Dropped dragged.jpg'), null, { timeout: 10000 });
+    // ...and when the bytes were not cached before the drag, the page script asks the panel for them.
+    await store.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.setData('application/x-sweetshelves-photo', JSON.stringify({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/own.jpg', name: 'own.jpg', type: 'image/jpeg', base64: '' }));
+      document.querySelector('.uploader-dropzone').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+    });
+    await store.waitForFunction(() => window.photoNames && window.photoNames.length === 1 && window.photoNames[0] === 'own.jpg', null, { timeout: 15000 });
+
     // eBay's success page carries the item number: the listing is recorded without a click.
     await store.click('a[href*="/sl/list/success"]');
     await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('recorded'), null, { timeout: 20000 });
