@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -353,6 +353,23 @@ class Lister:
         cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_links_upc ON listing_links(upc)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_links_platform_listing ON listing_links(platform, listing_id)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_links_platform_sku ON listing_links(platform, sku)')
+        # What the user picked on the store's intermediate steps (category, catalog match) versus what
+        # the panel suggested: training data for taking those steps over later.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS lister_choices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                upc TEXT NOT NULL,
+                base_upc TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                step TEXT NOT NULL,
+                chosen TEXT NOT NULL,
+                suggested TEXT,
+                url TEXT,
+                actor TEXT,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        cur.execute('CREATE INDEX IF NOT EXISTS idx_lister_choices_base ON lister_choices(base_upc, platform, step)')
         # Per-store "X" on the side panel: the item leaves that store's list but stays queued for the other.
         cur.execute('''
             CREATE TABLE IF NOT EXISTS lister_queue_state (
@@ -781,7 +798,45 @@ class Lister:
                 self._event(cur, link['proposal_id'], link['upc'], 'browser_link_removed', actor,
                             f"{link['platform']} {link.get('listing_id') or link.get('sku') or ''}")
             cur.execute('DELETE FROM listing_links WHERE id = ?', (int(link_id),))
+            # Undo what record_link did to the queue: this store is no longer listed, the row is queued again.
+            self.init_listagent(cur)
+            variants = self._variants(link['upc'])
+            platform = link['platform']
+            cur.execute(f"SELECT * FROM listing_queue WHERE upc IN ({','.join('?' for _ in variants)}) AND status IN ('queued', 'done') ORDER BY id DESC LIMIT 1", tuple(variants))
+            queue_row = _row(cur.fetchone())
+            if queue_row and queue_row.get(f'listed_{platform}_at'):
+                same = any(_text(queue_row.get(col)) and _text(queue_row.get(col)) == _text(link.get(key))
+                           for col, key in (('listed_listing_id', 'listing_id'), ('listed_sku', 'sku'), ('listed_asin', 'asin')))
+                if same or not (queue_row.get('listed_listing_id') or queue_row.get('listed_sku') or queue_row.get('listed_asin')):
+                    cur.execute(f'''UPDATE listing_queue SET listed_{platform}_at = NULL, status = 'queued',
+                                    listed_listing_id = NULL, listed_offer_id = NULL, listed_sku = NULL, listed_asin = NULL, listed_url = NULL,
+                                    listed_platform = NULL, listed_at = NULL WHERE id = ?''', (queue_row['id'],))
+                    link['queue_reverted'] = True
             conn.commit()
+        if link.get('queue_reverted'):
+            # The listing log row this link wrote would otherwise still trace sales to this unit.
+            try:
+                with self.db('listinglog.db') as conn:
+                    cur = conn.cursor()
+                    if self._has_table(cur, 'listing_log'):
+                        cur.execute('''DELETE FROM listing_log WHERE LOWER(COALESCE(source, '')) = 'lister' AND platform = ? AND upc = ?
+                                       AND (COALESCE(listing_id, '') = ? OR COALESCE(sku, '') = ? OR COALESCE(asin, '') = ?)''',
+                                    (link['platform'], link['upc'], _text(link.get('listing_id')), _text(link.get('sku')) or '-', _text(link.get('asin')) or '-'))
+                        conn.commit()
+            except sqlite3.Error:
+                pass
+            if any('Items to List marked listed' in step for step in (effects.get('steps') or [])):
+                try:
+                    with self.db('bol.db') as conn:
+                        cur = conn.cursor()
+                        if self._has_table(cur, 'bol_items'):
+                            keys = tuple({link['upc'], link['upc'].lstrip('0') or link['upc'], *self._variants(link['upc'])})
+                            cur.execute(f'''UPDATE bol_items SET listed_{platform} = 0, listed_{platform}_date = NULL, listed_{platform}_source = NULL
+                                            WHERE TRIM(COALESCE(upc, '')) IN ({','.join('?' for _ in keys)}) AND listed_{platform}_source = 'listing_center' ''', keys)
+                            conn.commit()
+                            link['items_to_list_reverted'] = bool(cur.rowcount)
+                except sqlite3.Error:
+                    pass
         match = effects.get('inventory_match') or {}
         if match.get('store') and match.get('listing_key'):
             try:
@@ -1022,6 +1077,7 @@ class Lister:
                 cur.execute(f"SELECT id, image_path, created_at, original_filename FROM listing_photos WHERE upc IN ({','.join('?' for _ in self._variants(upc))}) ORDER BY id DESC LIMIT 60",
                             tuple(self._variants(upc)))
                 own_photos = [_row(r) for r in cur.fetchall()]
+            learned = self._learned(cur, upc)
         prep = detail.get('prep') or {}
         voice_rows = prep.get('voice_notes') or []
         analysis = self._voice_analysis([v.get('id') for v in voice_rows])
@@ -1089,6 +1145,12 @@ class Lister:
             if fields.get('conditionDescription'):
                 parts.append('Condition: ' + fields['conditionDescription'])
             fields['descriptionText'] = '\n\n'.join(p for p in parts if p)
+        # Steps the store makes the user take before the form: suggest what the proposal or a past choice says.
+        for platform in PLATFORMS:
+            picks = learned.get(platform) or {}
+            if not fields.get('categoryPath') and picks.get('category'):
+                fields['categoryPath'] = picks['category']['chosen']
+                fields['categoryPathSource'] = 'learned'
         bol = detail.get('bol') or {}
         cost = None
         for key in ('avg_cost', 'cost', 'unit_cost'):
@@ -1121,6 +1183,7 @@ class Lister:
                       'listed': {'ebay': bool(queue_row.get('listed_ebay_at')), 'amazon': bool(queue_row.get('listed_amazon_at'))},
                       'skipped': skipped},
             'proposal': {k: proposal[k] for k in ('id', 'status', 'ready', 'updatedAt', 'flags') if k in proposal},
+            'learned': learned,
             'preparing': self._job_state(upc),
             'mobilePhotosUrl': base_url.rstrip('/') + '/items-to-list/mobile-photos?upc=' + upc + '&return=%2Fitems-to-list',
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
@@ -1225,6 +1288,51 @@ class Lister:
                 'asin': entry.get('asin') or '', 'store_upc': entry.get('upc') or '', 'title': entry.get('title') or '',
                 'note': 'already on the store; linked from the side panel'}
         return self.record_link(body, actor=actor, base_url=base_url)
+
+    # -- learning the store's intermediate steps ------------------------------------------------
+
+    def _learned(self, cur, upc):
+        """Latest choice per store and step for this catalog UPC (any unit of it), plus how often each was picked."""
+        self.init_tables(cur)
+        base = _base_upc(upc)
+        keys = tuple({base, base.lstrip('0') or base, base.zfill(12) if base.isdigit() else base})
+        cur.execute(f"SELECT platform, step, chosen, suggested, url, created_at FROM lister_choices WHERE base_upc IN ({','.join('?' for _ in keys)}) ORDER BY id DESC LIMIT 100", keys)
+        out = {}
+        for r in cur.fetchall():
+            r = _row(r)
+            steps = out.setdefault(r['platform'], {})
+            entry = steps.setdefault(r['step'], {'chosen': r['chosen'], 'suggested': r['suggested'] or '', 'createdAt': r['created_at'], 'count': 0, 'history': []})
+            entry['count'] += 1
+            if r['chosen'] not in entry['history']:
+                entry['history'].append(r['chosen'])
+        return out
+
+    def learn(self, data, *, actor=''):
+        """Record what the user picked on a store step (category, catalog match, condition) versus the suggestion."""
+        upc = self.format_upc12(_text(data.get('upc')))
+        platform = _text(data.get('platform')).lower()
+        step = _text(data.get('step'), 40).lower()
+        chosen = _text(data.get('chosen'), 500)
+        if not upc:
+            raise ListerError('upc is required')
+        if platform not in PLATFORMS:
+            raise ListerError('platform must be ebay or amazon')
+        if step not in ('category', 'match', 'condition', 'field'):
+            raise ListerError('step must be category, match, condition or field')
+        if not chosen:
+            raise ListerError('chosen is required')
+        suggested = _text(data.get('suggested'), 500)
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('''INSERT INTO lister_choices (upc, base_upc, platform, step, chosen, suggested, url, actor, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (upc, _base_upc(upc), platform, step, chosen, suggested or None, _text(data.get('url'), 500) or None, actor or None, _now()))
+            choice_id = cur.lastrowid
+            conn.commit()
+            learned = self._learned(cur, upc)
+        return {'id': choice_id, 'upc': upc, 'platform': platform, 'step': step, 'chosen': chosen, 'suggested': suggested,
+                'agreed': bool(suggested) and suggested.strip().lower() == chosen.strip().lower(), 'learned': learned}
 
     # -- voice notes ---------------------------------------------------------------------------
 
@@ -1600,6 +1708,14 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:mark-existing')
 
+    def api_lister_learn():
+        try:
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            return jsonify({'success': True, **lister.learn(data, actor=actor())}), 201
+        except Exception as e:
+            return failure(e, 'lister:learn')
+
     def api_lister_voice_analyze(media_id):
         try:
             guard_mutation()
@@ -1651,6 +1767,7 @@ def register(app, deps):
     app.add_url_rule('/api/lister/queue/<upc>/prepare', 'api_lister_queue_prepare', api_lister_queue_prepare, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/skip', 'api_lister_queue_skip', api_lister_queue_skip, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/mark-existing', 'api_lister_queue_mark_existing', api_lister_queue_mark_existing, methods=['POST'])
+    app.add_url_rule('/api/lister/learn', 'api_lister_learn', api_lister_learn, methods=['POST'])
     app.add_url_rule('/api/lister/voice/<int:media_id>/analyze', 'api_lister_voice_analyze', api_lister_voice_analyze, methods=['POST'])
     app.add_url_rule('/api/lister/photos/ai', 'api_lister_photo_ai', api_lister_photo_ai, methods=['POST'])
     app.add_url_rule('/api/lister/photos/fetch', 'api_lister_photo_fetch', api_lister_photo_fetch)

@@ -253,7 +253,7 @@
   async function ensurePageScript(tabId) {
     try {
       const pong = await chrome.tabs.sendMessage(tabId, { target: 'ss-lister-page', type: 'ping' });
-      if (pong?.ok && pong.version >= 2) return true;
+      if (pong?.ok && pong.version >= 3) return true;
     } catch { /* not injected yet */ }
     await chrome.scripting.executeScript({ target: { tabId }, files: ['matcher.js', 'content.js'] });
     return true;
@@ -294,8 +294,47 @@
     }
     renderPage(); renderDetail(); renderConfirm();
     await maybeAutoSearch();
+    await maybeAssist();
     await maybeAutoFill();
     await maybeAutoLink();
+  }
+
+  // eBay's steps before the form (category, catalog match, condition): highlight our guess, learn the click.
+  const ASSIST_KINDS = new Set(['listing-start', 'listing-category', 'listing-match', 'listing-confirm']);
+  async function maybeAssist() {
+    const item = current();
+    const page = state.page;
+    if (!item || page?.store !== 'ebay' || !ASSIST_KINDS.has(page.kind)) {
+      if (state.assist && state.tab?.id) { try { await pageMessage({ type: 'assist-stop' }); } catch { /* page gone */ } }
+      state.assist = null;
+      return;
+    }
+    const info = detail() || await loadDetail(item.upc);
+    if (!info) return;
+    const v = values(info);
+    try {
+      const learned = (info.learned || {}).ebay || {};
+      const result = await pageMessage({ type: 'assist-start', options: {
+        title: v.title || item.title, brand: v.brand || '', condition: v.condition || '',
+        categoryPath: v.categoryPath || learned.category?.chosen || '', matchTitle: learned.match?.chosen || '',
+      } });
+      state.assist = result.state; renderPage();
+    } catch (error) {
+      state.assist = null;
+    }
+  }
+
+  async function recordChoice(message) {
+    const item = current();
+    if (!item) return;
+    try {
+      const data = await api('/api/lister/learn', { method: 'POST', body: { upc: item.upc, platform: 'ebay', step: message.step, chosen: message.chosen, suggested: message.suggested || '', url: message.url || '' } });
+      const info = detail();
+      if (info) info.learned = data.learned || info.learned;
+      toast((data.agreed ? 'Same as suggested: ' : 'Learned ' + message.step + ': ') + String(message.chosen).slice(0, 60));
+    } catch (error) {
+      toast('Could not save that choice: ' + error.message, true);
+    }
   }
 
   function tabKey(suffix) {
@@ -320,7 +359,6 @@
     try {
       const result = await pageMessage({ type: 'search', options: { query: item.baseUpc || item.upc, store: state.page.store } });
       state.pendingSearch = null;
-      state.fillSessions[state.tab.id] = item.upc;
       toast(`Searched ${item.baseUpc || item.upc} on ${storeName(state.page.store)}`);
       return result;
     } catch (error) {
@@ -391,6 +429,10 @@
       state.pick = null; renderPick();
     } else if (message?.type === 'ss-lister-guide') {
       state.guide = message.state; renderGuideOnly();
+    } else if (message?.type === 'ss-lister-assist') {
+      state.assist = message.state; renderPage();
+    } else if (message?.type === 'ss-lister-choice') {
+      void recordChoice(message);
     }
   });
 
@@ -631,9 +673,14 @@
       return;
     }
     const kindText = {
-      'listing-start': 'search for the product', 'listing-form': 'listing form', 'listing-success': 'listing confirmed', 'listing-live': 'live listing',
+      'listing-start': 'search for the product', 'listing-category': 'choose a category', 'listing-match': 'find a catalog match', 'listing-confirm': 'confirm details',
+      'listing-form': 'listing form', 'listing-success': 'listing confirmed', 'listing-live': 'live listing',
       'seller-hub': 'Seller Hub', 'offer-form': 'add product / offer form', 'offer-success': 'offer saved', 'product-search': 'product search', inventory: 'inventory',
     }[page.kind] || 'page';
+    const assist = state.assist && state.assist.kind === page.kind ? state.assist : null;
+    const assistLine = assist ? (assist.suggested
+      ? `<div class="flag info"><b>Suggested:</b> ${esc(assist.suggested)}${page.kind === 'listing-confirm' ? ' (pre-selected)' : ' — your click teaches the panel'}</div>`
+      : (assist.candidates ? '<div class="flag warn">No confident suggestion here; your choice will be remembered.</div>' : '')) : '';
     const chips = [];
     if (page.listingId && page.store === 'ebay') chips.push(`Item # <code>${esc(page.listingId)}</code>`);
     if (page.asin) chips.push(`ASIN <code>${esc(page.asin)}</code>`);
@@ -644,6 +691,7 @@
         <span class="grow">${esc(kindText)}${page.fieldCount != null ? ` <span class="muted small">· ${page.fieldCount} fields</span>` : ''}</span>
         <button id="pageRefresh" class="icon" type="button" title="Re-read page">↻</button></div>
       ${chips.length ? `<div class="chips">${chips.join('')}</div>` : ''}
+      ${assistLine}
       ${page.error ? `<div class="flag warn">Page script: ${esc(page.error)}</div>` : ''}`;
     $('pageRefresh').onclick = () => refreshTab();
   }

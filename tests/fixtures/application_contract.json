@@ -5851,6 +5851,17 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/lister/learn",
+      "endpoint": "api_lister_learn",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/lister/voice/<int:media_id>/analyze",
       "endpoint": "api_lister_voice_analyze",
       "methods": [

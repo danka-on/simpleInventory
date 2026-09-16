@@ -561,6 +561,46 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn(b'Lister Ledger', page.data)
 
+    def test_learn_records_store_step_choices_and_feeds_the_next_unit(self):
+        res = self.client.post('/api/lister/learn', json={'upc': UPC + '-1', 'platform': 'ebay', 'step': 'category',
+                                                          'chosen': 'Home & Garden > Dinnerware > Plates', 'suggested': 'Home & Garden > Dinnerware',
+                                                          'url': 'https://www.ebay.com/sl/prelist/suggest'})
+        self.assertEqual(res.status_code, 201, res.get_json())
+        data = res.get_json()
+        self.assertFalse(data['agreed'])
+        self.assertEqual(data['learned']['ebay']['category']['chosen'], 'Home & Garden > Dinnerware > Plates')
+        same = self.client.post('/api/lister/learn', json={'upc': UPC, 'platform': 'ebay', 'step': 'match', 'chosen': 'Lenox plate', 'suggested': 'lenox PLATE'}).get_json()
+        self.assertTrue(same['agreed'])
+        # Another unit of the same catalog UPC gets the learned category when no proposal names one.
+        detail = self.client.get(f'/api/lister/queue/{UPC}-2', base_url='https://pi.example').get_json()['item']
+        self.assertEqual(detail['fields']['categoryPath'], 'Home & Garden > Dinnerware > Plates')
+        self.assertEqual(detail['fields']['categoryPathSource'], 'learned')
+        self.assertEqual(detail['learned']['ebay']['match']['history'], ['Lenox plate'])
+        self.assertEqual(self.client.post('/api/lister/learn', json={'upc': UPC, 'platform': 'ebay', 'step': 'other', 'chosen': 'x'}).status_code, 400)
+        self.assertEqual(self.client.post('/api/lister/learn', json={'upc': UPC, 'platform': 'ebay', 'step': 'category'}).status_code, 400)
+
+    def test_deleting_a_link_reverts_the_queue_items_to_list_and_listing_log(self):
+        res = self.client.post('/api/lister/links', json={'upc': UPC + '-1', 'platform': 'ebay', 'listing_id': '168611515264', 'sku': UPC + '-1'})
+        link = res.get_json()['link']
+        with closing(sqlite3.connect(self.root / 'bol.db')) as conn:
+            conn.execute('CREATE TABLE bol_items (id INTEGER PRIMARY KEY, upc TEXT, listed_ebay INTEGER, listed_ebay_date TEXT, listed_ebay_source TEXT)')
+            conn.execute("INSERT INTO bol_items (upc, listed_ebay, listed_ebay_date, listed_ebay_source) VALUES (?, 1, 'x', 'listing_center')", (UPC + '-1',))
+            conn.execute("INSERT INTO bol_items (upc, listed_ebay, listed_ebay_date, listed_ebay_source) VALUES (?, 1, 'x', 'user')", (UPC,))
+            conn.commit()
+        self.assertEqual(self.sql('listinglog.db', "SELECT COUNT(*) AS n FROM listing_log WHERE listing_id = '168611515264'")[0]['n'], 1)
+        res = self.client.delete(f"/api/lister/links/{link['id']}")
+        self.assertEqual(res.status_code, 200, res.get_json())
+        removed = res.get_json()['removed']
+        self.assertTrue(removed['queue_reverted'])
+        self.assertTrue(removed['items_to_list_reverted'])
+        row = self.sql('listagent.db', 'SELECT status, listed_ebay_at, listed_listing_id FROM listing_queue WHERE upc = ?', (UPC + '-1',))[0]
+        self.assertEqual(row, {'status': 'queued', 'listed_ebay_at': None, 'listed_listing_id': None})
+        self.assertEqual(self.sql('listinglog.db', "SELECT COUNT(*) AS n FROM listing_log WHERE listing_id = '168611515264'")[0]['n'], 0)
+        bol = {r['upc']: r for r in self.sql('bol.db', 'SELECT upc, listed_ebay, listed_ebay_source FROM bol_items')}
+        self.assertEqual((bol[UPC + '-1']['listed_ebay'], bol[UPC + '-1']['listed_ebay_source']), (0, None))
+        self.assertEqual(bol[UPC]['listed_ebay'], 1, 'a box the user ticked stays')
+        self.assertEqual(self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]['status'], 'queued')
+
     def test_qr_endpoint_renders_or_explains(self):
         res = self.client.get('/api/lister/qr?text=https://pi.example/items-to-list/mobile-photos?upc=1')
         self.assertIn(res.status_code, (200, 501))

@@ -222,11 +222,17 @@
     const out = { store: '', kind: '', listingId: '', asin: '', sku: '' };
     if (/(^|\.)ebay\.[a-z.]+$/.test(host)) {
       out.store = 'ebay';
-      const item = path.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})/) || (params.get('itemId') || params.get('item') || params.get('itemid') || '').match(/^(\d{9,15})$/);
+      // The prelist steps carry ANOTHER seller's item in itemId (mode=SellLikeItem): never our listing.
+      const prelist = /^\/sl\/prelist/.test(path) || params.getAll('mode').includes('SellLikeItem');
+      const paramItem = (params.get('itemId') || params.get('item') || params.get('itemid') || '').match(/^(\d{9,15})$/);
+      const item = path.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})/) || (!prelist && paramItem);
       if (item) out.listingId = item[1];
+      if (prelist && paramItem) out.matchId = paramItem[1];
       if (out.listingId && !/\/sl\//.test(path)) out.kind = 'listing-live';
-      else if (out.listingId && /^\/sl\//.test(path)) out.kind = 'listing-success';
-      else if (/^\/sl\/(prelist|sell)(\/|$)/.test(path)) out.kind = /\/sl\/prelist\/(identify|catalog)/.test(path) ? 'listing-form' : 'listing-start';
+      else if (/^\/sl\/[a-z]+\/success/.test(path) || (out.listingId && /^\/sl\//.test(path) && /success|congrat/.test(path))) out.kind = 'listing-success';
+      else if (/^\/sl\/prelist\/identify/.test(path)) out.kind = params.get('view') === 'sellnode-condition' ? 'listing-confirm' : 'listing-match';
+      else if (/^\/sl\/prelist\/catalog/.test(path)) out.kind = 'listing-match';
+      else if (/^\/sl\/(prelist|sell)(\/|$)/.test(path)) out.kind = 'listing-start';
       else if (/^\/sl\/list/.test(path) || /^\/lstng/.test(path) || host.startsWith('bulksell.')) out.kind = 'listing-form';
       else if (/^\/sh\/lst\/(active|drafts|ended)/.test(path) || /^\/sh\//.test(path)) out.kind = 'seller-hub';
       else if (/^\/sl\//.test(path)) out.kind = 'listing-form';
@@ -251,7 +257,8 @@
   }
 
   // Did the page just confirm a new listing? Pure text heuristics; the page script adds ids.
-  const EBAY_SUCCESS = /(your (item|listing) (is|was|has been) (listed|posted|published|live)|you(?:'ve| have) (successfully )?listed|is now live|congratulations|listing (is|was|has been) (created|posted|published|live)|view (your )?listing)/i;
+  // Strict on purpose: the prelist steps show other sellers' listings and "View listing" links.
+  const EBAY_SUCCESS = /(your (item|listing) (is|was|has been) (listed|live|published)|you(?:'ve| have) (successfully )?listed (your|this|an|the) (item|listing)|your listing is (now )?live|listed successfully)/i;
   const AMAZON_SUCCESS = /((listing|offer|product|your changes?) (was|has been|is being|will be|were|have been) (saved|created|submitted|processed|added|updated)|your (listing|product|offer) is (now )?(live|active|being processed)|successfully (saved|created|submitted|listed)|listing (submitted|created) successfully|(it|this) (may|can) take up to \d+ (minutes|hours) (for|before|until))/i;
 
   function successInfo(store, text) {
@@ -301,6 +308,59 @@
     return store === 'amazon' ? entry.amazon : entry.ebay;
   }
 
+  // eBay's prelist "Confirm details" step offers four radio buttons; map our condition onto them.
+  function prelistCondition(condition) {
+    const value = String(condition || '').toUpperCase();
+    if (value === 'NEW') return ['New'];
+    if (value === 'NEW_OTHER' || value === 'NEW_WITH_DEFECTS') return ['Open box', 'New (Other)', 'New'];
+    if (value === 'FOR_PARTS_OR_NOT_WORKING') return ['For parts or not working', 'For parts'];
+    if (value.startsWith('USED')) return ['Used', 'Pre-owned'];
+    return [];
+  }
+
+  const STOP_WORDS = new Set(['the', 'and', 'for', 'with', 'of', 'a', 'an', 'in', 'set', 'new', 'pc', 'pcs', 'piece', 'pieces', 'x']);
+
+  function tokens(value) {
+    return new Set(normalize(value).split(' ').filter(word => word.length > 1 && !STOP_WORDS.has(word)));
+  }
+
+  // How well a store candidate (catalog match title) fits our item: shared words over our words,
+  // with a bonus when the brand (our first word) appears and a penalty for very long candidates.
+  function candidateScore(candidate, target, brand) {
+    const ours = tokens(target);
+    const theirs = tokens(candidate);
+    if (!ours.size || !theirs.size) return 0;
+    let shared = 0;
+    for (const word of ours) if (theirs.has(word)) shared += 1;
+    let score = shared / ours.size;
+    const brandWord = normalize(brand || '').split(' ')[0] || [...ours][0];
+    if (brandWord && theirs.has(brandWord)) score += 0.25;
+    if (theirs.size > ours.size * 3) score -= 0.1;
+    return Math.max(0, Math.round(score * 1000) / 1000);
+  }
+
+  function rankCandidates(candidates, target, brand) {
+    return candidates
+      .map((candidate, index) => ({ index, candidate, score: candidateScore(candidate, target, brand) }))
+      .sort((a, b) => b.score - a.score || a.index - b.index);
+  }
+
+  // How well a category path on the page matches the one we want (segments compared from the leaf up).
+  function categoryScore(candidatePath, wantedPath) {
+    const split = value => String(value || '').split(/\s*(?:>|›|\/)\s*/).map(normalize).filter(Boolean);
+    const ours = split(wantedPath);
+    const theirs = split(candidatePath);
+    if (!ours.length || !theirs.length) return 0;
+    if (ours.join('>') === theirs.join('>')) return 1;
+    let score = 0;
+    const leaf = ours[ours.length - 1];
+    if (theirs[theirs.length - 1] === leaf) score += 0.6;
+    else if (theirs.includes(leaf)) score += 0.3;
+    const shared = theirs.filter(segment => ours.includes(segment)).length;
+    score += 0.4 * (shared / Math.max(ours.length, theirs.length));
+    return Math.round(score * 1000) / 1000;
+  }
+
   // Pick the <option> whose text best matches one of the wanted labels (exact, then contains).
   function chooseOption(options, wanted) {
     const labels = (wanted || []).map(normalize).filter(Boolean);
@@ -320,6 +380,6 @@
   return {
     TARGETS, CONDITION_LABELS, normalize, scoreTarget, assign, suggestTargets, matchAspects,
     signature, matchesSignature, detectPage, successInfo, isRequired, isEmptyValue, searchBoxScore,
-    conditionLabels, chooseOption,
+    conditionLabels, prelistCondition, tokens, candidateScore, rankCandidates, categoryScore, chooseOption,
   };
 });

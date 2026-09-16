@@ -534,16 +534,188 @@
     return true;
   }
 
+  // -- assist: the store's steps before the form (category, catalog match, condition) ------------------
+  // The user decides; the panel highlights its guess and reports what was clicked so it can learn.
+
+  let assist = null;
+
+  function categoryDialog() {
+    for (const dialog of document.querySelectorAll('[role="dialog"], dialog, [class*="dialog" i], [class*="modal" i]')) {
+      if (!isVisible(dialog)) continue;
+      const heading = dialog.querySelector('h1, h2, h3, [role="heading"]');
+      if (heading && /^\s*category\s*$/i.test(heading.textContent || '') && /suggested|all categories/i.test(dialog.innerText || '')) return dialog;
+    }
+    return null;
+  }
+
+  function pathTexts(root) {
+    // Leaf elements whose text looks like "Home & Garden > Kitchen ... > Salt & Pepper".
+    const out = [];
+    for (const el of root.querySelectorAll('a, li, button, div, span, p')) {
+      if (el.children.length > 2 || !isVisible(el)) continue;
+      const text = clip(el.textContent).slice(0, MAX_TEXT * 3);
+      if (/ > .+ > /.test(text) && text.length < 220) out.push({ el, text });
+    }
+    // Keep the innermost element for each distinct text.
+    const seen = new Map();
+    for (const entry of out) if (!seen.has(entry.text) || seen.get(entry.text).el.contains(entry.el)) seen.set(entry.text, entry);
+    return [...seen.values()];
+  }
+
+  function matchCards() {
+    const cards = [];
+    const seen = new Set();
+    for (const link of document.querySelectorAll('a[href*="/itm/"], a[href*="itemId="], [role="listitem"], li, article')) {
+      const href = link.getAttribute('href') || '';
+      const id = (href.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})/) || href.match(/itemId=(\d{9,15})/) || [])[1] || '';
+      const card = link.closest('li, article, [class*="card" i], [class*="item" i]') || link;
+      if (!isVisible(card) || seen.has(card)) continue;
+      const heading = card.querySelector('h1, h2, h3, h4, [class*="title" i], b, strong') || card;
+      const title = clip(heading.textContent).slice(0, 160);
+      if (!title || title.length < 8) continue;
+      seen.add(card);
+      cards.push({ el: card, title, itemId: id });
+    }
+    return cards;
+  }
+
+  function badge(el, label, kind) {
+    const tag = document.createElement('span');
+    tag.textContent = label;
+    tag.dataset.ssBadge = '1';
+    tag.style.cssText = 'position:absolute;z-index:2147483646;background:' + (kind === 'best' ? '#0a9c6c' : '#64748b') + ';color:#fff;font:600 11px system-ui,sans-serif;padding:2px 8px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.25);pointer-events:none';
+    document.documentElement.appendChild(tag);
+    const rect = el.getBoundingClientRect();
+    tag.style.left = (rect.left + window.scrollX) + 'px';
+    tag.style.top = Math.max(0, rect.top + window.scrollY - 10) + 'px';
+    return tag;
+  }
+
+  function highlight(el, kind) {
+    el.dataset.ssAssistPrev = el.style.outline || '';
+    el.style.outline = kind === 'best' ? '3px solid #0a9c6c' : '2px dashed #94a3b8';
+    el.style.outlineOffset = '2px';
+    assist.marks.push(el);
+  }
+
+  function clearAssistMarks() {
+    if (!assist) return;
+    for (const el of assist.marks) { try { el.style.outline = el.dataset.ssAssistPrev || ''; el.style.outlineOffset = ''; delete el.dataset.ssAssistPrev; } catch { /* ignore */ } }
+    for (const tag of assist.badges) tag.remove();
+    assist.marks = []; assist.badges = [];
+  }
+
+  function reportChoice(step, chosen, extra) {
+    chrome.runtime.sendMessage({ type: 'ss-lister-choice', step, chosen, suggested: assist?.suggested?.[step] || '', url: location.href, ...extra }).catch(() => {});
+  }
+
+  function assistRun() {
+    if (!assist) return { active: false };
+    clearAssistMarks();
+    const options = assist.options;
+    const kind = detect().kind;
+    const result = { active: true, kind, suggested: '', candidates: 0 };
+    if (kind === 'listing-category') {
+      const dialog = categoryDialog();
+      const wanted = options.categoryPath || '';
+      const paths = dialog ? pathTexts(dialog) : [];
+      result.candidates = paths.length;
+      if (paths.length && wanted) {
+        const scored = paths.map(p => ({ ...p, score: M.categoryScore(p.text, wanted) })).sort((a, b) => b.score - a.score);
+        if (scored[0].score >= 0.3) {
+          highlight(scored[0].el, 'best');
+          assist.badges.push(badge(scored[0].el, 'Sweet Shelves pick', 'best'));
+          result.suggested = scored[0].text;
+        }
+      }
+      assist.suggested.category = result.suggested;
+      if (dialog && assist.clickTarget !== dialog) {
+        assist.clickTarget = dialog;
+        dialog.addEventListener('click', event => {
+          const hit = event.target.closest ? pathTexts(dialog).find(p => p.el === event.target || p.el.contains(event.target)) : null;
+          if (hit) reportChoice('category', hit.text);
+        }, true);
+      }
+    } else if (kind === 'listing-match') {
+      const cards = matchCards();
+      result.candidates = cards.length;
+      if (cards.length && options.title) {
+        const ranked = M.rankCandidates(cards.map(c => c.title), options.title, options.brand);
+        const best = ranked[0];
+        if (best && best.score >= 0.35) {
+          highlight(cards[best.index].el, 'best');
+          assist.badges.push(badge(cards[best.index].el, `Sweet Shelves pick · ${Math.round(best.score * 100)}%`, 'best'));
+          result.suggested = cards[best.index].title;
+        }
+        for (const entry of ranked.slice(1, 3)) if (entry.score >= 0.35) highlight(cards[entry.index].el, 'alt');
+      }
+      assist.suggested.match = result.suggested;
+      if (assist.clickTarget !== document.body) {
+        assist.clickTarget = document.body;
+        document.body.addEventListener('click', event => {
+          if (!assist) return;
+          const card = matchCards().find(c => c.el === event.target || c.el.contains(event.target));
+          if (card) reportChoice('match', card.title, { itemId: card.itemId });
+          else if (event.target.closest && /continue without match/i.test(event.target.closest('button, a')?.textContent || '')) reportChoice('match', 'Continue without match');
+        }, true);
+      }
+    } else if (kind === 'listing-confirm') {
+      const labels = M.prelistCondition(options.condition);
+      const radios = Array.from(document.querySelectorAll('input[type="radio"]')).filter(isVisible);
+      result.candidates = radios.length;
+      const named = radios.map(r => ({ r, label: labelTextFor(r) || clip(r.parentElement?.textContent) }));
+      const pick = labels.map(l => named.find(n => M.normalize(n.label) === M.normalize(l) || M.normalize(n.label).startsWith(M.normalize(l)))).find(Boolean);
+      if (pick) {
+        result.suggested = pick.label;
+        const box = pick.r.closest('label') || pick.r.parentElement || pick.r;
+        highlight(box, 'best');
+        if (!pick.r.checked && options.preselectCondition !== false && !assist.conditionClicked) { assist.conditionClicked = true; pick.r.click(); }
+      }
+      assist.suggested.condition = result.suggested;
+    }
+    assist.last = result;
+    if (JSON.stringify(result) !== assist.reported) {
+      assist.reported = JSON.stringify(result);
+      chrome.runtime.sendMessage({ type: 'ss-lister-assist', state: result }).catch(() => {});
+    }
+    return result;
+  }
+
+  function assistStart(options) {
+    if (assist) { assist.options = options || {}; return assistRun(); }
+    assist = { options: options || {}, marks: [], badges: [], suggested: {}, clickTarget: null, reported: '', conditionClicked: false, started: Date.now() };
+    const rerun = () => { clearTimeout(assist?.timer); if (assist) assist.timer = setTimeout(() => { if (assist && Date.now() - assist.started < 10 * 60 * 1000) assistRun(); }, 400); };
+    assist.observer = new MutationObserver(rerun);
+    assist.observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+    window.addEventListener('scroll', rerun, { passive: true });
+    window.addEventListener('resize', rerun);
+    return assistRun();
+  }
+
+  function assistStop() {
+    if (!assist) return false;
+    clearAssistMarks();
+    assist.observer.disconnect();
+    clearTimeout(assist.timer);
+    assist = null;
+    return true;
+  }
+
   // What the page itself says about the live listing (after publishing), beyond the URL.
   function detect() {
     const page = M.detectPage(location.href);
     const text = document.body ? document.body.innerText.slice(0, 200000) : '';
     const fields = collect();
     const descriptors = fields.map(describe);
-    if (page.store === 'ebay' && !page.listingId) {
-      const match = text.match(/(?:item(?: number| id| #)?|listing)[:\s#]*?(\d{12,13})\b/i) || (document.querySelector('a[href*="/itm/"]') || {}).href?.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})/);
+    const success = M.successInfo(page.store, text).success;
+    if (page.store === 'ebay' && !page.listingId && (success || page.kind === 'listing-success')) {
+      // Only a confirmed listing may take its number from the page text or a "view listing" link;
+      // the prelist steps are full of other sellers' /itm/ links.
+      const match = text.match(/(?:item(?: number| id| #)?)[:\s#]*?(\d{12,13})\b/i) || (document.querySelector('a[href*="/itm/"]') || {}).href?.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})/);
       if (match) page.listingId = match[1];
     }
+    // eBay's category chooser is a dialog on the prelist page, not a URL of its own.
+    if (page.store === 'ebay' && page.kind !== 'listing-form' && categoryDialog()) page.kind = 'listing-category';
     if (page.store === 'amazon') {
       if (!page.asin) {
         const match = text.match(/\bASIN[:\s]*([A-Z0-9]{10})\b/) || text.match(/\b(B0[A-Z0-9]{8})\b/);
@@ -574,8 +746,9 @@
     page.hasSearchBox = Boolean(searchBox);
 
     // Success pages: eBay confirms with the item number, Seller Central with a saved-offer message.
-    const success = M.successInfo(page.store, text).success;
-    if (page.store === 'ebay' && (page.kind === 'listing-success' || (success && page.listingId && !formish))) page.kind = 'listing-success';
+    // Never on the prelist steps (search, category, match, confirm), whatever the text says.
+    const prelistStep = /^\/sl\/prelist/.test(location.pathname) || ['listing-start', 'listing-category', 'listing-match', 'listing-confirm'].includes(page.kind);
+    if (page.store === 'ebay' && !prelistStep && (page.kind === 'listing-success' || (success && page.listingId && !formish))) page.kind = 'listing-success';
     if (page.store === 'amazon' && success && !formish) page.kind = 'offer-success';
     page.successText = success;
     page.title = clip(document.title);
@@ -653,7 +826,7 @@
   }
 
   const api = { describe, collect: () => collect().map(describe), fill, detect, startPick, stopPick, setPicked, search, addPhotos,
-    guideStart, guideNext, guideGo, guideUse, guideStop, guideState, version: 2 };
+    guideStart, guideNext, guideGo, guideUse, guideStop, guideState, assistStart, assistStop, version: 3 };
   globalThis.__ssLister = api;
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -671,6 +844,8 @@
         case 'guide-use': sendResponse({ ok: true, state: guideUse() }); break;
         case 'guide-stop': sendResponse({ ok: guideStop(), state: guideState() }); break;
         case 'guide-state': sendResponse({ ok: true, state: guideState() }); break;
+        case 'assist-start': sendResponse({ ok: true, state: assistStart(message.options || {}) }); break;
+        case 'assist-stop': sendResponse({ ok: assistStop() }); break;
         case 'pick-start': sendResponse({ ok: startPick() }); break;
         case 'pick-stop': sendResponse({ ok: stopPick() }); break;
         case 'set-picked': sendResponse(setPicked(message.pickId, message.value, message.options)); break;

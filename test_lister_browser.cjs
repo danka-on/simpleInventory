@@ -41,7 +41,20 @@ const prelist = `<!doctype html><title>Sell | eBay</title>
 <input type="search" id="gh-ac" placeholder="Search for anything" aria-label="Search for anything">
 <h1>Tell us what you're selling</h1>
 <form id="prelist"><input type="text" id="what" placeholder="Enter your product's brand, model, or UPC" aria-label="Tell us what you're selling"><button type="submit">Search</button></form>
-<script>document.getElementById('prelist').addEventListener('submit', e => { e.preventDefault(); location.href = 'https://www.ebay.com/sl/list?mode=AddItem&q=' + encodeURIComponent(document.getElementById('what').value); });</script>`;
+<script>document.getElementById('prelist').addEventListener('submit', e => { e.preventDefault(); location.href = 'https://www.ebay.com/sl/prelist/identify?sr=sug&title=' + encodeURIComponent(document.getElementById('what').value); });</script>`;
+
+// eBay's "Find a match" step: other sellers' listings (their /itm/ ids), then "Confirm details" with a
+// condition radio, then the real form. The real URL carries the other seller's item as itemId.
+const matchPage = `<!doctype html><title>Find a match | eBay</title><h1>Find a match</h1><p>for "883049370897"</p>
+<p>Related listings from other sellers</p><ul>
+<li><a href="https://www.ebay.com/sl/prelist/identify?sr=sug&title=883049370897&mode=SellLikeItem&itemId=168611515264&view=sellnode-condition"><h3>Salt and Pepper Shakers Table Decoration Meal Condiment Container</h3></a></li>
+<li><a href="https://www.ebay.com/sl/prelist/identify?sr=sug&title=883049370897&mode=SellLikeItem&itemId=335566001122&view=sellnode-condition"><h3>Lenox Butterfly Meadow Dinner Plate 10.75 in Porcelain</h3></a></li>
+</ul><button>Continue without match</button>`;
+const confirmPage = `<!doctype html><title>Confirm details | eBay</title><h2>Confirm details</h2>
+<p>You have selected another seller's listing to help draft your item.</p>
+<label><input type="radio" name="cond" value="new"> New</label><label><input type="radio" name="cond" value="open"> Open box</label>
+<label><input type="radio" name="cond" value="used"> Used</label><label><input type="radio" name="cond" value="parts"> For parts or not working</label>
+<a href="https://www.ebay.com/sl/list?mode=AddItem&draftId=77">Continue to listing</a>`;
 
 const ebayForm = `<!doctype html><title>Create your listing | eBay</title>
 <h1>Create your listing</h1>
@@ -73,7 +86,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     channel: 'msedge', headless: false,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { events: [], links: [], skip: [], prepare: [], detail: 0 };
+  const calls = { events: [], links: [], skip: [], prepare: [], learn: [], detail: 0 };
   let linked = false;
   try {
     // Fake Sweet Shelves server: the extension must send the anti-CSRF header and cookies.
@@ -94,6 +107,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       assert.equal(request.headers()['x-sweet-shelves-lister'], '1', 'mutations carry the extension header: ' + url.pathname);
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
       if (url.pathname.endsWith('/skip')) { calls.skip.push(request.postDataJSON()); return json({ success: true, queue: 'queued' }); }
+      if (url.pathname === '/api/lister/learn') { calls.learn.push(request.postDataJSON()); return json({ success: true, agreed: false, learned: { ebay: {} } }, 201); }
       if (url.pathname === '/api/lister/events') { calls.events.push(request.postDataJSON()); return json({ success: true }); }
       if (url.pathname === '/api/lister/links') {
         calls.links.push(request.postDataJSON());
@@ -105,6 +119,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await context.route('https://www.ebay.com/**', route => {
       const url = new URL(route.request().url());
       const html = body => route.fulfill({ status: 200, contentType: 'text/html', body });
+      if (url.pathname.startsWith('/sl/prelist/identify')) return html(url.searchParams.get('view') === 'sellnode-condition' ? confirmPage : matchPage);
       if (url.pathname.startsWith('/sl/prelist')) return html(prelist);
       if (url.pathname.startsWith('/sl/list/success')) return html(successPage);
       if (url.pathname.startsWith('/sl/list')) return html(ebayForm);
@@ -152,8 +167,31 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     const store = await context.newPage();
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
     await store.bringToFront();
-    await store.waitForURL(/\/sl\/list\?mode=AddItem&q=883049370897/, { timeout: 20000 });
+    await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=883049370897/, { timeout: 20000 });
     assert.ok(!store.url().includes('%2D1'), 'the store search uses the catalog UPC without the -suffix');
+
+    // "Find a match": the panel highlights the listing that looks like ours; the user's click is learned,
+    // and the other seller's item id in the next URL must never be recorded as our listing.
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('find a catalog match'), null, { timeout: 15000 });
+    await store.waitForFunction(() => Array.from(document.querySelectorAll('li')).some(li => li.style.outline.includes('rgb(10, 156, 108)')), null, { timeout: 15000 });
+    const picked = await store.evaluate(() => Array.from(document.querySelectorAll('li')).find(li => li.style.outline.includes('rgb(10, 156, 108)')).textContent.trim());
+    assert.ok(picked.startsWith('Lenox Butterfly Meadow'), 'the Lenox listing is the suggested match, got: ' + picked);
+    assert.ok((await panel.textContent('#pageCard')).includes('Suggested:'));
+    await store.click('li:nth-child(1) a');  // the user disagrees and picks the other listing
+    await store.waitForURL(/view=sellnode-condition/, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('Learned match'), null, { timeout: 15000 });
+    assert.equal(calls.learn.length, 1);
+    assert.equal(calls.learn[0].step, 'match');
+    assert.ok(calls.learn[0].chosen.startsWith('Salt and Pepper Shakers'));
+    assert.ok(calls.learn[0].suggested.startsWith('Lenox Butterfly Meadow'));
+    assert.equal(calls.learn[0].upc, UPC + '-1');
+
+    // "Confirm details": our condition (USED_GOOD) is pre-selected; still nothing is recorded as listed.
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('confirm details'), null, { timeout: 15000 });
+    await store.waitForFunction(() => document.querySelector('input[value="used"]').checked, null, { timeout: 15000 });
+    assert.equal(calls.links.length, 0, 'the SellLikeItem item id is another seller\'s listing, not ours');
+    assert.ok(!(await panel.textContent('#pageCard')).includes('listing confirmed'));
+    await store.click('a[href*="/sl/list?mode=AddItem"]');
 
     // The listing form is filled from the prepared values, then the guide points at what is left.
     await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 20000 });

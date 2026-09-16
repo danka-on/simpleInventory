@@ -77,7 +77,7 @@ assert.deepEqual(M.suggestTargets(field({ type: 'checkbox', labelText: 'Price' }
 // --- page detection --------------------------------------------------------------------------
 assert.deepEqual(M.detectPage('https://www.ebay.com/sl/prelist/suggest?sr=wn'), { store: 'ebay', kind: 'listing-start', listingId: '', asin: '', sku: '' });
 assert.equal(M.detectPage('https://www.ebay.com/sl/sell').kind, 'listing-start');
-assert.equal(M.detectPage('https://www.ebay.com/sl/prelist/identify?upc=883049370897').kind, 'listing-form', 'the catalog match step belongs to the form');
+assert.equal(M.detectPage('https://www.ebay.com/sl/prelist/identify?upc=883049370897').kind, 'listing-match', 'the catalog match step is its own kind');
 assert.equal(M.detectPage('https://www.ebay.com/sl/list?mode=AddItem&draftId=5').kind, 'listing-form');
 assert.equal(M.detectPage('https://bulksell.ebay.com/ws/eBayISAPI.dll?SingleList').kind, 'listing-form');
 const success = M.detectPage('https://www.ebay.com/sl/list/success?itemId=335566778899&mode=AddItem');
@@ -97,6 +97,29 @@ assert.equal(M.detectPage('https://sellercentral.amazon.com/product-search/searc
 assert.equal(M.detectPage('https://sellercentral.amazon.com/inventory').kind, 'inventory');
 assert.equal(M.detectPage('https://www.amazon.com/dp/B0TESTASIN').store, '', 'the retail site is not a listing page');
 assert.equal(M.detectPage('not a url').store, '');
+
+// eBay's prelist steps: the other seller's item id in the URL is never our listing (real URL from 2026-09-16).
+const sellLike = M.detectPage('https://www.ebay.com/sl/prelist/identify?sr=sug&title=761323062839&isUid=false&sssr=shListingsCTA&caty=177008&mode=SellLikeItem&itemId=168611515264&view=sellnode-condition');
+assert.equal(sellLike.kind, 'listing-confirm');
+assert.equal(sellLike.listingId, '', 'another seller\'s item is not our item number');
+assert.equal(sellLike.matchId, '168611515264');
+assert.equal(M.detectPage('https://www.ebay.com/sl/prelist/identify?sr=sug&title=761323062839').kind, 'listing-match');
+assert.equal(M.detectPage('https://www.ebay.com/sl/list?mode=AddItem&itemId=168611515264&mode=SellLikeItem').listingId, '', 'SellLikeItem never yields our id');
+assert.equal(M.detectPage('https://www.ebay.com/sl/list?mode=AddItem&draftId=5').listingId, '');
+assert.deepEqual(M.prelistCondition('USED_GOOD')[0], 'Used');
+assert.deepEqual(M.prelistCondition('NEW_OTHER')[0], 'Open box');
+assert.deepEqual(M.prelistCondition('NEW'), ['New']);
+assert.equal(M.prelistCondition('FOR_PARTS_OR_NOT_WORKING')[0], 'For parts or not working');
+const ranked = M.rankCandidates([
+  'Salt and Pepper Shakers Table Decoration Meal Condiment Container Hug Design',
+  'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set',
+  'Washer & Dryer Parts',
+], 'Nambe Hug Salt and Pepper Shaker Set', 'Nambe');
+assert.equal(ranked[0].index, 1, 'the Nambe catalog listing wins');
+assert.ok(ranked[0].score > ranked[1].score && ranked[2].score === 0);
+assert.equal(M.categoryScore('Home & Garden > Kitchen, Dining & Bar > Kitchen Tools & Gadgets > Salt & Pepper', 'Home & Garden > Kitchen, Dining & Bar > Kitchen Tools & Gadgets > Salt & Pepper'), 1);
+assert.ok(M.categoryScore('Collectibles > Kitchen & Home > Kitchen Tools & Gadgets > Salt & Pepper Shakers', 'Home & Garden > Kitchen, Dining & Bar > Kitchen Tools & Gadgets > Salt & Pepper') < 0.5);
+assert.ok(M.categoryScore('Home & Garden > Major Appliances > Washer & Dryer Parts', 'Home & Garden > Kitchen, Dining & Bar > Salt & Pepper') < 0.3);
 
 // --- success wording, required fields, the product search box ---------------------------------
 assert.ok(M.successInfo('ebay', 'Congratulations! Your item is listed. View listing').success);
@@ -153,7 +176,7 @@ for (const id of ['connStatus', 'pageCard', 'itemList', 'detail', 'confirm', 'pi
   assert.ok(panel.includes(`id="${id}"`), 'side panel has #' + id);
 }
 const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
-for (const message of ['search', 'add-photos', 'guide-start', 'guide-next', 'guide-go', 'guide-use', 'guide-stop', 'detect', 'fill']) {
+for (const message of ['search', 'add-photos', 'guide-start', 'guide-next', 'guide-go', 'guide-use', 'guide-stop', 'assist-start', 'assist-stop', 'detect', 'fill']) {
   assert.ok(content.includes(`case '${message}'`), 'page script answers ' + message);
 }
 console.log('lister extension checks passed');
