@@ -30,6 +30,7 @@ const detail = {
     images: [], lots: ['L-1'], racks: ['A-3'], listableQuantity: 1, source: 'proposal', conditionDescriptionSource: 'notes',
   },
   prepStatus: { status: 'bad', reason: 'chip', updatedAt: '2026-09-15', quantity: 1 },
+  gate: { prepQty: 1, rackQty: 1, liveEbay: 0, liveAmazon: 0, listable: 1, mismatch: false },
   condition: { condition: 'USED_GOOD', conditionDescription: 'Small chip on the rim', reason: 'prep notes mention a flaw', assumed: false },
   notes: [{ id: 5, text: 'LT: nuotrauka | EN: Small chip on the rim', english: 'Small chip on the rim', createdAt: '2026-09-15T10:00:00' }],
   defect: '', voiceNotes: [], videos: [], photos: [], inventory: { quantity: 1, positions: ['B-1'], rows: [] }, cost: 4.5, bol: {},
@@ -158,13 +159,19 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
 
     // Item view: unit, prep status, stock, store status, the condition note flagged as coming from prep, the QR code.
     await panel.click('#viewItem');
-    await panel.waitForSelector('#prepareBtn');
+    await panel.waitForSelector('.tiles');
     const detailText = await panel.textContent('#detail');
-    for (const expected of ['unit 1', 'status: BAD', 'stock: 1', 'B-1', 'eBay: not listed', 'Amazon: not listed', 'Small chip on the rim', 'from the prep notes']) {
+    for (const expected of ['unit 1', 'status: BAD', '1 to list', 'rack 1 @ B-1', 'Small chip on the rim', 'from the prep notes']) {
       assert.ok(detailText.includes(expected), 'item view shows "' + expected + '"');
     }
-    assert.ok(!detailText.includes('Prepped:'), 'no "Prepped: ..." sentence');
-    assert.ok(await panel.$('.qr img'), 'the phone QR code is shown with the photos');
+    for (const gone of ['Prepped:', 'basic values', 'Prepare', 'Location matches']) assert.ok(!detailText.includes(gone), 'item view no longer shows "' + gone + '"');
+    const tiles = await panel.$$eval('.tiles .tile', els => els.map(t => ({ k: t.querySelector('.k').textContent, v: t.querySelector('.v').textContent, cls: t.className })));
+    assert.deepEqual(tiles.map(t => t.k), ['Stock', 'eBay', 'Amazon']);
+    assert.ok(tiles[0].cls.includes('ok') && tiles[1].v === 'NOT LISTED' && tiles[1].cls.includes('todo') && tiles[2].v === 'NOT LISTED', JSON.stringify(tiles));
+    assert.ok(!(await panel.$('.qr img')), 'the QR code starts minimized');
+    await panel.click('#addPhoto');
+    await panel.waitForSelector('.qr img');
+    await panel.click('#addPhoto');
 
     // On eBay's prelist page the panel types the UPC and submits the search by itself.
     // (Opened from Playwright rather than the Start button: a tab the extension opens starts

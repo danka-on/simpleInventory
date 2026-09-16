@@ -31,7 +31,7 @@
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
-    voiceBusy: new Set(), qrOpen: true, toastAction: null,
+    voiceBusy: new Set(), qrOpen: false, toastAction: null,
   };
 
   const $ = id => document.getElementById(id);
@@ -836,28 +836,36 @@
     }
     const v = values(info);
     const store = state.page?.store || '';
-    const preparing = info.preparing?.running;
     const notes = info.notes || [];
     const voice = info.voiceNotes || [];
     const photos = info.photos || [];
-    const listingPhotos = photos.filter(p => p.source === 'listing' || p.source === 'ai');
-    const prepPhotos = photos.filter(p => p.source === 'prep');
-    const catalogPhotos = photos.filter(p => p.source === 'catalog');
+    const groups = [
+      ['Listing', photos.filter(p => p.source === 'listing' || p.source === 'ai')],
+      ['Condition (prep)', photos.filter(p => p.source === 'prep')],
+      ['Catalog', photos.filter(p => p.source === 'catalog')],
+    ].filter(([, list]) => list.length);
     const existing = (info.existing || {})[state.platform] || [];
     const linkedHere = (info.links || []).find(l => l.platform === state.platform);
     const aspects = Object.entries(info.fields.aspects || {});
     const prep = info.prepStatus || {};
     const stock = info.inventory || {};
-    const storeChip = platform => {
+    const gate = info.gate || {};
+    const storeTile = platform => {
       const linked = (info.links || []).some(l => l.platform === platform) || info.queue?.listed?.[platform];
       const onStore = ((info.existing || {})[platform] || []).length > 0;
-      if (linked) return `<span class="chip ok">${storeName(platform)}: listed ✓</span>`;
-      if (onStore) return `<span class="chip warn" title="The store already carries this UPC">${storeName(platform)}: on store</span>`;
-      if (info.queue?.skipped?.includes(platform)) return `<span class="chip">${storeName(platform)}: skipped</span>`;
-      return `<span class="chip info">${storeName(platform)}: not listed</span>`;
+      const skipped = info.queue?.skipped?.includes(platform);
+      const [cls, text, sub] = linked ? ['ok', 'LISTED', 'recorded by the panel'] : onStore ? ['warn', 'ON STORE', 'already carries this UPC'] : skipped ? ['off', 'SKIPPED', 'left off this list'] : ['todo', 'NOT LISTED', 'to do'];
+      return `<div class="tile ${cls}"><div class="k">${storeName(platform)}</div><div class="v">${text}</div><div class="s">${esc(sub)}</div></div>`;
     };
+    const stockLine = [
+      gate.prepQty != null ? `prep <b>${esc(gate.prepQty)}</b>` : '',
+      `rack <b>${esc(gate.rackQty ?? stock.quantity ?? 0)}</b>${stock.positions?.length ? ' @ ' + esc(stock.positions.join(', ')) : ''}`,
+      `live eBay <b>${esc(gate.liveEbay ?? 0)}</b>`,
+      `Amazon <b>${esc(gate.liveAmazon ?? 0)}</b>`,
+    ].filter(Boolean).join(' · ');
+    const listable = gate.listable ?? (stock.quantity || 0);
     const tile = p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
-        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}><span class="src">${esc(p.source === 'prep' ? 'condition' : p.source)}</span></div>`;
+        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}></div>`;
     const copyAll = [
       `Title: ${v.title}`, `Price: ${money(v.price)} ${v.currency || ''}`.trim(), `Quantity: ${v.quantity ?? ''}`, `SKU: ${v.sku}`, `UPC: ${v.upc}`,
       `Condition: ${v.condition}${v.conditionDescription ? ' - ' + v.conditionDescription : ''}`, v.brand ? `Brand: ${v.brand}` : '',
@@ -866,25 +874,21 @@
       '', v.descriptionText || '',
     ].filter((line, i, arr) => line !== '' || (arr[i + 1] || '') !== '').join('\n');
     el.innerHTML = `
-      <div class="head">${(listingPhotos[0] || prepPhotos[0] || photos[0] || {}).url || item.thumb ? `<img src="${esc((listingPhotos[0] || prepPhotos[0] || photos[0] || {}).url || item.thumb)}" alt="">` : '<div class="noimg"></div>'}
+      <div class="head">${(photos[0] || {}).url || item.thumb ? `<img src="${esc((photos[0] || {}).url || item.thumb)}" alt="">` : '<div class="noimg"></div>'}
         <div><div class="name">${esc(v.title || item.title || item.upc)}</div>
           <div class="muted small">${esc(info.upc)}${info.suffixed ? ` · <b>unit ${esc(info.upc.split('-')[1])}</b>` : ''}${info.cost != null ? ' · cost $' + money(info.cost) : ''}${v.price != null ? ' · price $' + esc(money(v.price)) : ''} · qty ${esc(v.quantity ?? '?')}</div>
-          <div class="chips">
-            ${prep.status ? `<span class="chip ${prep.status === 'good' ? 'ok' : (prep.status === 'bad' ? 'bad' : 'warn')}" title="${esc(prep.reason || '')}">status: ${esc(prep.status.toUpperCase())}</span>` : ''}
-            <span class="chip ${stock.quantity ? 'ok' : 'warn'}" title="Warehouse rows with stock">stock: ${esc(stock.quantity ?? 0)}${stock.positions?.length ? ' · ' + esc(stock.positions.join(', ')) : ''}</span>
-            ${storeChip('ebay')}${storeChip('amazon')}
-          </div>
-          <div class="chips">${preparing ? '<span class="chip"><span class="spin"></span> preparing title, price, specifics…</span>' : (info.proposal?.ready ? '<span class="chip ok">prepared</span>' : `<span class="chip warn">basic values only</span>`)}
-            <button id="prepareBtn" class="mini" type="button" ${preparing ? 'disabled' : ''} title="Rebuild title, price, category, specifics and description">${info.proposal?.ready ? 'Re-prepare' : 'Prepare'}</button>
-            ${info.preparing?.error ? `<span class="chip bad" title="${esc(info.preparing.error)}">prepare failed</span>` : ''}</div>
+          ${prep.status ? `<div class="chips"><span class="chip ${prep.status === 'good' ? 'ok' : (prep.status === 'bad' ? 'bad' : 'warn')}" title="${esc(prep.reason || '')}">status: ${esc(prep.status.toUpperCase())}</span>${prep.reason ? `<span class="muted small">${esc(prep.reason)}</span>` : ''}</div>` : ''}
         </div></div>
-      ${(info.proposal?.flags || []).filter(f => (f.level === 'block' || f.level === 'warn') && !/^Prepped:/i.test(f.message || '')).slice(0, 3).map(f => `<div class="flag ${esc(f.level)}">${esc(f.message)}</div>`).join('')}
+      <div class="tiles">
+        <div class="tile ${listable ? 'ok' : 'bad'}"><div class="k">Stock</div><div class="v">${esc(listable)} to list</div><div class="s">${stockLine}${gate.mismatch ? ' · <span class="warn">prep and rack differ</span>' : ''}</div></div>
+        ${storeTile('ebay')}${storeTile('amazon')}
+      </div>
       ${existing.length && !linkedHere ? `<div class="flag warn">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}.
         <button id="markExisting" class="mini" type="button">Use that listing</button> ${item.storeUrl ? `<a href="${esc(item.storeUrl)}" target="_blank" rel="noopener">open</a>` : ''}</div>` : ''}
 
-      <h3>Photos <span class="muted">(${listingPhotos.length})</span><span class="grow"></span><button id="addPhoto" class="mini" type="button">${state.qrOpen ? 'Hide QR' : '+ Photo'}</button><button id="photoSelectAll" class="mini" type="button">${state.selectedPhotos.size ? 'Clear' : 'Select all'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
+      <h3>Photos <span class="muted">(${photos.length})</span><span class="grow"></span><button id="addPhoto" class="mini" type="button">${state.qrOpen ? 'Hide QR' : '+ Photo (QR)'}</button><button id="photoSelectAll" class="mini" type="button">${state.selectedPhotos.size ? 'Clear' : 'Select ours'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
       ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to add photos of this unit, then press ↻.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
-      ${listingPhotos.length ? `<div class="photos">${listingPhotos.map(tile).join('')}</div>` : '<div class="muted small">No listing photos yet. Scan the QR code to add some from the phone, or use the condition photos below.</div>'}
+      ${groups.length ? groups.map(([label, list]) => `<div class="pgroup"><div class="plabel">${esc(label)} <span class="muted">(${list.length})</span></div><div class="photos">${list.map(tile).join('')}</div></div>`).join('') : '<div class="muted small">No photos yet. Use + Photo (QR) to add some from the phone.</div>'}
       <div class="row tight">
         <button id="sendPhotos" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? 'Sending…' : 'Send to page'}</button>
         <button id="aiPhotos" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? esc(state.aiBusy) : 'AI photoshop'}</button>
@@ -892,21 +896,18 @@
       </div>
       <details ${state.aiPrompt ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(state.aiPrompt || info.aiPhotoPrompt || '')}</textarea><button id="aiPromptReset" class="mini" type="button">Reset to default</button></details>
 
-      <h3>From prep: condition photos &amp; notes <span class="grow"></span>${prepPhotos.length || notes.length || voice.length || info.defect ? '' : '<span class="muted">none</span>'}</h3>
-      ${prepPhotos.length ? `<div class="photos">${prepPhotos.map(tile).join('')}</div>` : ''}
+      <h3>Notes <span class="grow"></span>${notes.length || voice.length || info.defect || v.conditionDescription ? '' : '<span class="muted">none</span>'}</h3>
+      ${v.conditionDescription ? `<div class="note" style="border-left:4px solid var(--blue)"><b>Condition note on the listing${v.conditionDescriptionSource === 'notes' ? ' (from the prep notes — read it once)' : ''}:</b> ${esc(v.conditionDescription)}</div>` : ''}
       ${voice.map(n => `<div class="note"><b>Voice note</b> ${n.status === 'complete' ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span> transcribing…' : `<button class="mini" data-transcribe="${n.id}" type="button">Transcribe</button>`)}
         ${n.english ? `<div>${esc(n.english)}</div>` : ''}${n.lithuanian ? `<div class="lt">${esc(n.lithuanian)}</div>` : ''}${n.error && !n.english ? `<div class="flag warn">${esc(n.error)}</div>` : ''}
         <audio controls preload="none" src="${esc(n.url)}"></audio>${n.english ? `<div class="row tight"><button class="mini" data-usenote="${n.id}" type="button">Use as condition note</button><button class="mini" data-transcribe="${n.id}" data-again="1" type="button">Redo</button></div>` : ''}</div>`).join('')}
       ${info.defect ? `<div class="note"><b>BOL reason:</b> ${esc(info.defect)}</div>` : ''}
       ${notes.map(n => `<div class="note">${esc(n.english || n.text)}${n.english && n.english !== n.text ? `<div class="lt">${esc(n.text)}</div>` : ''}<div class="when">${esc((n.createdAt || '').slice(0, 16).replace('T', ' '))}</div></div>`).join('')}
-      ${v.conditionDescription ? `<div class="note" style="border-left:4px solid var(--blue)"><b>Condition note on the listing${v.conditionDescriptionSource === 'notes' ? ' (from the prep notes — read it once)' : ''}:</b> ${esc(v.conditionDescription)}</div>` : ''}
 
-      ${catalogPhotos.length ? `<details><summary>Catalog images (${catalogPhotos.length})</summary><div class="photos">${catalogPhotos.map(tile).join('')}</div></details>` : ''}
       ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
       <div class="row"><button id="copyAllBtn" class="mini" type="button">Copy all values</button><button id="openAgent" class="link" type="button">Open in Listing Agent</button><button id="openItems" class="link" type="button">Items to List</button></div>
       <details><summary>Text for manual paste</summary><pre class="copyall">${esc(copyAll)}</pre></details>`;
 
-    $('prepareBtn').onclick = () => { state.prepareAsked.delete(info.upc); void maybePrepare(info, { force: true }); };
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
     for (const button of el.querySelectorAll('button[data-usenote]')) button.onclick = async () => {

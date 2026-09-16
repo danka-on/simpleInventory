@@ -456,6 +456,7 @@ class ListerTestCase(unittest.TestCase):
         self.assertIn('scratched on the back', fields['conditionDescription'])
         self.assertEqual(fields['conditionDescriptionSource'], 'notes')
         self.assertEqual((item['prepStatus']['status'], item['prepStatus']['reason']), ('bad', 'chip'))
+        self.assertEqual(item['gate'], {'prepQty': 1, 'rackQty': 3, 'liveEbay': 1, 'liveAmazon': 0, 'listable': 1, 'mismatch': True})
         self.assertEqual(fields['images'][0], 'https://pi.example/static/listingagent_uploads/own.jpg')
         self.assertEqual([p['source'] for p in item['photos']], ['listing', 'prep', 'catalog'])
         self.assertEqual([v['status'] for v in item['voiceNotes']], ['complete', 'pending'])

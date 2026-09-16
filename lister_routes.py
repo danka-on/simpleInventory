@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.6'
+VERSION = '0.2.9'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -1156,6 +1156,35 @@ class Lister:
             fields['conditionDescription'] = condition['conditionDescription']
             fields['conditionDescriptionSource'] = 'notes'  # the panel flags it: read once before listing
         prep_status = self._prep_status(upc)
+        # One-line stock picture for the panel: what prep counted, what the rack holds, what is live.
+        def live_units(entries):
+            units = 0
+            for e in entries or []:
+                state = _text(e.get('state') or e.get('status')).lower()
+                if state and state not in ('active', 'live', ''):
+                    continue
+                try:
+                    units += max(int(e.get('quantity') or 0), 1)
+                except (TypeError, ValueError):
+                    units += 1
+            return units
+        ebay_live = (detail.get('ebay_store') or {}).get('listings') or []
+        amazon_live = (detail.get('amazon_store') or {}).get('listings') or []
+        prep_qty = prep_status.get('quantity')
+        try:
+            prep_qty = int(prep_qty) if prep_qty not in (None, '') else None
+        except (TypeError, ValueError):
+            prep_qty = None
+        if is_suffixed(upc):
+            listable = 1 if total_qty or prep_qty else 0
+        elif eligibility.get('listable_quantity') not in (None, ''):
+            listable = int(eligibility.get('listable_quantity') or 0)
+        elif prep_qty and total_qty:
+            listable = min(prep_qty, total_qty)
+        else:
+            listable = total_qty or prep_qty or 0
+        gate = {'prepQty': prep_qty, 'rackQty': total_qty, 'liveEbay': live_units(ebay_live), 'liveAmazon': live_units(amazon_live),
+                'listable': listable, 'mismatch': bool(prep_qty and total_qty and prep_qty != total_qty)}
         if not fields.get('images'):
             fields['images'] = [p['url'] for p in photos if p['source'] != 'catalog'][:12] or [p['url'] for p in photos][:12]
         if not fields.get('descriptionText'):
@@ -1203,6 +1232,7 @@ class Lister:
             'proposal': {k: proposal[k] for k in ('id', 'status', 'ready', 'updatedAt', 'flags') if k in proposal},
             'learned': learned,
             'prepStatus': prep_status,
+            'gate': gate,
             'preparing': self._job_state(upc),
             'mobilePhotosUrl': base_url.rstrip('/') + '/items-to-list/mobile-photos?upc=' + upc + '&return=%2Fitems-to-list',
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
