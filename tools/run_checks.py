@@ -41,6 +41,9 @@ def main():
         if (ROOT / 'tests' / 'fixtures').is_dir():
             shutil.copytree(ROOT / 'tests' / 'fixtures', destination / 'tests' / 'fixtures')
         shutil.copytree(ROOT / 'templates', destination / 'templates')
+        if (ROOT / 'lister-extension').is_dir():
+            shutil.copytree(ROOT / 'lister-extension', destination / 'lister-extension',
+                            ignore=shutil.ignore_patterns('__pycache__'))
         (destination / 'static').mkdir()
         for source in (ROOT / 'static').iterdir():
             if source.suffix in {'.js', '.css'}:
