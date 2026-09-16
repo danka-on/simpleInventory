@@ -5792,6 +5792,249 @@
       "defaults": null,
       "strict_slashes": true,
       "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/queue",
+      "endpoint": "api_lister_queue",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/queue/<upc>",
+      "endpoint": "api_lister_queue_detail",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/queue/<upc>/prepare",
+      "endpoint": "api_lister_queue_prepare",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/queue/<upc>/skip",
+      "endpoint": "api_lister_queue_skip",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/queue/<upc>/mark-existing",
+      "endpoint": "api_lister_queue_mark_existing",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/voice/<int:media_id>/analyze",
+      "endpoint": "api_lister_voice_analyze",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/photos/ai",
+      "endpoint": "api_lister_photo_ai",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/photos/fetch",
+      "endpoint": "api_lister_photo_fetch",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/qr",
+      "endpoint": "api_lister_qr",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/ledger",
+      "endpoint": "api_lister_ledger",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/lister-ledger",
+      "endpoint": "lister_ledger_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/lister/",
+      "endpoint": "lister_feed_index",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/lister/<path:filename>",
+      "endpoint": "lister_feed_file",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/ping",
+      "endpoint": "api_lister_ping",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/items",
+      "endpoint": "api_lister_items",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/select",
+      "endpoint": "api_lister_select",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/links",
+      "endpoint": "api_lister_links_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/links",
+      "endpoint": "api_lister_links_post",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/links/<int:link_id>",
+      "endpoint": "api_lister_link_delete",
+      "methods": [
+        "DELETE",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/resolve",
+      "endpoint": "api_lister_resolve",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/events",
+      "endpoint": "api_lister_events",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
     }
   ],
   "hooks": {

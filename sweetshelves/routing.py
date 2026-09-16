@@ -32,6 +32,7 @@ from . import inventory_archives as ss_inventory_archives
 from . import inventory_cleanup as ss_inventory_cleanup
 from . import inventory_history_views as ss_inventory_history_views
 from . import listing_alerts as ss_listing_alerts
+from . import listing_checks as ss_listing_checks
 from . import listing_lifecycle as ss_listing_lifecycle
 from . import listing_log as ss_listing_log
 from . import listing_queue as ss_listing_queue
@@ -595,3 +596,28 @@ def register_routes():
 
     from voice_note_routes import register as register_voice_notes
     register_voice_notes(ss_runtime.app, BASE_DIR)
+
+    # Sweet Shelves Lister: the Chrome side panel that lists the Listing Agent queue on eBay /
+    # Seller Central pages and links the live listing back to the warehouse.
+    from lister_routes import register as register_lister
+    try:  # the proposal builder (Listing Agent phase 1) is optional: without it the panel fills basic values
+        from .listing_proposals import _agent_build_proposal as _lister_build_proposal
+    except Exception:
+        _lister_build_proposal = None
+    register_lister(ss_runtime.app, {
+        'db_connection': ss_database.db_connection,
+        '_safe_error': ss_errors._safe_error,
+        '_listagent_mark_listed': ss_listing_queue._listagent_mark_listed,
+        '_listagent_upc_variants': ss_listing_queue._listagent_upc_variants,
+        '_listagent_format_upc12': ss_listing_queue._listagent_format_upc12,
+        '_listagent_init_tables': ss_listing_checks._listagent_init_tables,
+        '_listing_helper_scan_cache_clear': ss_caching._listing_helper_scan_cache_clear,
+        # Queue-driven panel (0.2): item detail, proposal build, per-store skip, Items-to-List flag, AI photos.
+        'api_listingagent_upc_detail': ss_listing_queue.api_listingagent_upc_detail,
+        '_agent_build_proposal': _lister_build_proposal,
+        '_listagent_remove_from_queue': ss_listing_queue._listagent_remove_from_queue,
+        '_listing_center_mark_bol_listed': ss_listing_lifecycle._listing_center_mark_bol_listed,
+        '_listagent_add_photo': ss_listing_queue._listagent_add_photo,
+        'update_data_version': ss_caching.update_data_version,
+        'BASE_DIR': BASE_DIR,
+    })

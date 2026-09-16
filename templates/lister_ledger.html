@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lister Ledger</title>
+  <style>
+    :root{--primary:#0a9c6c;--bg:#f7f7f8;--card:#fff;--border:#e0e0e0;--ink:#0f172a;--muted:#64748b;--amber:#b7791f;--amber-bg:#fff6e0;--radius:10px;}
+    *{box-sizing:border-box;}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);margin:0;padding:16px;color:var(--ink);}
+    .top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin-bottom:14px;}
+    .back-btn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--muted);font-size:0.9rem;font-weight:600;padding:6px 10px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);justify-self:start;}
+    h1{margin:0;font-size:1.3rem;text-align:center;}
+    .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;}
+    .filters input,.filters select{padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:0.88rem;font-family:inherit;background:var(--card);color:var(--ink);}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 13px;border:none;border-radius:var(--radius);font-size:0.88rem;font-weight:600;font-family:inherit;cursor:pointer;background:var(--primary);color:#fff;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;}
+    .row{display:grid;grid-template-columns:110px 1fr auto;gap:12px;align-items:start;}
+    .badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;color:#fff;}
+    .badge.ebay{background:#e53238;} .badge.amazon{background:#ff9900;color:#111;}
+    .muted{color:var(--muted);font-size:0.85rem;}
+    code{background:#f1f5f9;padding:1px 6px;border-radius:5px;font-size:0.85rem;}
+    .suffix{background:var(--amber-bg);color:var(--amber);padding:1px 6px;border-radius:5px;font-weight:700;}
+    table{width:100%;border-collapse:collapse;margin-top:8px;font-size:0.85rem;}
+    th,td{text-align:left;padding:4px 6px;border-top:1px dashed var(--border);}
+    th{color:var(--muted);font-weight:600;}
+    .traced{color:var(--primary);font-weight:700;}
+    .empty{text-align:center;color:var(--muted);padding:30px;}
+    @media (max-width:640px){.row{grid-template-columns:1fr;}}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a class="back-btn" href="/tools">&larr; Tools</a>
+    <h1>Lister Ledger</h1>
+    <span></span>
+  </div>
+  <p class="muted">Every listing linked through the Sweet Shelves Lister side panel, with the store identifiers it maps to our UPC
+    (suffix included) and the sales that came back through Ready to Ship for that exact unit.</p>
+  <div class="filters">
+    <input id="upc" placeholder="UPC (with or without -suffix)">
+    <select id="platform"><option value="">Both stores</option><option value="ebay">eBay</option><option value="amazon">Amazon</option></select>
+    <button class="btn" id="load" type="button">Show</button>
+    <span class="muted" id="count"></span>
+  </div>
+  <div id="list"></div>
+  <script>
+    const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    async function load(){
+      const upc = document.getElementById('upc').value.trim();
+      const platform = document.getElementById('platform').value;
+      const res = await fetch('/api/lister/ledger?upc=' + encodeURIComponent(upc) + '&platform=' + encodeURIComponent(platform) + '&limit=300', {cache:'no-store'});
+      const data = await res.json().catch(() => ({}));
+      const list = document.getElementById('list');
+      if(!data.success){ list.innerHTML = '<div class="empty">' + esc(data.error || 'Could not load the ledger') + '</div>'; return; }
+      const links = data.links || [];
+      document.getElementById('count').textContent = links.length ? links.length + ' link' + (links.length === 1 ? '' : 's') : '';
+      if(!links.length){ list.innerHTML = '<div class="empty">Nothing linked yet. Listings recorded from the side panel appear here.</div>'; return; }
+      list.innerHTML = links.map(l => {
+        const key = l.platform === 'ebay' ? ('Item ' + (l.listing_id || '')) : ('SKU ' + (l.sku || '') + (l.asin ? ' · ASIN ' + l.asin : ''));
+        const upcHtml = l.upc && l.upc.includes('-') ? '<span class="suffix">' + esc(l.upc) + '</span>' : '<code>' + esc(l.upc) + '</code>';
+        const sales = (l.sales || []).map(o => '<tr><td>' + esc(o.paid_time || '') + '</td><td>' + esc(o.order_id || '') + '</td><td>' + esc(o.title || '') + '</td><td>' + esc(o.quantity ?? '') + '</td><td>' + esc(o.price ?? '') + '</td><td>' + ((o.source_upc && o.source_upc === l.upc) || o.listing_trace_id ? '<span class="traced">exact unit</span>' : esc(o.barcode || '')) + '</td></tr>').join('');
+        return '<div class="card"><div class="row"><div><span class="badge ' + esc(l.platform) + '">' + (l.platform === 'ebay' ? 'eBay' : 'Amazon') + '</span><div class="muted">' + esc((l.created_at || '').replace('T', ' ')) + '</div></div>'
+          + '<div><div><b>' + esc(l.title || '(no title)') + '</b></div><div>UPC ' + upcHtml + ' &rarr; ' + esc(key) + (l.store_upc && l.store_upc !== l.upc ? ' <span class="muted">(store shows UPC ' + esc(l.store_upc) + ')</span>' : '') + '</div>'
+          + '<div class="muted">' + (l.price != null ? '$' + Number(l.price).toFixed(2) + ' · ' : '') + (l.quantity != null ? 'qty ' + esc(l.quantity) + ' · ' : '') + 'by ' + esc(l.created_by || 'lister') + (l.note ? ' · ' + esc(l.note) : '') + '</div>'
+          + (sales ? '<table><tr><th>Paid</th><th>Order</th><th>Title</th><th>Qty</th><th>Price</th><th>Traced to</th></tr>' + sales + '</table>' : '<div class="muted">No sale yet.</div>') + '</div>'
+          + '<div>' + (l.url ? '<a href="' + esc(l.url) + '" target="_blank" rel="noopener">Open listing</a>' : '') + '</div></div></div>';
+      }).join('');
+    }
+    document.getElementById('load').onclick = load;
+    document.getElementById('upc').addEventListener('keydown', e => { if(e.key === 'Enter') load(); });
+    const params = new URLSearchParams(location.search);
+    if(params.get('upc')) document.getElementById('upc').value = params.get('upc');
+    load();
+  </script>
+</body>
+</html>

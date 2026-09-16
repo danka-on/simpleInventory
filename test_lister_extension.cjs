@@ -9,7 +9,7 @@ const root = fs.existsSync(path.join(__dirname, 'lister-extension')) ? path.join
 const M = require(path.join(root, 'matcher.js'));
 
 function field(overrides) {
-  return { tag: 'input', type: 'text', name: '', id: '', ariaLabel: '', placeholder: '', labelText: '', nearbyText: '', role: '', maxLength: 0, contenteditable: false, ...overrides };
+  return { tag: 'input', type: 'text', name: '', id: '', ariaLabel: '', placeholder: '', labelText: '', nearbyText: '', role: '', maxLength: 0, contenteditable: false, value: '', ...overrides };
 }
 
 // --- eBay-like listing form -----------------------------------------------------------------
@@ -75,9 +75,14 @@ assert.equal(M.suggestTargets(field({ labelText: 'Product description', tag: 'te
 assert.deepEqual(M.suggestTargets(field({ type: 'checkbox', labelText: 'Price' })), [], 'checkboxes are never suggested');
 
 // --- page detection --------------------------------------------------------------------------
-assert.deepEqual(M.detectPage('https://www.ebay.com/sl/prelist/suggest?sr=wn'), { store: 'ebay', kind: 'listing-form', listingId: '', asin: '', sku: '' });
+assert.deepEqual(M.detectPage('https://www.ebay.com/sl/prelist/suggest?sr=wn'), { store: 'ebay', kind: 'listing-start', listingId: '', asin: '', sku: '' });
+assert.equal(M.detectPage('https://www.ebay.com/sl/sell').kind, 'listing-start');
+assert.equal(M.detectPage('https://www.ebay.com/sl/prelist/identify?upc=883049370897').kind, 'listing-form', 'the catalog match step belongs to the form');
 assert.equal(M.detectPage('https://www.ebay.com/sl/list?mode=AddItem&draftId=5').kind, 'listing-form');
 assert.equal(M.detectPage('https://bulksell.ebay.com/ws/eBayISAPI.dll?SingleList').kind, 'listing-form');
+const success = M.detectPage('https://www.ebay.com/sl/list/success?itemId=335566778899&mode=AddItem');
+assert.equal(success.kind, 'listing-success');
+assert.equal(success.listingId, '335566778899');
 const live = M.detectPage('https://www.ebay.com/itm/Lenox-Plate/335566778899?hash=abc');
 assert.equal(live.kind, 'listing-live');
 assert.equal(live.listingId, '335566778899');
@@ -88,10 +93,35 @@ assert.equal(offer.store, 'amazon');
 assert.equal(offer.kind, 'offer-form');
 assert.equal(offer.asin, 'B0TESTASIN');
 assert.equal(offer.sku, 'SS-1');
-assert.equal(M.detectPage('https://sellercentral.amazon.com/product-search/search?q=883049370897').kind, 'product-search');
+assert.equal(M.detectPage('https://sellercentral.amazon.com/product-search/search?q=883049370897').kind, 'listing-start');
 assert.equal(M.detectPage('https://sellercentral.amazon.com/inventory').kind, 'inventory');
 assert.equal(M.detectPage('https://www.amazon.com/dp/B0TESTASIN').store, '', 'the retail site is not a listing page');
 assert.equal(M.detectPage('not a url').store, '');
+
+// --- success wording, required fields, the product search box ---------------------------------
+assert.ok(M.successInfo('ebay', 'Congratulations! Your item is listed. View listing').success);
+assert.ok(!M.successInfo('ebay', 'Create your listing. Title. Price.').success);
+assert.ok(M.successInfo('amazon', 'Your listing has been saved. It may take up to 15 minutes for your changes to appear.').success);
+assert.ok(!M.successInfo('amazon', 'Offer details. Seller SKU. Your price.').success);
+assert.ok(!M.successInfo('', 'Congratulations').success);
+assert.ok(M.isRequired(field({ labelText: 'Title *' })));
+assert.ok(M.isRequired(field({ required: true })));
+assert.ok(M.isRequired(field({ ariaRequired: true })));
+assert.ok(!M.isRequired(field({ labelText: 'Subtitle' })));
+assert.ok(M.isEmptyValue(field({ value: '' })));
+assert.ok(M.isEmptyValue(field({ tag: 'select', value: 'Select' })));
+assert.ok(!M.isEmptyValue(field({ tag: 'select', value: 'New' })));
+assert.ok(!M.isEmptyValue(field({ value: '24.5' })));
+const prelist = [
+  field({ type: 'search', id: 'gh-ac', placeholder: 'Search for anything', ariaLabel: 'Search for anything' }),
+  field({ type: 'text', placeholder: 'Tell us what you\'re selling', ariaLabel: 'Enter your product\'s brand, model, or UPC' }),
+  field({ type: 'text', labelText: 'Zip code' }),
+];
+const scores = prelist.map(d => M.searchBoxScore('ebay', d));
+assert.equal(scores[0], 0, 'the header search box is never the product search');
+assert.ok(scores[1] >= 4 && scores[1] > scores[2], 'the prelist box wins');
+assert.ok(M.searchBoxScore('amazon', amazonForm[6]) >= 6, 'Seller Central search-term box');
+assert.equal(M.searchBoxScore('amazon', amazonForm[0]), 0, 'the SKU field is not a search box');
 
 // --- condition helpers -----------------------------------------------------------------------
 assert.equal(M.chooseOption(['Select', 'New', 'New (Other)', 'Used'], M.conditionLabels('NEW_OTHER', 'ebay')), 2);
@@ -107,6 +137,7 @@ for (const name of ['background.js', 'content.js', 'sidepanel.js', 'update-bridg
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
 assert.equal(manifest.name, 'Sweet Shelves Lister');
 assert.equal(manifest.manifest_version, 3);
+assert.ok(/^\d+\.\d+\.\d+$/.test(manifest.version));
 assert.equal(manifest.background.service_worker, 'background.js');
 assert.equal(manifest.side_panel.default_path, 'sidepanel.html');
 for (const file of [manifest.background.service_worker, manifest.side_panel.default_path, ...manifest.content_scripts[0].js, ...Object.values(manifest.icons)]) {
@@ -117,7 +148,12 @@ assert.ok(manifest.host_permissions.some(p => p.includes('ebay.com')) && manifes
 assert.ok(manifest.content_scripts[0].matches.every(m => m.endsWith('/lister/*')), 'the update bridge only runs on the update page');
 const panel = fs.readFileSync(path.join(root, 'sidepanel.html'), 'utf8');
 assert.ok(panel.includes('src="matcher.js"') && panel.includes('src="sidepanel.js"'));
-for (const id of ['connStatus', 'pageCard', 'itemList', 'detail', 'confirm', 'pickCard', 'settings', 'signin', 'toast']) {
+for (const id of ['connStatus', 'pageCard', 'itemList', 'detail', 'confirm', 'pickCard', 'settings', 'signin', 'toast',
+  'storeEbay', 'storeAmazon', 'viewList', 'viewItem', 'modal', 'toastAction', 'setAutoLink', 'setAutoSearch', 'setAutoPrepare']) {
   assert.ok(panel.includes(`id="${id}"`), 'side panel has #' + id);
+}
+const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+for (const message of ['search', 'add-photos', 'guide-start', 'guide-next', 'guide-go', 'guide-use', 'guide-stop', 'detect', 'fill']) {
+  assert.ok(content.includes(`case '${message}'`), 'page script answers ' + message);
 }
 console.log('lister extension checks passed');

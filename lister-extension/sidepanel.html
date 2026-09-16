@@ -17,11 +17,16 @@
 <section id="settings" class="card" hidden>
   <h2>Settings</h2>
   <label>Sweet Shelves server<input id="setServer" type="url" placeholder="https://pi.nexuscentralhq.org"></label>
-  <label>Your name (shown on the proposal timeline)<input id="setActor" type="text" placeholder="e.g. Dan"></label>
+  <label>Your name (shown on the ledger)<input id="setActor" type="text" placeholder="e.g. Dan"></label>
+  <label class="check"><input id="setAutoSearch" type="checkbox"> Search the UPC as soon as a store's "what are you selling" page opens</label>
   <label class="check"><input id="setAutoFill" type="checkbox"> Fill automatically when a listing form opens</label>
+  <label class="check"><input id="setAutoGuide" type="checkbox"> Highlight fields that still need a value after filling</label>
+  <label class="check"><input id="setAutoLink" type="checkbox"> Record the listing automatically when the store confirms it (with Undo)</label>
+  <label class="check"><input id="setAutoPrepare" type="checkbox"> Prepare title, price, specifics and description in the background</label>
   <div class="row">
     <button id="saveSettings" class="primary" type="button">Save</button>
-    <button id="openServer" type="button">Open Sweet Shelves</button>
+    <button id="openServer" type="button">Open Items to List</button>
+    <button id="openLedger" type="button">Ledger</button>
     <button id="openUpdates" type="button">Update extension</button>
   </div>
   <p class="muted" id="versionLine"></p>
@@ -33,14 +38,23 @@
   <button id="signinBtn" class="primary" type="button">Open sign-in page</button>
 </section>
 
+<nav class="storebar">
+  <div class="seg" role="tablist">
+    <button id="storeEbay" class="seg-btn active" type="button">eBay <span id="countEbay" class="count"></span></button>
+    <button id="storeAmazon" class="seg-btn" type="button">Amazon <span id="countAmazon" class="count"></span></button>
+  </div>
+  <div class="viewtabs">
+    <button id="viewList" class="tab active" type="button">Queue</button>
+    <button id="viewItem" class="tab" type="button">Item</button>
+  </div>
+</nav>
+
 <section id="pageCard" class="card page"></section>
 
 <section id="pickCard" class="card pick" hidden></section>
 
-<section class="card items">
+<section id="listCard" class="card items">
   <div class="tabs">
-    <button id="scopeSelected" class="tab active" type="button">Selected</button>
-    <button id="scopeOpen" class="tab" type="button">All open</button>
     <input id="filter" type="search" placeholder="Filter by title or UPC">
     <button id="reload" class="icon" type="button" title="Reload" aria-label="Reload">↻</button>
   </div>
@@ -51,7 +65,9 @@
 
 <section id="confirm" class="card confirm" hidden></section>
 
-<footer class="foot"><span id="toast" role="status"></span></footer>
+<div id="modal" class="modal" hidden></div>
+
+<footer class="foot"><span id="toast" role="status"></span><button id="toastAction" class="link" type="button" hidden></button></footer>
 
 <script src="matcher.js"></script>
 <script src="sidepanel.js"></script>

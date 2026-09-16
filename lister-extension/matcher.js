@@ -209,6 +209,10 @@
   }
 
   // What kind of store page is this URL?
+  //   listing-start   the store's "what are you selling" search (eBay prelist, Seller Central product search)
+  //   listing-form    the form where title/price/quantity are typed (eBay list, Seller Central offer)
+  //   listing-success eBay's "your item is listed" page (item number in the URL)
+  //   listing-live    a live eBay listing
   function detectPage(href) {
     let url;
     try { url = new URL(href || ''); } catch { return { store: '', kind: '', listingId: '', asin: '', sku: '' }; }
@@ -218,10 +222,12 @@
     const out = { store: '', kind: '', listingId: '', asin: '', sku: '' };
     if (/(^|\.)ebay\.[a-z.]+$/.test(host)) {
       out.store = 'ebay';
-      const item = path.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})/) || (params.get('itemId') || params.get('item') || '').match(/^(\d{9,15})$/);
+      const item = path.match(/\/itm\/(?:[^/]+\/)?(\d{9,15})/) || (params.get('itemId') || params.get('item') || params.get('itemid') || '').match(/^(\d{9,15})$/);
       if (item) out.listingId = item[1];
       if (out.listingId && !/\/sl\//.test(path)) out.kind = 'listing-live';
-      else if (/^\/sl\/(prelist|list|sell)/.test(path) || /^\/lstng/.test(path) || host.startsWith('bulksell.')) out.kind = 'listing-form';
+      else if (out.listingId && /^\/sl\//.test(path)) out.kind = 'listing-success';
+      else if (/^\/sl\/(prelist|sell)(\/|$)/.test(path)) out.kind = /\/sl\/prelist\/(identify|catalog)/.test(path) ? 'listing-form' : 'listing-start';
+      else if (/^\/sl\/list/.test(path) || /^\/lstng/.test(path) || host.startsWith('bulksell.')) out.kind = 'listing-form';
       else if (/^\/sh\/lst\/(active|drafts|ended)/.test(path) || /^\/sh\//.test(path)) out.kind = 'seller-hub';
       else if (/^\/sl\//.test(path)) out.kind = 'listing-form';
       if (out.kind === 'seller-hub' && out.listingId) out.kind = 'listing-live';
@@ -234,14 +240,59 @@
       const asin = path.match(/\/(B0[A-Z0-9]{8}|[0-9]{9}[0-9X])(\/|$)/i) || (params.get('asin') || '').match(/^([A-Z0-9]{10})$/i);
       if (asin) out.asin = asin[1].toUpperCase();
       out.sku = params.get('sku') || params.get('mSku') || params.get('sellerSku') || '';
-      if (/\/abis\/(listing|Display|syh|product-search|display)/i.test(path) || /\/abis\//i.test(path)) {
-        out.kind = /product-search|search/i.test(path) ? 'product-search' : 'offer-form';
+      if (/\/product-search|\/productsearch/i.test(path)) out.kind = 'listing-start';
+      else if (/\/abis\/(listing|Display|syh|display)/i.test(path) || /\/abis\//i.test(path)) {
+        out.kind = /product-search|search/i.test(path) ? 'listing-start' : 'offer-form';
       } else if (/\/inventory/i.test(path) || /\/myinventory/i.test(path)) out.kind = 'inventory';
-      else if (/\/productsearch|\/product-search/i.test(path)) out.kind = 'product-search';
       if (out.asin) out.listingId = out.asin;
       return out;
     }
     return out;
+  }
+
+  // Did the page just confirm a new listing? Pure text heuristics; the page script adds ids.
+  const EBAY_SUCCESS = /(your (item|listing) (is|was|has been) (listed|posted|published|live)|you(?:'ve| have) (successfully )?listed|is now live|congratulations|listing (is|was|has been) (created|posted|published|live)|view (your )?listing)/i;
+  const AMAZON_SUCCESS = /((listing|offer|product|your changes?) (was|has been|is being|will be|were|have been) (saved|created|submitted|processed|added|updated)|your (listing|product|offer) is (now )?(live|active|being processed)|successfully (saved|created|submitted|listed)|listing (submitted|created) successfully|(it|this) (may|can) take up to \d+ (minutes|hours) (for|before|until))/i;
+
+  function successInfo(store, text) {
+    const sample = String(text || '').slice(0, 20000);
+    if (store === 'ebay') return { success: EBAY_SUCCESS.test(sample) };
+    if (store === 'amazon') return { success: AMAZON_SUCCESS.test(sample) };
+    return { success: false };
+  }
+
+  // Fields the store insists on (required marker) that are still empty.
+  function isRequired(descriptor) {
+    if (descriptor.required || descriptor.ariaRequired) return true;
+    const label = String(descriptor.labelText || '') + ' ' + String(descriptor.nearbyText || '');
+    return /\*|\brequired\b/i.test(label);
+  }
+
+  function isEmptyValue(descriptor) {
+    const value = String(descriptor.value || '').trim();
+    if (!value) return true;
+    if (descriptor.tag === 'select') return /^(select|choose|pick|-+|please select)/i.test(value);
+    return false;
+  }
+
+  // The store's product search box on a listing-start page (never the site-wide header search).
+  function searchBoxScore(store, descriptor) {
+    const type = normalize(descriptor.type);
+    if (SKIP_TYPES.has(type) || descriptor.tag === 'select' || descriptor.contenteditable) return 0;
+    const text = normalize([descriptor.labelText, descriptor.ariaLabel, descriptor.placeholder, descriptor.name, descriptor.id, descriptor.nearbyText].join(' '));
+    if (!text) return 0;
+    if (/search for anything|gh ac|site search|search ebay/.test(text)) return 0;
+    let score = 0;
+    if (store === 'amazon') {
+      if (/search term|product name|upc|ean|isbn|asin/.test(text)) score += 6;
+      if (descriptor.id === 'search-term' || descriptor.name === 'search-term') score += 6;
+    } else {
+      if (/what are you selling|what you re selling|tell us what|brand model|upc|isbn|ean|product|find your item|item you re selling|search/.test(text)) score += 4;
+      if (/what are you selling|tell us what|brand model|find your item/.test(text)) score += 4;
+      if (descriptor.id === 's0-1-1-24-7-@keyword-@box-@input-textbox' || /keyword/.test(text)) score += 4;
+    }
+    if (type === 'search') score += 2;
+    return score;
   }
 
   function conditionLabels(condition, store) {
@@ -268,6 +319,7 @@
 
   return {
     TARGETS, CONDITION_LABELS, normalize, scoreTarget, assign, suggestTargets, matchAspects,
-    signature, matchesSignature, detectPage, conditionLabels, chooseOption,
+    signature, matchesSignature, detectPage, successInfo, isRequired, isEmptyValue, searchBoxScore,
+    conditionLabels, chooseOption,
   };
 });
