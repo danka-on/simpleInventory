@@ -5769,6 +5769,29 @@
       "defaults": null,
       "strict_slashes": true,
       "subdomain": ""
+    },
+    {
+      "rule": "/api/ai-usage",
+      "endpoint": "ai_usage_summary",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/ai-usage/balance",
+      "endpoint": "ai_usage_balance",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
     }
   ],
   "hooks": {

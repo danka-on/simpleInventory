@@ -257,6 +257,72 @@
             </a>
         </div>
 
+        <!-- AI API usage: Claude + ChatGPT spend logged by the app, minus the balance typed in -->
+        <div class="section-title">
+            <i class="fas fa-robot"></i>
+            <span>AI API Usage</span>
+        </div>
+        <div id="ai-usage" class="ai-usage-grid">
+            <div class="ai-usage-card" data-provider="anthropic"><h3>Claude</h3><div class="ai-usage-body">Loading…</div></div>
+            <div class="ai-usage-card" data-provider="openai"><h3>ChatGPT (OpenAI)</h3><div class="ai-usage-body">Loading…</div></div>
+        </div>
+        <p class="ai-usage-note">Counts calls this app makes (voice notes, dictation, label photos, listings). Leftover = the balance you enter from the provider's billing page minus app spend since then; spend outside the app isn't seen.</p>
+        <style>
+            .ai-usage-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+            .ai-usage-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:16px; box-shadow:0 2px 8px rgba(0,0,0,0.04); }
+            .ai-usage-card h3 { margin:0 0 10px; color:#2c3e50; font-size:1rem; }
+            .ai-left { font-size:1.6rem; font-weight:700; color:#00b894; }
+            .ai-left.low { color:#d63031; }
+            .ai-muted { color:#666; font-size:0.85rem; }
+            .ai-usage-card table { width:100%; border-collapse:collapse; font-size:0.85rem; margin-top:8px; }
+            .ai-usage-card td { padding:3px 0; border-bottom:1px solid #f0f0f0; }
+            .ai-usage-card td:last-child { text-align:right; font-variant-numeric:tabular-nums; }
+            .ai-balance-form { display:flex; gap:6px; margin-top:10px; }
+            .ai-balance-form input { flex:1; min-width:0; padding:6px; border:1px solid #ddd; border-radius:4px; }
+            .ai-balance-form button { padding:6px 10px; font-size:0.85rem; }
+            .ai-usage-note { color:#888; font-size:0.8rem; margin:8px 0 0; }
+            @media (max-width: 480px) { .ai-usage-grid { grid-template-columns:1fr; } }
+        </style>
+        <script>
+            (function () {
+                const money = v => '$' + Number(v || 0).toFixed(v >= 10 || v === 0 ? 2 : 4);
+                const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+                function render(providers) {
+                    document.querySelectorAll('.ai-usage-card').forEach(card => {
+                        const p = providers[card.dataset.provider];
+                        const body = card.querySelector('.ai-usage-body');
+                        const b = p.balance;
+                        const left = b
+                            ? `<div class="ai-left${b.leftover_usd < 2 ? ' low' : ''}">${money(b.leftover_usd)} left</div>
+                               <div class="ai-muted">${money(b.entered_usd)} entered ${esc(b.set_at.slice(0, 10))} − ${money(b.spent_since_usd)} used</div>`
+                            : '<div class="ai-muted">Enter your current credit balance to track leftover.</div>';
+                        const rows = [['Today', p.today], ['Last 7 days', p.week], ['Last 30 days', p.month], ['All time', p.all]]
+                            .map(([label, w]) => `<tr><td>${label} <span class="ai-muted">(${w.calls} calls)</span></td><td>${money(w.cost_usd)}</td></tr>`).join('');
+                        const features = p.features.map(f =>
+                            `<tr><td>${esc(f.feature)} <span class="ai-muted">×${f.calls}</span></td><td>${money(f.cost_usd)}</td></tr>`).join('');
+                        const unpriced = p.all.unpriced_calls ? `<div class="ai-muted">${p.all.unpriced_calls} calls on an unpriced model</div>` : '';
+                        body.innerHTML = left + `<table>${rows}</table>` +
+                            (features ? `<div class="ai-muted" style="margin-top:10px;">By feature, 30 days</div><table>${features}</table>` : '') +
+                            unpriced +
+                            `<form class="ai-balance-form"><input type="number" step="0.01" min="0" placeholder="Balance $" required>
+                             <button class="btn" type="submit">Set</button></form>`;
+                        body.querySelector('form').addEventListener('submit', async ev => {
+                            ev.preventDefault();
+                            const amount = ev.target.querySelector('input').value;
+                            const r = await fetch('/api/ai-usage/balance', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({provider: card.dataset.provider, amount_usd: amount})});
+                            const data = await r.json().catch(() => ({}));
+                            if (data.success) render(data.providers); else alert(data.error || 'Could not save balance.');
+                        });
+                    });
+                }
+                fetch('/api/ai-usage', {cache: 'no-store'}).then(r => r.json()).then(data => {
+                    if (!data.success) throw new Error(data.error);
+                    render(data.providers);
+                }).catch(() => document.querySelectorAll('.ai-usage-body').forEach(b => { b.textContent = 'Usage unavailable.'; }));
+            })();
+        </script>
+
         <!-- Management Tools Section -->
         <div class="section-title">
             <i class="fas fa-tools"></i>

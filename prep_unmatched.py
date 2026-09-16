@@ -259,7 +259,10 @@ class PrepUnmatched:
                 'tools':[{'name':'read_label','description':'Report only clearly visible product name text.','input_schema':{'type':'object','properties':{'readable':{'type':'boolean'},'name':{'type':['string','null']}},'required':['readable','name'],'additionalProperties':False}}],
                 'tool_choice':{'type':'tool','name':'read_label'}})
         response.raise_for_status()
-        for block in response.json().get('content') or []:
+        result = response.json()
+        from ai_usage import record as record_ai_usage
+        record_ai_usage('anthropic', 'claude-haiku-4-5-20251001', 'Prep label photo', result)
+        for block in result.get('content') or []:
             if block.get('type') == 'tool_use' and block.get('name') == 'read_label':
                 value = block.get('input') or {}
                 name = ' '.join(str(value.get('name') or '').split())[:300]

@@ -3,6 +3,7 @@
 import ebay_mapping
 import os
 import requests
+from ai_usage import record as record_ai_usage
 from flask import jsonify, request
 from . import (
     ebay_policies as ss_ebay_policies, errors as ss_errors, listing_lifecycle as ss_listing_lifecycle,
@@ -330,6 +331,7 @@ def api_listingagent_ebay_generate_description():
                     err_msg = resp.text[:300]
                 raise ss_errors._ListingAgentUserError(f'Anthropic API error ({resp.status_code}): {err_msg}', status_code=502)
             result = resp.json()
+            record_ai_usage('anthropic', 'claude-haiku-4-5-20251001', 'eBay description', result)
             description = (result.get('content') or [{}])[0].get('text', '').strip()
             if not description:
                 raise ss_errors._ListingAgentUserError(f'Anthropic API returned empty response. Raw: {str(result)[:200]}', status_code=502)
@@ -417,6 +419,7 @@ def api_listingagent_ebay_generate_title():
                     err_msg = resp.text[:300]
                 raise ss_errors._ListingAgentUserError(f'Anthropic API error ({resp.status_code}): {err_msg}', status_code=502)
             result = resp.json()
+            record_ai_usage('anthropic', 'claude-haiku-4-5-20251001', 'eBay title', result)
             out_text = (result.get('content') or [{}])[0].get('text', '').strip()
             if not out_text:
                 raise ss_errors._ListingAgentUserError(f'Anthropic API returned empty response. Raw: {str(result)[:200]}', status_code=502)
