@@ -296,7 +296,8 @@
     // leaving that page (success, another site) brings the queue back.
     const onForm = state.page.kind === 'listing-form' || state.page.kind === 'offer-form';
     if (onForm && current() && !state.locked) { state.locked = current().upc; state.view = 'item'; }
-    else if (!onForm && state.locked && !(state.page.store && ASSIST_KINDS.has(state.page.kind))) {
+    else if (!onForm && state.locked) {
+      // Out of the listing window (back to search, the success page, another site): show the queue again.
       state.locked = null;
       if (state.page.kind !== 'listing-success' && state.page.kind !== 'offer-success') state.view = 'list';
     }
@@ -370,14 +371,14 @@
     return (state.tab?.id || 0) + '|' + (state.page?.url || '').split('#')[0] + '|' + suffix;
   }
 
-  async function maybeAutoSearch() {
+  async function maybeAutoSearch({ force = false } = {}) {
     const item = current();
     const page = state.page;
     if (!item || !page?.store || page.kind !== 'listing-start') return;
-    const wanted = state.pendingSearch?.upc === item.upc || state.settings.autoSearch;
+    const wanted = force || state.pendingSearch?.upc === item.upc || state.settings.autoSearch;
     if (!wanted) return;
     const key = tabKey('search|' + item.upc);
-    if (state.searched.has(key)) return;
+    if (!force && state.searched.has(key)) return;
     const result = await searchUpc({ auto: true });
     if (result?.ok) state.searched.add(key);  // otherwise the next page update tries again
   }
@@ -761,7 +762,9 @@
         if (event.target.closest('a, button')) return;
         state.currentUpc = el.dataset.upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); remember();
         renderItems(); renderDetail(); renderConfirm();
-        void loadDetail(state.currentUpc);
+        void loadDetail(state.currentUpc).then(() => maybeAssist());
+        // Picked while the store's search page is open: search this UPC right away.
+        void maybeAutoSearch({ force: true });
       };
     }
     for (const button of list.querySelectorAll('button[data-skip]')) {
@@ -1109,7 +1112,9 @@
     wireStatic();
     renderAll();
     await connect();
-    await Promise.all([loadQueue(), refreshTab()]);
+    // The queue first, so a panel opened on the store's search page already has an item to search.
+    await loadQueue();
+    await refreshTab();
   }
 
   void main();

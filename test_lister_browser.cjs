@@ -230,6 +230,14 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(rows.find(r => r.label === 'Title')?.cls.includes('done'), 'the filled title is green');
     assert.ok(rows.find(r => r.label === 'Price')?.cls.includes('done'), 'the filled price is green');
     assert.ok(await store.$eval('#ss-lister-guide', el => el.textContent.includes('required')), 'the overlay on the page lists what is required');
+    // Re-reading the page while the guide is up must not throw (0.2.2 did: "reading 'length'").
+    await panel.click('#pageRefresh');
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 10000 });
+    assert.ok(!(await panel.textContent('#pageCard')).includes('Page script:'), await panel.textContent('#pageCard'));
+    // Clicking a green (filled) row still jumps to that field.
+    await panel.click('.needs li.done');
+    await store.waitForFunction(() => document.activeElement && document.activeElement.id === 'title', null, { timeout: 10000 });
+    assert.equal(await store.evaluate(() => document.activeElement.id), 'title');
     // The item is locked in on the listing page: the queue is hidden and the item view is up.
     assert.ok(await panel.$eval('#lock', el => el.classList.contains('on')));
     assert.ok(await panel.$eval('#listCard', el => el.hidden));
@@ -256,6 +264,17 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(calls.links[0].note.includes('auto-detected'));
     assert.equal(await panel.$eval('#toastAction', el => el.textContent), 'Undo');
     await panel.waitForFunction(() => document.querySelector('.item[data-upc="883049370897-1"]').classList.contains('listed'), null, { timeout: 15000 });
+    assert.ok(!(await panel.$eval('#lock', el => el.classList.contains('on'))), 'the lock is released after the listing is recorded');
+
+    // Back on the search page the next queued item is searched by itself...
+    await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
+    await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
+    // ...and picking an item from the queue while the search page is open searches it again at once.
+    await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('search for the product'), null, { timeout: 15000 });
+    await panel.click('#viewList');
+    await panel.click('.item[data-upc="012345678905"]');
+    await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
     console.log('lister browser test passed');
   } finally {
     await context.close();

@@ -508,12 +508,13 @@
     for (const row of guide.rows) guideStyle(row, row.done ? 'done' : (row.required ? 'required' : 'optional'));
     const pointer = guidePointer();
     const el = current ? guideElement(current) : null;
-    if (el && !current.done) {
+    if (el) {
+      // A green (filled) row still takes the user to that spot when clicked.
       try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); if (current.kind === 'field') el.focus({ preventScroll: true }); } catch { /* ignore */ }
       const rect = el.getBoundingClientRect();
       pointer.style.display = '';
-      pointer.style.background = current.required ? '#dc2626' : '#f59e0b';
-      pointer.textContent = `${current.label}${current.suggestion ? ' → ' + current.suggestion.slice(0, 60) : ''}`;
+      pointer.style.background = current.done ? '#16a34a' : (current.required ? '#dc2626' : '#f59e0b');
+      pointer.textContent = current.done ? `${current.label} ✓` : `${current.label}${current.suggestion ? ' → ' + current.suggestion.slice(0, 60) : ''}`;
       pointer.style.left = Math.max(8, rect.left + window.scrollX) + 'px';
       pointer.style.top = Math.max(0, rect.top + window.scrollY - 30) + 'px';
     } else {
@@ -842,7 +843,7 @@
     page.title = clip(document.title);
     page.url = location.href;
     page.fieldCount = fields.length;
-    page.guide = guide ? { active: true, index: guide.index, count: guide.needed.length } : { active: false };
+    page.guide = guide ? { active: true, index: guide.index, count: guide.rows.filter(r => !r.done).length, total: guide.rows.length } : { active: false };
     return page;
   }
 
