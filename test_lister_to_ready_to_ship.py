@@ -1,0 +1,240 @@
+"""One unit, end to end: listed through the Lister, sold, then found on Ready to Ship.
+
+The unit is a one-of-one suffixed warehouse row (`<upc>-1`), the kind the Lister lists as its own
+SKU. Every step runs against the real code on temporary databases: the panel's link, the queue and
+inventory-match rows it writes, the sold order the marketplace reports, and the `/sold-orders` feed
+Ready to Ship renders. Decoy rows (a second unit and the plain base barcode) sit on other shelves,
+so a match that is merely "close enough" fails these tests.
+"""
+from contextlib import closing
+import datetime
+import gc
+import os
+import sqlite3
+import unittest
+from unittest.mock import patch
+
+import DBmanager
+from sweetshelves import (runtime as ss_runtime, sales as ss_sales, sales_actions as ss_sales_actions,
+                          shipping_orders as ss_shipping_orders)
+import test_lister
+
+UPC = '761323062839'
+UNIT = UPC + '-1'          # the one of one we list and sell
+DECOY_UNIT = UPC + '-2'    # another unit of the same product, a different shelf
+LISTING_ID = '187885365480'
+SHELF = 'or1s3b4'
+DECOY_SHELF = 'gr2s1b1'
+BASE_SHELF = 'ba1s1b1'
+
+
+def _now():
+    return datetime.datetime.now().replace(microsecond=0)
+
+
+class ListerToReadyToShipTest(unittest.TestCase):
+    """The Lister's own link is the only thing tying the order to the shelf."""
+
+    setUp = test_lister.ListerTestCase.setUp
+    seed = test_lister.ListerTestCase.seed
+    sql = test_lister.ListerTestCase.sql
+
+    def setUpFixture(self):
+        """Ready to Ship's feed, the temp databases and the one-of-one rack unit."""
+        # Ready to Ship's feed opens connections it leaves to the garbage collector; on Windows the
+        # temporary folder cannot be removed while one is alive, so collect before it is cleaned up.
+        self.addCleanup(gc.collect)
+        self._dbm = patch.object(DBmanager, 'BASE_DIR', str(self.root))
+        self._dbm.start()
+        self.addCleanup(self._dbm.stop)
+        ss_runtime.cache.init_app(self.app)
+        self.app.add_url_rule('/sold-orders', 'sold_orders', ss_sales.sold_orders)
+        self.app.add_url_rule('/mark-order-handled', 'mark_order_handled', ss_sales_actions.mark_order_handled, methods=['POST'])
+        self.app.add_url_rule('/api/ready-to-ship/location-options/<int:order_id>', 'location_options',
+                              ss_shipping_orders.ready_to_ship_location_options)
+        # Confirming an order opens sold.db by a relative path, so the test runs from the temp folder.
+        cwd = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, cwd)
+        with closing(sqlite3.connect(self.root / 'searchRack.db')) as conn:
+            conn.execute('DELETE FROM SEARCHRACK')
+            conn.executemany('''INSERT INTO SEARCHRACK (ID, TITLE, BARCODE, ITEM_POSITION, QUANTITY)
+                                VALUES (?, ?, ?, ?, ?)''', [
+                (101, 'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', UNIT, SHELF, 1),
+                (102, 'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', DECOY_UNIT, DECOY_SHELF, 1),
+                (103, 'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', UPC, BASE_SHELF, 4),
+            ])
+            conn.commit()
+        with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
+            conn.execute("INSERT INTO listing_queue (upc, title, status, added_at) VALUES (?, 'Nambe shakers', 'queued', ?)",
+                         (UNIT, '2026-09-17T08:00:00'))
+            conn.commit()
+
+    def list_it(self, **overrides):
+        """What the panel posts when the store's success page is reached: our unit is the SKU."""
+        body = {'upc': UNIT, 'platform': 'ebay', 'listing_id': LISTING_ID, 'sku': UNIT,
+                'title': 'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', 'price': 39.99, 'quantity': 1}
+        body.update(overrides)
+        res = self.client.post('/api/lister/links', json=body)
+        self.assertEqual(res.status_code, 201, res.get_json())
+        return res.get_json()['link']
+
+    def sell_it(self, **overrides):
+        """The order row the eBay sync writes: item number and SKU, no warehouse knowledge."""
+        order = {'order_id': '02-13579-24680', 'item_id': LISTING_ID, 'sku': UNIT, 'store': 'ebay',
+                 'title': 'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', 'quantity': 1, 'price': 39.99,
+                 'paid_time': _now().isoformat(sep=' '), 'barcode': '', 'source_upc': ''}
+        order.update(overrides)
+        with closing(sqlite3.connect(self.root / 'sold.db')) as conn:
+            cur = conn.cursor()
+            DBmanager.ensure_sold_orders_schema(cur, conn)
+            columns = ', '.join(order)
+            cur.execute(f"INSERT INTO orders ({columns}) VALUES ({', '.join('?' for _ in order)})", tuple(order.values()))
+            conn.commit()
+            return cur.lastrowid
+
+    def ready_to_ship(self):
+        ss_runtime.cache.clear()
+        res = self.client.get('/sold-orders?days=7')
+        self.assertEqual(res.status_code, 200, res.data[:400])
+        return res.get_json()
+
+    # -- the chain ---------------------------------------------------------------------------
+
+    def test_listing_the_unit_writes_every_hop_of_the_trail(self):
+        self.setUpFixture()
+        link = self.list_it()
+        self.assertEqual((link['upc'], link['sku'], link['listing_id'], link['kind']), (UNIT, UNIT, LISTING_ID, 'listed'))
+
+        # 1. The queue row carries the store's keys, so a SKU or item number resolves back to our unit.
+        queue = self.sql('listagent.db', 'SELECT * FROM listing_queue WHERE upc = ?', (UNIT,))[0]
+        self.assertEqual((queue['listed_sku'], queue['listed_listing_id'], queue['listed_platform']), (UNIT, LISTING_ID, 'ebay'))
+        self.assertTrue(queue['listed_ebay_at'])
+
+        # 2. The inventory match points at the exact rack row, not at the product.
+        match = self.sql('listing_alerts.db', 'SELECT * FROM listing_inventory_matches')[0]
+        self.assertEqual((match['store'], match['listing_key']), ('ebay', LISTING_ID))
+        self.assertEqual((match['searchrack_id'], match['inventory_barcode'], match['inventory_location']), (101, UNIT, SHELF))
+
+        # 3. The Finder learns the same pairing, keyed by the store listing.
+        alias = self.sql('listing_alerts.db', 'SELECT * FROM finder_aliases')[0]
+        self.assertEqual(alias['source_key'], f'ebay:{LISTING_ID}')
+        self.assertEqual(alias['barcode_key'].lower().replace(' ', ''), UNIT)
+
+        # 4. Both directions of the panel's own lookup.
+        resolved = self.client.get(f'/api/lister/resolve?platform=ebay&listing_id={LISTING_ID}').get_json()
+        self.assertEqual(resolved['upc'], UNIT)
+        self.assertEqual([l['listing_id'] for l in self.client.get('/api/lister/links?upc=' + UNIT).get_json()['links']], [LISTING_ID])
+
+    def test_the_sold_order_lands_on_that_exact_shelf_unit(self):
+        self.setUpFixture()
+        self.list_it()
+        self.sell_it()
+        orders = self.ready_to_ship()
+        self.assertEqual(len(orders), 1, orders)
+        order = orders[0]
+        self.assertEqual(order['barcode'], UNIT, 'the sold SKU resolves to our suffixed unit')
+        self.assertEqual(order['location'], SHELF)
+        self.assertEqual(order['finder_searchrack_id'], 101)
+        self.assertEqual(order['finder_matched_barcode'], UNIT)
+        self.assertNotIn(DECOY_SHELF, str(order.get('locations') or order.get('location')))
+
+    def test_an_order_with_no_sku_still_reaches_the_unit_through_the_listing_link(self):
+        """Amazon-style: the order carries the item number only. The panel's link is the whole trail."""
+        self.setUpFixture()
+        self.list_it()
+        self.sell_it(sku='', barcode='', source_upc='')
+        order = self.ready_to_ship()[0]
+        self.assertEqual(order['location'], SHELF)
+        self.assertEqual(order['finder_searchrack_id'], 101)
+        self.assertEqual(order['finder_matched_barcode'], UNIT)
+        self.assertEqual(order.get('location_match_source'), 'store_listing_fallback')
+
+    def test_a_store_sku_that_is_not_our_barcode_resolves_through_the_queue_row(self):
+        """The listing's SKU need not be the UPC: listed_sku on the queue row carries the trail."""
+        self.setUpFixture()
+        self.list_it(sku='NAMBE-HUG-SET')
+        self.sell_it(sku='NAMBE-HUG-SET')
+        order = self.ready_to_ship()[0]
+        self.assertEqual(order['barcode'], UNIT)
+        self.assertEqual((order['location'], order['finder_searchrack_id']), (SHELF, 101))
+        options, data, status = self.confirm(order)
+        self.assertEqual((status, data.get('success')), (200, True), data)
+        self.assertEqual(self.rack(), {101: 0, 102: 1, 103: 4})
+
+    def test_a_sale_of_the_other_unit_does_not_borrow_this_link(self):
+        self.setUpFixture()
+        self.list_it()
+        self.sell_it(order_id='02-99999-11111', item_id='999888777666', sku=DECOY_UNIT)
+        order = self.ready_to_ship()[0]
+        self.assertEqual(order['barcode'], DECOY_UNIT)
+        self.assertEqual(order['location'], DECOY_SHELF)
+        self.assertEqual(order['finder_searchrack_id'], 102)
+
+    def confirm(self, order):
+        """What Ready to Ship posts when the order is confirmed: the same two fields the page sends."""
+        suggested = order.get('location_match_barcode', '') if order.get('location_match_suggested') else ''
+        query = f'?matched_barcode={suggested}' if suggested else ''
+        options = self.client.get(f"/api/ready-to-ship/location-options/{order['id']}{query}").get_json()
+        payload = {'id': order['id'], 'allocations': [], 'matched_barcode': suggested}
+        res = self.client.post('/mark-order-handled', json=payload)
+        return options, res.get_json(), res.status_code
+
+    def rack(self):
+        return {r['ID']: r['QUANTITY'] for r in self.sql('searchRack.db', 'SELECT ID, QUANTITY FROM SEARCHRACK')}
+
+    def test_confirming_the_order_takes_the_unit_off_that_shelf_and_no_other(self):
+        self.setUpFixture()
+        self.list_it()
+        self.sell_it()
+        order = self.ready_to_ship()[0]
+        options, data, status = self.confirm(order)
+        self.assertEqual(options.get('barcode'), UNIT, options)
+        self.assertEqual((status, data.get('success')), (200, True), data)
+        removed_from = [l.get('location_code') if isinstance(l, dict) else l for l in data.get('locations') or []]
+        self.assertEqual(removed_from, [SHELF])
+        self.assertEqual(self.rack(), {101: 0, 102: 1, 103: 4}, 'only the listed unit left the shelf')
+
+    def test_an_order_with_no_sku_shows_the_shelf_but_cannot_be_confirmed_from_it(self):
+        """Where the trail is thin today: the page finds the unit, the confirm step still wants a barcode.
+
+        `/sold-orders` resolves the shelf through the Lister's link, but both the location options and
+        `/mark-order-handled` return early on the order's own empty barcode, before the suggested
+        (linked) one is considered. The operator has to match the order by hand or complete it
+        without taking the unit off the shelf.
+        """
+        self.setUpFixture()
+        self.list_it()
+        self.sell_it(sku='', barcode='', source_upc='')
+        order = self.ready_to_ship()[0]
+        self.assertEqual((order['location'], order['finder_matched_barcode']), (SHELF, UNIT))
+        options, data, status = self.confirm(order)
+        self.assertEqual((options['barcode'], options['can_fulfill']), ('', False))
+        self.assertEqual(status, 409)
+        self.assertIn('no barcode yet', data['error'])
+        self.assertEqual(self.rack(), {101: 1, 102: 1, 103: 4}, 'nothing left the shelf')
+
+    def test_the_ledger_ties_the_order_back_to_the_listing_the_panel_made(self):
+        self.setUpFixture()
+        self.list_it()
+        self.sell_it()
+        entries = self.client.get('/api/lister/ledger').get_json()['links']
+        self.assertEqual(len(entries), 1, entries)
+        entry = entries[0]
+        self.assertEqual((entry['upc'], entry['listing_id']), (UNIT, LISTING_ID))
+        self.assertEqual([s['order_id'] for s in entry['sales']], ['02-13579-24680'])
+
+    def test_unlinking_takes_the_shelf_mapping_back_out(self):
+        self.setUpFixture()
+        link = self.list_it()
+        self.assertEqual(self.client.delete(f"/api/lister/links/{link['id']}").status_code, 200)
+        self.assertEqual(self.sql('listing_alerts.db', 'SELECT COUNT(*) AS n FROM listing_inventory_matches')[0]['n'], 0)
+        queue = self.sql('listagent.db', 'SELECT * FROM listing_queue WHERE upc = ?', (UNIT,))[0]
+        self.assertEqual((queue['status'], queue['listed_ebay_at'], queue['listed_sku']), ('queued', None, None))
+        self.sell_it(sku='', barcode='', source_upc='')
+        order = self.ready_to_ship()[0]
+        self.assertFalse(str(order.get('location') or '').strip(), 'with the link gone the item-number-only order claims no shelf')
+
+
+if __name__ == '__main__':
+    unittest.main()
