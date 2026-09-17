@@ -618,6 +618,7 @@ def register_routes():
         ensure_registry=ss_warehouse_receiving._ensure_custom_item_registry,
         ensure_prep=plus_prep_schema._ensure_items_prep_tables,
         clear_cache=ss_runtime.cache.clear,
+        upc_variants=ss_listing_lifecycle._marketplace_upc_lookup_variants,
         preplog=ss_prep_log._preplog_add_entry,
         update_data_version=ss_caching.update_data_version)
 

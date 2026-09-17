@@ -5827,6 +5827,18 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/prep-plus/identify",
+      "endpoint": "prep_plus_identify",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/warehouse/name-dictation",
       "endpoint": "warehouse_name_dictation",
       "methods": [

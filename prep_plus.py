@@ -30,6 +30,30 @@ from PIL import Image
 
 # Damaged items are filed with the same defect words Items-to-List filters on.
 DEFECTS = ('Missing pieces', 'Wrong item', 'Broken', 'Box damage', 'Return', 'Replacement', 'Other')
+
+# Where a scanned barcode's name may come from, best first, each tried across every
+# spelling of the barcode. Our own listings outrank the Macy manifest on purpose: if we
+# have already listed this item, that title is the one a buyer saw and the one the rest
+# of the app shows for it, while the manifest line is the vendor's wording. Only when
+# nothing here knows the barcode does the page ask the outside catalogs, and those are
+# never adopted on their own — the person picks.
+IDENTITY_SOURCES = (
+    ('ebay_store', 'eBay store', 'ebayStore.db', (
+        "SELECT COALESCE(Title, '') AS title, COALESCE(Image, '') AS image FROM INVENTORY"
+        " WHERE UPC IS NOT NULL AND LOWER(TRIM(UPC)) = ? ORDER BY ID DESC LIMIT 1",
+    )),
+    ('amazon_store', 'Amazon store', 'amazonStore.db', (
+        # ITEMS is the SP-API table; INVENTORY is the older one some installs still carry.
+        "SELECT COALESCE(TITLE, '') AS title, COALESCE(IMAGE, '') AS image FROM ITEMS"
+        " WHERE UPC IS NOT NULL AND LOWER(TRIM(UPC)) = ? ORDER BY LAST_UPDATED DESC LIMIT 1",
+        "SELECT COALESCE(Title, '') AS title, COALESCE(Image, '') AS image FROM INVENTORY"
+        " WHERE UPC IS NOT NULL AND LOWER(TRIM(UPC)) = ? ORDER BY ID DESC LIMIT 1",
+    )),
+    ('macy_bol', 'Macy BOL', 'rawbol.db', (
+        "SELECT COALESCE(item_description, '') AS title, COALESCE(image_url, '') AS image"
+        " FROM raw_bol_items WHERE upc IS NOT NULL AND LOWER(TRIM(upc)) = ? ORDER BY rowid DESC LIMIT 1",
+    )),
+)
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 MAX_PHOTOS = 12
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
@@ -97,14 +121,46 @@ def _insert_bol_item(cur, values, columns):
 
 class PrepPlus:
     def __init__(self, app, db_connection, normalize_upc, normalize_lot, reject_title,
-                 asset_scope, ensure_registry, ensure_prep, clear_cache,
+                 asset_scope, ensure_registry, ensure_prep, clear_cache, upc_variants,
                  preplog=None, update_data_version=None):
         self.app, self.db = app, db_connection
         self.normalize_upc, self.normalize_lot = normalize_upc, normalize_lot
         self.reject_title, self.asset_scope = reject_title, asset_scope
         self.ensure_registry, self.ensure_prep = ensure_registry, ensure_prep
-        self.clear_cache = clear_cache
+        self.clear_cache, self.upc_variants = clear_cache, upc_variants
         self.preplog, self.update_data_version = preplog, update_data_version
+
+    # ---- who is this? ----------------------------------------------------
+
+    def identify(self):
+        """The name we already hold for a scanned barcode, from the closest source out."""
+        upc = self.normalize_upc(request.args.get('upc'))
+        if not upc:
+            raise PrepPlusError('Scan a barcode first.')
+        variants = [value for value in (self.upc_variants(upc) or []) if value] or [upc.lower()]
+        tried = []
+        for source, label, database, queries in IDENTITY_SOURCES:
+            result = 'no match'
+            for query in queries:
+                try:
+                    with self.db(database) as conn:
+                        cur = conn.cursor()
+                        for variant in variants:
+                            row = cur.execute(query, (variant,)).fetchone()
+                            if not row:
+                                continue
+                            title = ' '.join(str(row['title'] or '').split())[:MAX_TITLE]
+                            if not title or self.reject_title(title):
+                                continue
+                            return jsonify(success=True, found=True, source=source, label=label,
+                                           title=title, image_url=str(row['image'] or '').strip(),
+                                           tried=tried)
+                except Exception:
+                    # A table or database this install does not have is not an answer.
+                    result = 'unavailable'
+                    continue
+            tried.append({'source': source, 'label': label, 'result': result})
+        return jsonify(success=True, found=False, tried=tried)
 
     # ---- storage ---------------------------------------------------------
 
@@ -338,15 +394,22 @@ def register(app, **dependencies):
     def page():
         return render_template('prep_plus.html', defects=DEFECTS)
 
-    def save():
-        try:
-            return service.save()
-        except PrepPlusError as exc:
-            return jsonify(success=False, error=str(exc)), 400
-        except Exception:
-            app.logger.exception('Prep + intake failed')
-            return jsonify(success=False, error='Could not save this item. It is still in the list — retry it.'), 500
+    def guarded(method, failure):
+        def view():
+            try:
+                return method()
+            except PrepPlusError as exc:
+                return jsonify(success=False, error=str(exc)), 400
+            except Exception:
+                app.logger.exception('Prep + request failed')
+                return jsonify(success=False, error=failure), 500
+        return view
 
     app.add_url_rule('/prep-plus', 'prep_plus_page', page)
-    app.add_url_rule('/api/prep-plus/item', 'prep_plus_item', save, methods=['POST'])
+    app.add_url_rule('/api/prep-plus/item', 'prep_plus_item',
+                     guarded(service.save, 'Could not save this item. It is still in the list — retry it.'),
+                     methods=['POST'])
+    app.add_url_rule('/api/prep-plus/identify', 'prep_plus_identify',
+                     guarded(service.identify, 'Could not check this barcode. Type the name instead.'),
+                     methods=['GET'])
     return service

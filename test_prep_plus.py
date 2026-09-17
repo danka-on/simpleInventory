@@ -64,6 +64,13 @@ class PrepPlusTests(unittest.TestCase):
                     media_type TEXT, file_path TEXT, mime_type TEXT, created_at TEXT);
             ''')
 
+        with db('ebayStore.db') as conn:
+            conn.execute('CREATE TABLE INVENTORY (ID INTEGER PRIMARY KEY, UPC TEXT, Title TEXT, Image TEXT)')
+        with db('amazonStore.db') as conn:
+            conn.execute('CREATE TABLE ITEMS (UPC TEXT, TITLE TEXT, IMAGE TEXT, LAST_UPDATED TEXT)')
+        with db('rawbol.db') as conn:
+            conn.execute('CREATE TABLE raw_bol_items (upc TEXT, item_description TEXT, image_url TEXT)')
+
         def registry(cur):
             cur.execute('''CREATE TABLE IF NOT EXISTS custom_item_registry (upc TEXT PRIMARY KEY,
                 item_description TEXT, image_url TEXT, reserved_at TEXT, updated_at TEXT)''')
@@ -75,7 +82,8 @@ class PrepPlusTests(unittest.TestCase):
             reject_title=lambda title: 'Use a short descriptive name, not a barcode or placeholder.'
                                        if title.lower() in ('unknown', 'item') or title.isdigit() else '',
             asset_scope=asset_scope, ensure_registry=registry, ensure_prep=lambda: None,
-            clear_cache=lambda: None, preplog=lambda **kwargs: self.logged.append(kwargs),
+            clear_cache=lambda: None, upc_variants=lambda value: [str(value).lower()],
+            preplog=lambda **kwargs: self.logged.append(kwargs),
             update_data_version=lambda: None)
         self.client = self.app.test_client()
         self.tokens = 0
@@ -97,6 +105,20 @@ class PrepPlusTests(unittest.TestCase):
     def rows(self, sql, *params):
         with self.db('bol.db') as conn:
             return [tuple(row) for row in conn.execute(sql, params)]
+
+    def stock(self, *, ebay=None, amazon=None, macy=None):
+        if ebay:
+            with self.db('ebayStore.db') as conn:
+                conn.execute('INSERT INTO INVENTORY (UPC, Title, Image) VALUES (?,?,?)', (BARCODE, ebay, 'e.jpg'))
+        if amazon:
+            with self.db('amazonStore.db') as conn:
+                conn.execute('INSERT INTO ITEMS VALUES (?,?,?,?)', (BARCODE, amazon, 'a.jpg', '2026-01-01'))
+        if macy:
+            with self.db('rawbol.db') as conn:
+                conn.execute('INSERT INTO raw_bol_items VALUES (?,?,?)', (BARCODE, macy, 'm.jpg'))
+
+    def identify(self, barcode=BARCODE):
+        return self.client.get('/api/prep-plus/identify?upc=' + barcode).get_json()
 
     # ---- the happy paths -------------------------------------------------
 
@@ -180,6 +202,50 @@ class PrepPlusTests(unittest.TestCase):
         self.assertEqual(self.logged[0]['source'], 'prep-plus')
         self.assertEqual(self.logged[0]['status'], 'bad')
         self.assertEqual(self.logged[0]['base_upc'], BARCODE)
+
+    # ---- identifying a scan ----------------------------------------------
+
+    def test_our_own_listing_beats_the_macy_manifest(self):
+        self.stock(macy='MENS SHIRT BLU LG', ebay='Polo Ralph Lauren blue shirt, large')
+        found = self.identify()
+        self.assertEqual((found['found'], found['source'], found['title']),
+                         (True, 'ebay_store', 'Polo Ralph Lauren blue shirt, large'))
+
+    def test_the_macy_manifest_answers_when_we_have_not_listed_it(self):
+        self.stock(macy='MENS SHIRT BLU LG')
+        found = self.identify()
+        self.assertEqual((found['found'], found['source'], found['label'], found['image_url']),
+                         (True, 'macy_bol', 'Macy BOL', 'm.jpg'))
+
+    def test_an_amazon_listing_answers_when_ebay_has_nothing(self):
+        self.stock(macy='MENS SHIRT BLU LG', amazon='Ralph Lauren Mens Classic Fit Shirt')
+        found = self.identify()
+        self.assertEqual((found['source'], found['title']),
+                         ('amazon_store', 'Ralph Lauren Mens Classic Fit Shirt'))
+
+    def test_a_barcode_nobody_holds_is_left_for_the_catalogs(self):
+        found = self.identify()
+        self.assertFalse(found['found'])
+        # Every source is named in the report, so the page can say what it asked.
+        self.assertEqual([row['source'] for row in found['tried']],
+                         ['ebay_store', 'amazon_store', 'macy_bol'])
+
+    def test_a_placeholder_title_is_not_an_answer(self):
+        self.stock(ebay='unknown', macy='MENS SHIRT BLU LG')
+        self.assertEqual(self.identify()['source'], 'macy_bol')
+
+    def test_a_missing_store_database_is_not_an_answer_either(self):
+        (self.root / 'ebayStore.db').unlink()
+        self.stock(macy='MENS SHIRT BLU LG')
+        found = self.identify()
+        self.assertEqual(found['source'], 'macy_bol')
+        self.assertEqual([row for row in found['tried'] if row['source'] == 'ebay_store'][0]['result'],
+                         'unavailable')
+
+    def test_identify_needs_a_barcode(self):
+        response = self.client.get('/api/prep-plus/identify?upc=')
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('Scan a barcode first', response.get_json()['error'])
 
     # ---- the refusals ----------------------------------------------------
 

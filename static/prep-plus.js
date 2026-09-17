@@ -27,13 +27,23 @@
         condition: { button: 'micCondition', maxMs: 90000, quietMs: 2200, prompt: 'Say what is wrong with it, or how it looks.' }
     };
 
+    // A barcode gun types far faster than fingers, which is how the page tells a scan
+    // from someone filling the field in by hand and only spends a store lookup on a scan.
+    const SCAN_GAP_MS = 35;
+    const SCAN_SETTLE_MS = 140;
+    const SCAN_MIN_KEYS = 6;
+    const SCANNABLE = /^[0-9]{8,14}$/;
+
     const state = {
         photos: null,          // photo strip (data URLs)
         conditionAudio: null,  // { blob, name } kept for upload
         queue: [],
         sending: false,
-        counter: 0
+        counter: 0,
+        lookedUp: '',          // the barcode a lookup was already spent on
+        lookingUp: false
     };
+    const scan = { last: 0, fast: 0, timer: null };
     let mic = null;
 
     // ---- small ui helpers ------------------------------------------------
@@ -46,6 +56,12 @@
 
     function micStatus(message, tone) {
         const el = byId('micStatus');
+        el.textContent = message || '';
+        el.dataset.tone = tone || '';
+    }
+
+    function lookupStatus(message, tone) {
+        const el = byId('lookupStatus');
         el.textContent = message || '';
         el.dataset.tone = tone || '';
     }
@@ -319,6 +335,51 @@
         return String(byId('itemBarcode').value || '').trim();
     }
 
+    // ---- scanning --------------------------------------------------------
+
+    function markScanKey() {
+        const now = Date.now();
+        scan.fast = now - scan.last < SCAN_GAP_MS ? scan.fast + 1 : 0;
+        scan.last = now;
+        clearTimeout(scan.timer);
+        scan.timer = setTimeout(() => endScan(false), SCAN_SETTLE_MS);
+    }
+
+    function endScan(terminated) {
+        clearTimeout(scan.timer);
+        const scanned = terminated || scan.fast >= SCAN_MIN_KEYS;
+        scan.fast = 0;
+        if (!scanned || !SCANNABLE.test(barcodeValue())) return;
+        lookupStores({ auto: true });
+    }
+
+    // A scan has to land in the barcode box even when nothing was focused, or when the
+    // last thing touched was a button: the person picks up an item and pulls the trigger.
+    function onPageKey(event) {
+        if (event.ctrlKey || event.metaKey || event.altKey) return;
+        const field = byId('itemBarcode');
+        const active = document.activeElement;
+        const inField = active === field;
+        if (event.key === 'Enter') {
+            // A gun ends its scan with Enter; that must not submit or move on by itself.
+            if (!inField) return;
+            event.preventDefault();
+            endScan(true);
+            return;
+        }
+        if (event.key.length !== 1 || !/[0-9A-Za-z-]/.test(event.key)) return;
+        const typingElsewhere = active && !inField
+            && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable);
+        if (typingElsewhere) return;  // they are writing a name or a note, not scanning
+        if (!inField) {
+            event.preventDefault();
+            field.focus();
+            field.value += event.key;
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        markScanKey();
+    }
+
     async function generateBarcode() {
         const button = byId('generateBarcode');
         button.disabled = true;
@@ -375,47 +436,86 @@
         }
     }
 
-    async function lookupStores() {
-        const barcode = barcodeValue();
-        if (!barcode) {
-            status('Scan or type the item barcode first — a store lookup needs it.', 'bad');
+    function useName(title, label) {
+        const field = byId('itemTitle');
+        field.value = String(title || '').slice(0, 200);
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        lookupStatus('Name from ' + (label || 'the listing') + '. Check it against the item.', 'ok');
+    }
+
+    // Our own listings and the Macy manifest are things we already decided about, so a
+    // hit there fills the name straight away. Outside catalogs are guesses about someone
+    // else's barcode, so they are only ever offered.
+    async function identify(barcode) {
+        const response = await fetch('/api/prep-plus/identify?upc=' + encodeURIComponent(barcode));
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Could not check this barcode.');
+        return result;
+    }
+
+    async function askCatalogs(barcode, results) {
+        results.innerHTML = '<div class="lookup-note">Not ours — asking Amazon, eBay and UPCitemdb…</div>';
+        const response = await fetch('/api/items-prep/unmatched/lookup?upc=' + encodeURIComponent(barcode));
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'The lookup is unavailable.');
+        if (barcodeValue() !== barcode) return;  // scanned again while this was in flight
+        const candidates = result.candidates || [];
+        if (!candidates.length) {
+            const tried = (result.tried || []).map(row => `${row.source}: ${row.result}`).join(' · ');
+            results.innerHTML = `<div class="lookup-note">${escapeHtml(result.message || 'Nothing we hold and no catalog knows this barcode.')}`
+                + (tried ? `<br><span class="muted">${escapeHtml(tried)}</span>` : '') + '</div>';
+            lookupStatus('Nobody knows this one — say or type the name.');
             return;
         }
+        results.innerHTML = candidates.map((candidate, index) => `
+            <button type="button" class="lookup-hit" data-hit="${index}">
+                ${candidate.image_url ? `<img src="${escapeHtml(candidate.image_url)}" alt="">` : '<span class="lookup-noimg">no photo</span>'}
+                <span class="lookup-text">
+                    <strong>${escapeHtml(candidate.title || '')}</strong>
+                    <span class="muted">${escapeHtml(candidate.source || '')}</span>
+                </span>
+            </button>`).join('');
+        results.querySelectorAll('[data-hit]').forEach(button => {
+            button.addEventListener('click', () => {
+                const candidate = candidates[Number(button.dataset.hit)];
+                useName(candidate.title, candidate.source);
+            });
+        });
+        lookupStatus(`${candidates.length} catalog match${candidates.length > 1 ? 'es' : ''} — tap the right one, or say the name yourself.`);
+    }
+
+    async function lookupStores(options = {}) {
+        const barcode = barcodeValue();
+        if (!barcode) {
+            if (!options.auto) lookupStatus('Scan or type the item barcode first — a lookup needs it.', 'bad');
+            return;
+        }
+        // A scan that repeats, or a second scan of the same code, must not spend another
+        // lookup: UPCitemdb's free allowance is about a hundred a day for the whole site.
+        if (options.auto && (state.lookingUp || barcode === state.lookedUp)) return;
+        state.lookedUp = barcode;
+        state.lookingUp = true;
         const button = byId('lookupStores');
         const results = byId('lookupResults');
         button.disabled = true;
-        results.innerHTML = '<div class="lookup-note">Asking Amazon, eBay and UPCitemdb…</div>';
+        lookupStatus('');
+        results.innerHTML = '<div class="lookup-note">Checking what we already know…</div>';
         try {
-            const response = await fetch('/api/items-prep/unmatched/lookup?upc=' + encodeURIComponent(barcode));
-            const result = await response.json();
-            if (!response.ok || !result.success) throw new Error(result.error || 'The lookup is unavailable.');
-            const candidates = result.candidates || [];
-            if (!candidates.length) {
-                const tried = (result.tried || []).map(row => `${row.source}: ${row.result}`).join(' · ');
-                results.innerHTML = `<div class="lookup-note">${escapeHtml(result.message || 'No store had this exact barcode.')}`
-                    + (tried ? `<br><span class="muted">${escapeHtml(tried)}</span>` : '') + '</div>';
+            const ours = await identify(barcode);
+            if (barcodeValue() !== barcode) return;
+            if (ours.found) {
+                results.innerHTML = '';
+                // A scan must never overwrite a name the person already said or typed.
+                const typed = String(byId('itemTitle').value || '').trim();
+                if (typed && options.auto) lookupStatus(`We hold this as "${ours.title}" (${ours.label}). Your name is kept.`);
+                else useName(ours.title, ours.label);
                 return;
             }
-            results.innerHTML = candidates.map((candidate, index) => `
-                <button type="button" class="lookup-hit" data-hit="${index}">
-                    ${candidate.image_url ? `<img src="${escapeHtml(candidate.image_url)}" alt="">` : '<span class="lookup-noimg">no photo</span>'}
-                    <span class="lookup-text">
-                        <strong>${escapeHtml(candidate.title || '')}</strong>
-                        <span class="muted">${escapeHtml(candidate.source || '')}</span>
-                    </span>
-                </button>`).join('');
-            results.querySelectorAll('[data-hit]').forEach(button => {
-                button.addEventListener('click', () => {
-                    const candidate = candidates[Number(button.dataset.hit)];
-                    const field = byId('itemTitle');
-                    field.value = String(candidate.title || '').slice(0, 200);
-                    field.dispatchEvent(new Event('input', { bubbles: true }));
-                    status('Name taken from ' + (candidate.source || 'the store listing') + '. Check it against the item.', 'ok');
-                });
-            });
+            await askCatalogs(barcode, results);
         } catch (error) {
             results.innerHTML = `<div class="lookup-note bad">${escapeHtml(error.message || 'The lookup is unavailable.')}</div>`;
         } finally {
+            state.lookingUp = false;
             button.disabled = false;
         }
     }
@@ -456,7 +556,10 @@
         if (good) good.checked = true;
         applyCondition();
         byId('lookupResults').innerHTML = '';
+        lookupStatus('');
         micStatus('');
+        state.lookedUp = '';
+        scan.fast = 0;
         updateReady();
         byId('itemBarcode').focus();
     }
@@ -619,15 +722,18 @@
         byId('printBarcode').addEventListener('click', printBarcode);
         byId('lookupStores').addEventListener('click', lookupStores);
         byId('nextItem').addEventListener('click', queueItem);
-        byId('itemBarcode').addEventListener('input', updateReady);
         byId('itemTitle').addEventListener('input', updateReady);
-        byId('itemBarcode').addEventListener('keydown', event => {
-            // A barcode gun ends its scan with Enter; that should not submit anything.
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                byId('itemTitle').focus();
+        byId('itemBarcode').addEventListener('input', () => {
+            updateReady();
+            // A different code means the last answer is about a different item.
+            if (barcodeValue() !== state.lookedUp) {
+                byId('lookupResults').innerHTML = '';
+                lookupStatus('');
             }
         });
+        // Capture phase, on the document: a scan should land in the barcode box whatever
+        // happens to be focused, including nothing at all on a freshly opened page.
+        document.addEventListener('keydown', onPageKey, true);
         document.querySelectorAll('input[name="condition"]').forEach(input => {
             input.addEventListener('change', applyCondition);
         });

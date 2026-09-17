@@ -114,7 +114,24 @@
     <div class="card" id="itemCard" data-condition="good">
 
       <div class="step">
-        <div class="step-head"><span class="step-num">1</span><span class="step-title" data-i18n="prep_plus_step_photos">Photos</span>
+        <div class="step-head"><span class="step-num">1</span><span class="step-title" data-i18n="prep_plus_step_barcode">Barcode</span>
+          <span class="step-hint" data-i18n="prep_plus_barcode_hint">just scan — nothing to tap first</span></div>
+        <input type="text" id="itemBarcode" inputmode="numeric" autocomplete="off" autofocus data-i18n="prep_plus_barcode_placeholder" placeholder="Scan or type">
+        <div class="row" style="margin-top:10px;">
+          <button type="button" class="btn btn-primary" id="generateBarcode" data-i18n="prep_plus_generate">Generate</button>
+          <button type="button" class="btn btn-orange" id="printBarcode" data-i18n="prep_plus_print_label">Print label</button>
+          <button type="button" class="btn btn-gray" id="lookupStores" data-i18n="prep_plus_lookup_stores">Look up in stores</button>
+        </div>
+        <div class="note-line" id="lookupStatus" role="status" aria-live="polite"></div>
+        <div id="lookupResults"></div>
+        <div style="margin-top:12px;">
+          <label for="itemLot"><span data-i18n="prep_plus_lot_number">Lot number</span> <span class="muted" data-i18n="prep_plus_optional">(optional)</span></label>
+          <input type="text" id="itemLot" autocomplete="off" data-i18n="prep_plus_lot_placeholder" placeholder="Leave empty for store finds">
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-head"><span class="step-num">2</span><span class="step-title" data-i18n="prep_plus_step_photos">Photos</span>
           <span class="step-hint" data-i18n="prep_plus_photos_hint">first one is the thumbnail</span></div>
         <div class="identity-photo-strip" id="photoStrip"></div>
         <input type="file" id="photoInput" accept="image/*" capture="environment" multiple hidden>
@@ -127,7 +144,7 @@
       </div>
 
       <div class="step">
-        <div class="step-head"><span class="step-num">2</span><span class="step-title" data-i18n="prep_plus_step_name">Name</span>
+        <div class="step-head"><span class="step-num">3</span><span class="step-title" data-i18n="prep_plus_step_name">Name</span>
           <span class="step-hint" data-i18n="prep_plus_name_hint">say it or type it</span></div>
         <input type="text" id="itemTitle" maxlength="200" autocomplete="off" data-i18n="prep_plus_name_placeholder" placeholder="Brand, item, size, colour">
         <button type="button" class="mic" id="micTitle" data-mode="idle">
@@ -137,7 +154,7 @@
       </div>
 
       <div class="step">
-        <div class="step-head"><span class="step-num">3</span><span class="step-title" data-i18n="prep_plus_step_condition">Condition</span></div>
+        <div class="step-head"><span class="step-num">4</span><span class="step-title" data-i18n="prep_plus_step_condition">Condition</span></div>
         <div class="conditions">
           <label data-i18n="good"><input type="radio" name="condition" value="good" checked> Good</label>
           <label data-i18n="prep_plus_damaged"><input type="radio" name="condition" value="damaged"> Damaged</label>
@@ -161,22 +178,6 @@
           <button type="button" class="btn btn-gray" id="clearAudio" style="flex:none;min-height:38px;padding:6px 12px;" data-i18n="prep_plus_drop_recording">Drop</button>
         </div>
         <div class="note-line" id="micStatus" role="status" aria-live="polite"></div>
-      </div>
-
-      <div class="step">
-        <div class="step-head"><span class="step-num">4</span><span class="step-title" data-i18n="prep_plus_step_barcode">Barcode</span>
-          <span class="step-hint" data-i18n="prep_plus_barcode_hint">scan, type, or make one</span></div>
-        <input type="text" id="itemBarcode" inputmode="numeric" autocomplete="off" data-i18n="prep_plus_barcode_placeholder" placeholder="Scan or type">
-        <div class="row" style="margin-top:10px;">
-          <button type="button" class="btn btn-primary" id="generateBarcode" data-i18n="prep_plus_generate">Generate</button>
-          <button type="button" class="btn btn-orange" id="printBarcode" data-i18n="prep_plus_print_label">Print label</button>
-          <button type="button" class="btn btn-gray" id="lookupStores" data-i18n="prep_plus_lookup_stores">Look up in stores</button>
-        </div>
-        <div id="lookupResults"></div>
-        <div style="margin-top:12px;">
-          <label for="itemLot"><span data-i18n="prep_plus_lot_number">Lot number</span> <span class="muted" data-i18n="prep_plus_optional">(optional)</span></label>
-          <input type="text" id="itemLot" autocomplete="off" data-i18n="prep_plus_lot_placeholder" placeholder="Leave empty for store finds">
-        </div>
       </div>
 
       <div class="step">
