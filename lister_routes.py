@@ -150,6 +150,14 @@ def _base_upc(upc):
     return _text(upc).split('-', 1)[0].strip()
 
 
+def secure_image_url(url):
+    """The BOL carries its catalog pictures as http:// links (Macy's and Bloomingdale's Scene7).
+    A page served over https - the side panel included - will not load a plain http picture, so the
+    link is asked for over https instead. Both hosts answer there; anything else is left alone."""
+    value = _text(url)
+    return 'https://' + value[len('http://'):] if value[:7].lower() == 'http://' else value
+
+
 def is_suffixed(upc):
     return '-' in _text(upc)
 
@@ -1310,6 +1318,7 @@ class Lister:
                         image = _text(r.get('image_url'))
                         if image.lower() in ('nan', 'none', 'null'):
                             continue
+                        image = secure_image_url(image)
                         for upc in bases.get(_text(r.get('upc')), ()):
                             out.setdefault(upc, image)
             except sqlite3.Error:
@@ -2462,6 +2471,7 @@ class Lister:
         value = _text(url)
         if value.startswith(base_url.rstrip('/') + '/') or value.startswith('/'):
             raise ListerError('That photo is not one of our static files.')
+        value = secure_image_url(value)
         if not value.lower().startswith('https://'):
             raise ListerError('Photos must be Sweet Shelves static files or https images.')
         import requests

@@ -1008,6 +1008,41 @@ class ListerTestCase(unittest.TestCase):
             self.assertEqual(len(calls), 1)
         self.assertEqual(self.client.post('/api/lister/photo-link/opened', json={}).status_code, 400)
 
+    def test_queue_thumbnails_are_asked_for_over_https(self):
+        """The BOL keeps its Macy's pictures as http:// links. The side panel is an https page, so a
+        plain http picture is never loaded - the queue row showed a broken image instead."""
+        with closing(sqlite3.connect(self.root / 'rawbol.db')) as conn:
+            conn.execute('CREATE TABLE raw_bol_items (id INTEGER PRIMARY KEY, upc TEXT, image_url TEXT, prep_reason TEXT)')
+            conn.execute("INSERT INTO raw_bol_items (upc, image_url) VALUES (?, 'http://slimages.macys.com/is/image/MCY/24513711')",
+                         (UPC.lstrip('0'),))
+            conn.commit()
+        row = self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]
+        self.assertEqual(row['thumb'], 'https://slimages.macys.com/is/image/MCY/24513711')
+
+    def test_the_photo_proxy_takes_the_http_link_the_bol_gave_us(self):
+        """The fallback is what a refused picture falls back to; rejecting the BOL's own http link
+        made it a dead end and left the broken image on screen."""
+        grabbed = []
+
+        class FakeResponse:
+            status_code = 200
+            headers = {'Content-Type': 'image/jpeg'}
+
+            class raw:
+                @staticmethod
+                def read(_n):
+                    return bytes([0xff, 0xd8]) + b'jpeg'
+
+        def fake_get(url, **kwargs):
+            grabbed.append(url)
+            return FakeResponse()
+
+        with patch('requests.get', fake_get):
+            res = self.client.get('/api/lister/photos/fetch?url=http://slimages.macys.com/is/image/MCY/1',
+                                  base_url='https://pi.example')
+        self.assertEqual(res.status_code, 200, res.get_json())
+        self.assertEqual(grabbed, ['https://slimages.macys.com/is/image/MCY/1'])
+
     def test_photo_link_says_what_is_missing(self):
         self.assertEqual(self.client.post('/api/lister/photo-link', json={}).status_code, 400)
 

@@ -1224,6 +1224,9 @@
   // request from a chrome-extension:// page, or our own server behind Cloudflare Access, which an
   // <img> cannot sign in to. When one fails it is fetched once more through the server - the same
   // signed-in route the drag-and-drop photos use - and shown as its own bytes.
+  // A picture the store will not give us either way (Bloomingdale's answers 403 to us) ends as
+  // a clear pixel, so the row shows its empty grey tile instead of a broken-image icon.
+  const BLANK_PIC = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const proxiedPics = new Map();
   function proxiedPic(url) {
     if (!proxiedPics.has(url))
@@ -1247,7 +1250,7 @@
     if (!/^https?:/i.test(url)) return;
     img.dataset.src = url;
     img.dataset.retried = '1';
-    proxiedPic(url).then(src => { img.src = src; }).catch(() => {});
+    proxiedPic(url).then(src => { img.src = src; }).catch(() => { img.src = BLANK_PIC; });
   }, true);
 
   // Photos that already went into the store page (sent, or dragged in) are greyed out on the tiles.
