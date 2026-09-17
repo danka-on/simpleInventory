@@ -14,7 +14,7 @@
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false };
   const CONDITIONS = ['NEW', 'NEW_OTHER', 'NEW_WITH_DEFECTS', 'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE', 'FOR_PARTS_OR_NOT_WORKING'];
   const VALUE_LABELS = {
     title: 'Title', price: 'Price', quantity: 'Quantity', sku: 'SKU / custom label', upc: 'UPC', asin: 'ASIN',
@@ -31,7 +31,7 @@
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
-    voiceBusy: new Set(), qrOpen: false, toastAction: null,
+    voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
   };
 
   const $ = id => document.getElementById(id);
@@ -158,6 +158,7 @@
       if (upc === state.currentUpc) { renderDetail(); renderConfirm(); }
       void maybePrepare(item);
       void maybeTranscribe(item);
+      void maybeAutoPhotos(item);
       return item;
     } catch (error) {
       toast(error.message, true);
@@ -284,6 +285,7 @@
       try {
         const result = await pageMessage({ type: 'detect' });
         if (result?.ok && result.page) state.page = { ...page, ...result.page };
+        if (state.page.guide && !state.page.guide.active && state.guide?.active) state.guide = null;
       } catch (error) {
         state.page.error = error.message;
       }
@@ -429,6 +431,7 @@
       toast(filled.length ? `Filled ${filled.length} field${filled.length === 1 ? '' : 's'} on ${storeName(store)}` : 'No matching fields found on this page. Use "Pick a field".', !filled.length);
       if (info.proposal?.id) void api('/api/lister/events', { method: 'POST', body: { proposal_id: info.proposal.id, event: filled.length ? 'helper_filled' : 'helper_fill_failed', note: `${store} ${state.page.kind || ''}${auto ? ' (auto)' : ''}`, payload: { filled, unmatched: result.report.unmatched, aspects: result.report.aspects } } }).catch(() => {});
       if (state.settings.autoGuide) await guide('start', { silent: true });
+      await maybeAutoText();
     } catch (error) {
       toast('Fill failed: ' + error.message, true);
     } finally {
@@ -469,6 +472,10 @@
       state.assist = message.state; renderPage();
     } else if (message?.type === 'ss-lister-choice') {
       void recordChoice(message);
+    } else if (message?.type === 'ss-lister-action') {
+      if (message.action === 'fill') void fillPage();
+      else if (message.action === 'pick') void startPick();
+      else if (message.action === 'generate' && detail()) void generate(detail(), message.kind === 'description' ? 'description' : 'title');
     } else if (message?.type === 'ss-lister-dropped') {
       toast(message.ok ? `Dropped ${message.name} into the page's uploader` : 'Drop failed: ' + message.reason, !message.ok);
     }
@@ -663,7 +670,21 @@
     if (!info) return;
     const urls = (info.photos || []).map(p => p.url).filter(u => state.selectedPhotos.has(u));
     if (!urls.length) { toast('Tick the photos to clean up first', true); return; }
-    const prompt = ($('aiPrompt')?.value || '').trim();
+    await aiPhotoshopUrls(info, urls);
+  }
+
+  // Auto mode: every photo of ours (listing + prep) that has no AI version yet, once per item and session.
+  async function maybeAutoPhotos(info) {
+    if (!info || !state.settings.autoAiPhotos || state.aiBusy) return;
+    const done = new Set((info.photos || []).filter(p => p.source === 'ai').map(p => p.from).filter(Boolean));
+    const urls = (info.photos || []).filter(p => (p.source === 'listing' || p.source === 'prep') && !done.has(p.name) && !state.autoPhotos.has(p.url)).map(p => p.url);
+    if (!urls.length) return;
+    for (const url of urls) state.autoPhotos.add(url);
+    await aiPhotoshopUrls(info, urls);
+  }
+
+  async function aiPhotoshopUrls(info, urls) {
+    const prompt = ($('aiPrompt')?.value || state.aiPrompt || '').trim();
     state.aiPrompt = prompt && prompt !== info.aiPhotoPrompt ? prompt : '';
     remember();
     let done = 0;
@@ -721,10 +742,21 @@
     const el = $('pageCard');
     const item = current();
     const info = detail();
+    const toggles = `<div class="toggles">
+        <label class="check"><input id="autoAiTitle" type="checkbox" ${state.settings.autoAiTitle ? 'checked' : ''}> AI title as the page loads</label>
+        <label class="check"><input id="autoAiDescription" type="checkbox" ${state.settings.autoAiDescription ? 'checked' : ''}> AI description as the page loads</label>
+      </div>`;
+    const wireToggles = () => {
+      for (const key of ['autoAiTitle', 'autoAiDescription']) {
+        const box = $(key);
+        if (box) box.onchange = async () => { await saveSettings({ ...state.settings, [key]: box.checked }); toast(box.checked ? 'Will write the ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' automatically on every listing' : 'Automatic ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' off'); if (box.checked) void maybeAutoText(); };
+      }
+    };
     if (!page.store) {
       el.innerHTML = `<div class="store"><span class="badge none">no store page</span><span class="grow muted small">Pick an item, then start the listing. The panel searches the UPC, fills the form and records the listing.</span></div>
-        ${item ? `<div class="actions"><button id="startBtn" class="primary" type="button">Start on ${storeName(state.platform)}</button></div>` : ''}`;
+        ${item ? `<div class="actions"><button id="startBtn" class="primary" type="button">Start on ${storeName(state.platform)}</button></div>` : ''}${toggles}`;
       if ($('startBtn')) $('startBtn').onclick = () => startOn(state.platform);
+      wireToggles();
       return;
     }
     const kindText = {
@@ -742,34 +774,26 @@
     if (page.sku) chips.push(`SKU <code>${esc(page.sku)}</code>`);
     const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
     const g = state.guide;
-    const busy = Boolean(state.busy) || Boolean(state.genBusy);
     const actions = item ? [
       page.kind === 'listing-start' ? `<button id="searchBtn" class="primary" type="button" title="Type the UPC into the store's product search">Search UPC</button>` : '',
       !onForm && page.kind !== 'listing-start' && !ASSIST_KINDS.has(page.kind) ? `<button id="startBtn" type="button">Start on ${storeName(state.platform)}</button>` : '',
-      onForm ? `<button id="fillBtn" class="primary" type="button" ${busy ? 'disabled' : ''}>${state.busy === 'fill' ? 'Filling…' : 'Fill page'}</button>` : '',
-      onForm ? `<button id="guideBtn" type="button" title="Checklist overlay on the page: red = required and empty, green = filled">${g?.active ? 'Next field' : 'Checklist'}</button>` : '',
-      onForm && g?.active ? '<button id="guideStop" class="mini" type="button">Hide</button>' : '',
-      onForm && info ? `<button id="genTitle" class="mini" type="button" ${busy ? 'disabled' : ''} title="Write an 80-character title from the item and its notes, into the page">${state.genBusy === 'title' ? '…' : 'AI title'}</button>` : '',
-      onForm && info ? `<button id="genDescription" class="mini" type="button" ${busy ? 'disabled' : ''} title="Write the description from the item, its condition and prep notes, into the page">${state.genBusy === 'description' ? '…' : 'AI description'}</button>` : '',
-      `<button id="pickBtn" class="mini" type="button" title="Click a field on the store page and choose which value goes in">Pick a field…</button>`,
+      onForm && !g?.active ? `<button id="guideBtn" class="primary" type="button" title="Show the checklist overlay on the page (fill, AI text, pick a field live there)">Show checklist</button>` : '',
+      onForm && g?.active ? `<span class="muted small">Fill, AI text and Pick a field are on the checklist overlay on the page.</span>` : '',
     ].filter(Boolean).join('') : '';
     el.innerHTML = `
       <div class="store"><span class="badge ${page.store}">${storeName(page.store)}</span>
-        <span class="grow">${esc(kindText)}${g?.active && onForm ? ` <span class="muted small">· ${esc(g.open)} of ${esc(g.total)} left</span>` : ''}</span>
+        <span class="grow">${esc(kindText)}${g?.active && onForm ? ` <span class="muted small">· ${esc(g.open)} of ${esc(g.total)} left</span>` : ''}${state.genBusy ? ` <span class="muted small">· writing ${esc(state.genBusy)}…</span>` : ''}</span>
         <button id="pageRefresh" class="icon" type="button" title="Re-read page">↻</button></div>
       ${chips.length ? `<div class="chips">${chips.join('')}</div>` : ''}
       ${assistLine}
       ${actions ? `<div class="actions">${actions}</div>` : ''}
+      ${toggles}
       ${page.error ? `<div class="flag warn">Page script: ${esc(page.error)}</div>` : ''}`;
     $('pageRefresh').onclick = () => refreshTab();
     if ($('startBtn')) $('startBtn').onclick = () => startOn(state.platform);
     if ($('searchBtn')) $('searchBtn').onclick = () => { state.pendingSearch = { upc: item.upc, platform: state.platform }; void searchUpc(); };
-    if ($('fillBtn')) $('fillBtn').onclick = () => fillPage();
-    if ($('guideBtn')) $('guideBtn').onclick = () => guide(g?.active ? 'next' : 'start');
-    if ($('guideStop')) $('guideStop').onclick = () => guide('stop');
-    if ($('genTitle')) $('genTitle').onclick = () => generate(info, 'title');
-    if ($('genDescription')) $('genDescription').onclick = () => generate(info, 'description');
-    if ($('pickBtn')) $('pickBtn').onclick = () => startPick();
+    if ($('guideBtn')) $('guideBtn').onclick = () => guide('start');
+    wireToggles();
   }
 
   // Put one value on the store page (after an AI text or a note was applied) without a full re-fill.
@@ -779,6 +803,20 @@
       const result = await pageMessage({ type: 'fill', options: { values: values(info), store: state.page.store, targets: [target], aspects: {}, learned: state.learned[state.page.store + ':' + (state.page.kind || '')] || {} } });
       return (result.report.filled || []).some(f => f.target === target);
     } catch { return false; }
+  }
+
+  // The two auto-AI switches: once per tab and item, after the form was filled.
+  async function maybeAutoText() {
+    const info = detail();
+    const page = state.page;
+    if (!info || !page?.store || !(page.kind === 'listing-form' || page.kind === 'offer-form')) return;
+    for (const kind of ['title', 'description']) {
+      if (!state.settings[kind === 'title' ? 'autoAiTitle' : 'autoAiDescription']) continue;
+      const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc + '|' + kind;
+      if (state.autoText.has(key)) continue;
+      state.autoText.add(key);
+      await generate(info, kind);
+    }
   }
 
   function renderItems() {
@@ -824,6 +862,16 @@
     }
   }
 
+  // "LT: ... | EN: ..." written notes split into their two halves for the side-by-side view.
+  function noteHalves(note) {
+    const text = String(note.text || '');
+    const match = text.match(/^\s*LT:\s*([\s\S]*?)\s*\|\s*EN:\s*([\s\S]*)$/i);
+    if (match) return { lt: match[1].trim(), en: match[2].trim() };
+    if (/^\s*LT:/i.test(text)) return { lt: text.replace(/^\s*LT:\s*/i, '').trim(), en: note.english || '' };
+    if (/^\s*EN:/i.test(text)) return { lt: '', en: text.replace(/^\s*EN:\s*/i, '').trim() };
+    return { lt: '', en: note.english || text };
+  }
+
   function renderDetail() {
     const item = current();
     const info = detail();
@@ -839,11 +887,6 @@
     const notes = info.notes || [];
     const voice = info.voiceNotes || [];
     const photos = info.photos || [];
-    const groups = [
-      ['Listing', photos.filter(p => p.source === 'listing' || p.source === 'ai')],
-      ['Condition (prep)', photos.filter(p => p.source === 'prep')],
-      ['Catalog', photos.filter(p => p.source === 'catalog')],
-    ].filter(([, list]) => list.length);
     const existing = (info.existing || {})[state.platform] || [];
     const linkedHere = (info.links || []).find(l => l.platform === state.platform);
     const aspects = Object.entries(info.fields.aspects || {});
@@ -867,8 +910,12 @@
       `live eBay ${esc(gate.liveEbay ?? 0)}`,
       `Amazon ${esc(gate.liveAmazon ?? 0)}`,
     ].filter(Boolean).join(' · ');
+    const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : p.source === 'catalog' ? 'catalog' : '');
     const tile = p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
-        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}></div>`;
+        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}>
+        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden>too small</span></div>`;
+    const noteRow = (icon, lt, en, extra = '') => `<div class="note2"><span class="ico" title="${icon === '🎤' ? 'Voice note' : 'Written note'}">${icon}</span>
+        <div class="lt">${lt ? esc(lt) : '<span class="muted">—</span>'}</div><div class="en">${en ? esc(en) : '<span class="muted">—</span>'}</div>${extra}</div>`;
     const copyAll = [
       `Title: ${v.title}`, `Price: ${money(v.price)} ${v.currency || ''}`.trim(), `Quantity: ${v.quantity ?? ''}`, `SKU: ${v.sku}`, `UPC: ${v.upc}`,
       `Condition: ${v.condition}${v.conditionDescription ? ' - ' + v.conditionDescription : ''}`, v.brand ? `Brand: ${v.brand}` : '',
@@ -891,30 +938,38 @@
       ${existing.length && !linkedHere ? `<div class="flag warn">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}.
         <button id="markExisting" class="mini" type="button">Use that listing</button> ${item.storeUrl ? `<a href="${esc(item.storeUrl)}" target="_blank" rel="noopener">open</a>` : ''}</div>` : ''}
 
+      <h3>Notes <span class="grow"></span>${notes.length || voice.length || info.defect || v.conditionDescription ? '<span class="muted">LT · EN</span>' : '<span class="muted">none</span>'}</h3>
+      ${v.conditionDescription ? `<div class="note cond"><b>On the listing${v.conditionDescriptionSource === 'notes' ? ' · from the prep notes, read once' : ''}:</b> ${esc(v.conditionDescription)}</div>` : ''}
+      ${voice.map(n => noteRow('🎤', n.lithuanian, n.english, `<div class="acts">
+          ${n.status === 'complete' || n.english ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span>' : `<button class="mini" data-transcribe="${n.id}" type="button" title="Transcribe and translate">text</button>`)}
+          <button class="mini" data-play="${esc(n.url)}" type="button" title="Play the recording">▶</button>
+          ${n.english ? `<button class="mini" data-usenote="${n.id}" type="button" title="Add to the condition note on the listing">→ listing</button>` : ''}
+          ${n.error && !n.english ? `<span class="chip bad" title="${esc(n.error)}">failed</span>` : ''}</div>`)).join('')}
+      ${info.defect ? noteRow('📦', '', 'BOL reason: ' + info.defect) : ''}
+      ${notes.map(n => { const h = noteHalves(n); return noteRow('📝', h.lt, h.en, `<div class="acts muted small">${esc((n.createdAt || '').slice(0, 10))}</div>`); }).join('')}
+      <audio id="notePlayer" preload="none" hidden></audio>
+
       <h3>Photos <span class="muted">(${photos.length})</span><span class="grow"></span><button id="addPhoto" class="mini" type="button">${state.qrOpen ? 'Hide QR' : '+ Photo (QR)'}</button><button id="photoSelectAll" class="mini" type="button">${state.selectedPhotos.size ? 'Clear' : 'Select ours'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
       ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to add photos of this unit, then press ↻.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
-      ${groups.length ? groups.map(([label, list]) => `<div class="pgroup"><div class="plabel">${esc(label)} <span class="muted">(${list.length})</span></div><div class="photos">${list.map(tile).join('')}</div></div>`).join('') : '<div class="muted small">No photos yet. Use + Photo (QR) to add some from the phone.</div>'}
+      ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo (QR) to add some from the phone.</div>'}
       <div class="row tight">
         <button id="sendPhotos" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? 'Sending…' : 'Send to page'}</button>
         <button id="aiPhotos" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? esc(state.aiBusy) : 'AI photoshop'}</button>
-        <button id="copyPhotos" class="mini" type="button">Copy URLs</button>
+        <label class="check small"><input id="autoAiPhotos" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> auto on every photo</label>
       </div>
       <details ${state.aiPrompt ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(state.aiPrompt || info.aiPhotoPrompt || '')}</textarea><button id="aiPromptReset" class="mini" type="button">Reset to default</button></details>
-
-      <h3>Notes <span class="grow"></span>${notes.length || voice.length || info.defect || v.conditionDescription ? '' : '<span class="muted">none</span>'}</h3>
-      ${v.conditionDescription ? `<div class="note" style="border-left:4px solid var(--blue)"><b>Condition note on the listing${v.conditionDescriptionSource === 'notes' ? ' (from the prep notes — read it once)' : ''}:</b> ${esc(v.conditionDescription)}</div>` : ''}
-      ${voice.map(n => `<div class="note"><b>Voice note</b> ${n.status === 'complete' ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span> transcribing…' : `<button class="mini" data-transcribe="${n.id}" type="button">Transcribe</button>`)}
-        ${n.english ? `<div>${esc(n.english)}</div>` : ''}${n.lithuanian ? `<div class="lt">${esc(n.lithuanian)}</div>` : ''}${n.error && !n.english ? `<div class="flag warn">${esc(n.error)}</div>` : ''}
-        <audio controls preload="none" src="${esc(n.url)}"></audio>${n.english ? `<div class="row tight"><button class="mini" data-usenote="${n.id}" type="button">Use as condition note</button><button class="mini" data-transcribe="${n.id}" data-again="1" type="button">Redo</button></div>` : ''}</div>`).join('')}
-      ${info.defect ? `<div class="note"><b>BOL reason:</b> ${esc(info.defect)}</div>` : ''}
-      ${notes.map(n => `<div class="note">${esc(n.english || n.text)}${n.english && n.english !== n.text ? `<div class="lt">${esc(n.text)}</div>` : ''}<div class="when">${esc((n.createdAt || '').slice(0, 16).replace('T', ' '))}</div></div>`).join('')}
-
       ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
-      <div class="row"><button id="copyAllBtn" class="mini" type="button">Copy all values</button><button id="openAgent" class="link" type="button">Open in Listing Agent</button><button id="openItems" class="link" type="button">Items to List</button></div>
       <details><summary>Text for manual paste</summary><pre class="copyall">${esc(copyAll)}</pre></details>`;
 
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
+    for (const button of el.querySelectorAll('button[data-play]')) button.onclick = () => {
+      const player = $('notePlayer');
+      if (player.src === button.dataset.play && !player.paused) { player.pause(); button.textContent = '▶'; return; }
+      for (const b of el.querySelectorAll('button[data-play]')) b.textContent = '▶';
+      player.src = button.dataset.play; void player.play().catch(() => toast('Could not play the recording', true)); button.textContent = '⏸';
+      player.onended = () => { button.textContent = '▶'; };
+    };
     for (const button of el.querySelectorAll('button[data-usenote]')) button.onclick = async () => {
       const note = voice.find(n => n.id === Number(button.dataset.usenote));
       if (!note) return;
@@ -929,6 +984,9 @@
     $('photoRefresh').onclick = () => { delete state.details[info.upc]; void loadDetail(info.upc, { force: true }); };
     for (const box of el.querySelectorAll('input[data-select]')) box.onchange = () => { if (box.checked) state.selectedPhotos.add(box.dataset.select); else state.selectedPhotos.delete(box.dataset.select); box.closest('.photo').classList.toggle('selected', box.checked); };
     for (const tileEl of el.querySelectorAll('.photo')) {
+      const img = tileEl.querySelector('img');
+      const flagSize = () => { if (img.naturalWidth && (img.naturalWidth < 500 || img.naturalHeight < 500)) tileEl.querySelector('.tag.small').hidden = false; };
+      if (img.complete) flagSize(); else img.onload = flagSize;
       tileEl.onclick = event => { if (event.target.matches('input')) return; const box = tileEl.querySelector('input'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); };
       tileEl.onmouseenter = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
       tileEl.onmousedown = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
@@ -949,12 +1007,9 @@
     }
     $('sendPhotos').onclick = () => sendPhotos();
     $('aiPhotos').onclick = () => aiPhotoshop();
+    $('autoAiPhotos').onchange = async () => { await saveSettings({ ...state.settings, autoAiPhotos: $('autoAiPhotos').checked }); toast($('autoAiPhotos').checked ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off'); if ($('autoAiPhotos').checked) void maybeAutoPhotos(info); };
     $('aiPromptReset').onclick = () => { $('aiPrompt').value = info.aiPhotoPrompt || ''; state.aiPrompt = ''; remember(); };
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
-    $('copyPhotos').onclick = () => copy(photos.map(p => p.url).join('\n'), 'Copied photo URLs');
-    $('copyAllBtn').onclick = () => copy(copyAll, 'Copied listing text');
-    $('openAgent').onclick = () => chrome.tabs.create({ url: serverBase() + '/listingagent?upc=' + encodeURIComponent(info.upc) });
-    $('openItems').onclick = () => chrome.tabs.create({ url: serverBase() + '/items-to-list?q=' + encodeURIComponent(info.baseUpc || info.upc) });
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
   }
 
@@ -1127,7 +1182,13 @@
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
     $('reload').onclick = () => { state.details = {}; void connect().then(() => loadQueue()); void refreshTab(); };
     chrome.tabs.onActivated.addListener(scheduleRefresh);
-    chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (tab?.active && (info.status === 'complete' || info.url)) scheduleRefresh(); });
+    chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+      if (info.status === 'loading' && !info.url) {
+        for (const set of [state.autoFilled, state.autoText]) for (const key of [...set]) if (key.startsWith(tabId + '|')) set.delete(key);
+        if (state.tab?.id === tabId) state.guide = null;
+      }
+      if (tab?.active && (info.status === 'complete' || info.url)) scheduleRefresh();
+    });
     chrome.windows?.onFocusChanged?.addListener(() => scheduleRefresh());
     // Store pages render their forms after load; look again a little later.
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (tab?.active && info.status === 'complete') setTimeout(scheduleRefresh, 2500); });

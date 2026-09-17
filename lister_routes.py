@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.9'
+VERSION = '0.2.11'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -1119,17 +1119,20 @@ class Lister:
         photos = []
         seen = set()
 
-        def add_photo(url, source, photo_id=None):
+        def add_photo(url, source, photo_id=None, origin=''):
             url = _absolute(url, base_url)
             if not url or url in seen:
                 return
             seen.add(url)
-            photos.append({'url': url, 'source': source, 'id': photo_id, 'name': url.rsplit('/', 1)[-1].split('?')[0]})
+            photos.append({'url': url, 'source': source, 'id': photo_id, 'name': url.rsplit('/', 1)[-1].split('?')[0],
+                           'from': origin})  # for AI photos: the source photo's file name
 
         for p in own_photos:
             rel = _text(p.get('image_path'))
             if rel:
-                add_photo(f'/static/{rel}', 'ai' if '_ai_' in rel else 'listing', p.get('id'))
+                origin = _text(p.get('original_filename'))
+                add_photo(f'/static/{rel}', 'ai' if '_ai_' in rel else 'listing', p.get('id'),
+                          origin[3:] if origin.startswith('ai:') else '')
         for url in prep.get('images') or []:
             add_photo(url, 'prep')
         for url in detail.get('images') or []:

@@ -33,7 +33,9 @@ const detail = {
   gate: { prepQty: 1, rackQty: 1, liveEbay: 0, liveAmazon: 0, listable: 1, mismatch: false },
   condition: { condition: 'USED_GOOD', conditionDescription: 'Small chip on the rim', reason: 'prep notes mention a flaw', assumed: false },
   notes: [{ id: 5, text: 'LT: nuotrauka | EN: Small chip on the rim', english: 'Small chip on the rim', createdAt: '2026-09-15T10:00:00' }],
-  defect: '', voiceNotes: [], videos: [], photos: [], inventory: { quantity: 1, positions: ['B-1'], rows: [] }, cost: 4.5, bol: {},
+  defect: '', videos: [], inventory: { quantity: 1, positions: ['B-1'], rows: [] }, cost: 4.5, bol: {},
+  voiceNotes: [{ id: 41, url: 'https://pi.nexuscentralhq.org/static/items_prep/v.webm', createdAt: '2026-09-15', english: 'scratched on the back', lithuanian: 'subraižytas gale', status: 'complete', error: '' }],
+  photos: [{ url: 'https://pi.nexuscentralhq.org/static/items_prep/p1.jpg', source: 'prep', id: null, name: 'p1.jpg', from: '' }],
   existing: { ebay: [], amazon: [] }, links: [], queue: { id: 11, status: 'queued', listed: { ebay: false, amazon: false }, skipped: [] },
   proposal: { id: 7, status: 'proposed', ready: true, flags: [] }, preparing: { running: false, error: '' },
   mobilePhotosUrl: 'https://pi.nexuscentralhq.org/items-to-list/mobile-photos?upc=' + UPC + '-1', aiPhotoPrompt: 'Clean up this product photo.',
@@ -89,7 +91,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     channel: 'msedge', headless: false,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { events: [], links: [], skip: [], prepare: [], learn: [], detail: 0 };
+  const calls = { events: [], links: [], skip: [], prepare: [], learn: [], generate: [], detail: 0 };
   let linked = false;
   try {
     // Fake Sweet Shelves server: the extension must send the anti-CSRF header and cookies.
@@ -112,6 +114,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
       if (url.pathname.endsWith('/skip')) { calls.skip.push(request.postDataJSON()); return json({ success: true, queue: 'queued' }); }
       if (url.pathname === '/api/lister/learn') { calls.learn.push(request.postDataJSON()); return json({ success: true, agreed: false, learned: { ebay: {} } }, 201); }
+      if (url.pathname.endsWith('/generate')) { const body = request.postDataJSON(); calls.generate.push(body); return json(body.kind === 'title' ? { success: true, kind: 'title', title: 'AI Lenox Butterfly Meadow Plate' } : { success: true, kind: 'description', descriptionHtml: '<p>AI description</p>', descriptionText: 'AI description' }); }
       if (url.pathname === '/api/lister/events') { calls.events.push(request.postDataJSON()); return json({ success: true }); }
       if (url.pathname === '/api/lister/links') {
         calls.links.push(request.postDataJSON());
@@ -164,7 +167,16 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     for (const expected of ['unit 1', 'status: BAD', '1 on the rack', '@ B-1', '1 to list', 'prep 1', 'Small chip on the rim', 'from the prep notes']) {
       assert.ok(detailText.includes(expected), 'item view shows "' + expected + '"');
     }
-    for (const gone of ['Prepped:', 'basic values', 'Prepare', 'Location matches']) assert.ok(!detailText.includes(gone), 'item view no longer shows "' + gone + '"');
+    for (const gone of ['Prepped:', 'basic values', 'Prepare', 'Location matches', 'Copy all values', 'Open in Listing Agent', 'Items to List']) assert.ok(!detailText.includes(gone), 'item view no longer shows "' + gone + '"');
+    // Notes come before photos, Lithuanian and English side by side, voice notes with a mic and a play button.
+    assert.ok(detailText.indexOf('Notes') < detailText.indexOf('Photos'), 'notes are above the photos');
+    const voiceRow = await panel.$eval('.note2', row => ({ ico: row.querySelector('.ico').textContent, lt: row.querySelector('.lt').textContent, en: row.querySelector('.en').textContent, play: Boolean(row.querySelector('button[data-play]')) }));
+    assert.deepEqual(voiceRow, { ico: '🎤', lt: 'subraižytas gale', en: 'scratched on the back', play: true });
+    const writtenRow = await panel.$$eval('.note2', rows => rows.map(row => ({ lt: row.querySelector('.lt').textContent, en: row.querySelector('.en').textContent })).pop());
+    assert.deepEqual(writtenRow, { lt: 'nuotrauka', en: 'Small chip on the rim' }, 'a "LT: … | EN: …" note is split into its halves');
+    assert.equal(await panel.$eval('.photo .tag.prep', t => t.textContent), 'prep', 'prep photos carry a small bubble');
+    assert.ok(await panel.$('#autoAiPhotos'), 'the automatic AI photoshop switch sits with the photos');
+    assert.ok(await panel.$('#autoAiTitle') && await panel.$('#autoAiDescription'), 'the automatic AI text switches sit on the store card');
     const tiles = await panel.$$eval('.tiles .tile', els => els.map(t => ({ k: t.querySelector('.k').textContent, v: t.querySelector('.v').textContent, cls: t.className })));
     assert.deepEqual(tiles.map(t => t.k), ['Warehouse stock', 'eBay', 'Amazon']);
     assert.ok(!detailText.includes('prep and rack differ'), 'the mismatch is shown visually, not as a sentence');
@@ -253,6 +265,15 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(!rowFor('UPC'), 'the UPC is not on the checklist');
     assert.ok(rowFor('Condition description').dot.includes('37, 99, 235') && rowFor('Condition description').text.includes('prep notes'), 'the note-sourced condition description is blue with a disclaimer');
     assert.ok((await panel.textContent('#pageCard')).includes('of'), 'the store card shows the checklist progress');
+    // The actions live on the overlay now, not on the store card.
+    assert.ok(!(await panel.$('#fillBtn')) && !(await panel.$('#pickBtn')), 'no Fill / Pick buttons on the store card');
+    const footButtons = await store.$$eval('#ss-lister-guide [data-ss="foot"] button', els => els.map(b => b.textContent.trim()));
+    for (const label of ['Fill page', 'Pick a field…', 'Hide', 'Next (Tab)']) assert.ok(footButtons.includes(label), 'overlay footer has ' + label + ': ' + footButtons);
+    // The AI button beside the Title row writes the title through the panel and puts it on the page.
+    await store.click(`#ss-lister-guide [data-ss-row="${rows.findIndex(r => r.text.startsWith('Title'))}"] [data-ss-ai="title"]`);
+    await store.waitForFunction(() => document.getElementById('title').value === 'AI Lenox Butterfly Meadow Plate', null, { timeout: 15000 });
+    assert.equal(calls.generate[0].kind, 'title');
+    assert.ok(calls.generate[0].values.notes.includes('scratched on the back'), 'the voice note text feeds the AI prompt');
     // Re-reading the page while the guide is up must not throw (0.2.2 did: "reading 'length'").
     await panel.click('#pageRefresh');
     await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 10000 });
@@ -274,7 +295,8 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // Photos reach the page's uploader through the file input (the item view is already up: locked).
     detail.photos.push({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/own.jpg', source: 'listing', id: 1, name: 'own.jpg' });
     await panel.click('#photoRefresh');
-    await panel.waitForSelector('.photo');
+    await panel.waitForSelector('.photo.listing');
+    await panel.click('.photo.listing input[data-select]');  // only the listing photo, not the prep one
     await panel.click('#sendPhotos');
     await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 15000 });
     assert.deepEqual(await store.evaluate(() => window.photoNames), ['own.jpg']);

@@ -442,6 +442,7 @@ class ListerTestCase(unittest.TestCase):
             conn.commit()
         with self.app.app_context():
             listing_queue._listagent_add_photo(UPC + '-1', image_path='listingagent_uploads/own.jpg')
+            listing_queue._listagent_add_photo(UPC + '-1', image_path='listingagent_uploads/x_ai_1.jpg', original_filename='ai:own.jpg')
         data = self.client.get(f'/api/lister/queue/{UPC}-1', base_url='https://pi.example').get_json()
         self.assertTrue(data['success'], data)
         item = data['item']
@@ -457,8 +458,9 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(fields['conditionDescriptionSource'], 'notes')
         self.assertEqual((item['prepStatus']['status'], item['prepStatus']['reason']), ('bad', 'chip'))
         self.assertEqual(item['gate'], {'prepQty': 1, 'rackQty': 3, 'liveEbay': 1, 'liveAmazon': 0, 'listable': 1, 'mismatch': True})
-        self.assertEqual(fields['images'][0], 'https://pi.example/static/listingagent_uploads/own.jpg')
-        self.assertEqual([p['source'] for p in item['photos']], ['listing', 'prep', 'catalog'])
+        self.assertEqual(fields['images'][0], 'https://pi.example/static/listingagent_uploads/x_ai_1.jpg')
+        self.assertEqual([p['source'] for p in item['photos']], ['ai', 'listing', 'prep', 'catalog'])
+        self.assertEqual([p['from'] for p in item['photos']], ['own.jpg', '', '', ''], 'an AI photo names the photo it was made from')
         self.assertEqual([v['status'] for v in item['voiceNotes']], ['complete', 'pending'])
         self.assertEqual(item['voiceNotes'][0]['english'], 'scratched on the back')
         self.assertEqual(item['notes'][0]['english'], 'box opened, item unused')

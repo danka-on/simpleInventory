@@ -514,6 +514,11 @@
     try { el.style.outline = el.dataset.ssGuidePrev || ''; el.style.outlineOffset = ''; delete el.dataset.ssGuidePrev; delete el.dataset.ssGuideDone; } catch { /* ignore */ }
   }
 
+  // Buttons on the overlay that need the server go through the side panel.
+  function panelAction(action, extra) {
+    chrome.runtime.sendMessage({ type: 'ss-lister-action', action, ...(extra || {}) }).catch(() => {});
+  }
+
   function guidePanel() {
     if (guide.panel) return guide.panel;
     const panel = document.createElement('div');
@@ -531,9 +536,15 @@
       <div data-ss="foot" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid #334155;background:#111827">
         <button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:600">Use suggestion (Ctrl+Enter)</button>
         <button data-ss="next" style="background:#334155;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
+        <button data-ss="fill" title="Fill the form from the item's values" style="background:#1d4ed8;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Fill page</button>
+        <button data-ss="pick" title="Click a field on the page and choose which value goes in" style="background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Pick a field…</button>
+        <button data-ss="hide" title="Hide the checklist (Esc)" style="background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Hide</button>
       </div>`;
     panel.querySelector('[data-ss="use"]').onclick = () => guideUse();
     panel.querySelector('[data-ss="next"]').onclick = () => guideNext();
+    panel.querySelector('[data-ss="fill"]').onclick = () => panelAction('fill');
+    panel.querySelector('[data-ss="pick"]').onclick = () => panelAction('pick');
+    panel.querySelector('[data-ss="hide"]').onclick = () => { guideStop(); notifyGuide(); };
     panel.querySelector('[data-ss="done"]').onclick = () => { guideStop(); notifyGuide(); };
     panel.querySelector('[data-ss="collapse"]').onclick = event => { event.stopPropagation(); guide.collapsed = !guide.collapsed; guideRender(); };
     panel.querySelector('[data-ss="head"]').onclick = () => { if (guide.collapsed) { guide.collapsed = false; guideRender(); } };
@@ -577,9 +588,11 @@
         <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.value ? ` <span style="color:#e2e8f0;font-weight:700">· ${escapeHtml(row.value)}</span>` : ''}${row.required && !row.done ? ' <span style="color:#fca5a5;font-size:11px">required</span>' : ''}
           ${!row.done && row.suggestion ? `<div style="color:#cbd5e1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}
           ${fromNotes ? '<div style="color:#93c5fd;font-size:11px">Filled from the warehouse prep notes. Read it once before listing.</div>' : ''}</span>
+        ${row.target === 'title' || row.target === 'description' ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="background:#0a9c6c;color:#fff;border:0;border-radius:6px;padding:2px 8px;cursor:pointer;font:600 11px system-ui,sans-serif">AI</button>` : ''}
         <span style="color:${colour};font-weight:700">${row.done ? (fromNotes ? 'ⓘ' : '✓') : (row.required ? '!' : '·')}</span></div>`;
     }).join('') || '<div style="padding:10px 12px;color:#cbd5e1">No listing fields found on this page yet.</div>';
     for (const el of body.querySelectorAll('[data-ss-row]')) el.onclick = () => guideGo(Number(el.dataset.ssRow));
+    for (const el of body.querySelectorAll('[data-ss-ai]')) el.onclick = event => { event.stopPropagation(); el.textContent = '…'; panelAction('generate', { kind: el.dataset.ssAi }); };
     panel.querySelector('[data-ss="use"]').style.display = current && !current.done && current.suggestion && current.kind === 'field' ? '' : 'none';
     for (const row of guide.rows) guideStyle(row, row.done ? (row.fromNotes ? 'notes' : 'done') : (row.required ? 'required' : 'optional'));
     const pointer = guidePointer();
