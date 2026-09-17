@@ -974,6 +974,7 @@
     <script src="/static/scan-feedback.js?v=20260912a"></script>
     <script src="/static/media-capture.js?v=20260914c"></script>
     <script src="/static/warehouse-identity.js?v=20260914c"></script>
+    <script src="/static/last-scan-preview.js?v=20260917a"></script>
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
     <script src="/static/no-barcode-label.js?v=20260912a"></script>
     <script>
@@ -2165,6 +2166,20 @@
             return sessionStorage.getItem('positionLocked') === 'true';
         }
 
+
+        function lastScanLookup(code) {
+            const key = normalizeManualTitleKey(code);
+            const cached = key ? screeningCache.get(key) : null;
+            return cached ? Promise.resolve(cached) : fetchAddItemScreeningSingle(key);
+        }
+        function lastScanImageSaved(code, url) {
+            const key = normalizeManualTitleKey(code);
+            if (key) screeningCache.set(key, Object.assign({}, screeningCache.get(key) || {}, { image_url: url, missing_image: false }));
+        }
+        var lastScanPreview = window.LastScanPreview
+            ? window.LastScanPreview.mount(document.getElementById('barcodeList'), { lookup: lastScanLookup, onImage: lastScanImageSaved })
+            : null;
+
         async function addBarcodeToList(code) {
             const screening = await ensureScannedBarcodeReadyForAdd(code);
             if (!screening.ready) {
@@ -2185,6 +2200,7 @@
             }
             playBeep();
             updateBarcodeList();
+            if (lastScanPreview) lastScanPreview.show(code, screening.title);
             resetAutoSubmitTimer();
             return screening.title;
         }
@@ -2195,6 +2211,7 @@
 
             if (scannedBarcodeItems.length === 0) {
                 listEl.innerHTML = '<div style="color:#999; text-align:center; padding:12px;">' + t('no_barcodes_scanned', 'No barcodes scanned yet') + '</div>';
+                if (lastScanPreview) lastScanPreview.hide();
                 return;
             }
 

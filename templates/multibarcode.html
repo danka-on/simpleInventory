@@ -1300,6 +1300,7 @@
     <script src="/static/scan-feedback.js?v=20260912a"></script>
     <script src="/static/media-capture.js?v=20260914c"></script>
     <script src="/static/warehouse-identity.js?v=20260914c"></script>
+    <script src="/static/last-scan-preview.js?v=20260917a"></script>
     <script src="/static/barcode-entry-state.js?v=20260505a"></script>
     <script src="/static/no-barcode-label.js?v=20260912a"></script>
     <script src="/static/ios-scanner-keyboard.js?v=20260907a"></script>
@@ -1546,6 +1547,18 @@
         
         const barcodeInput = document.getElementById('barcodeInput');
         const barcodeListEl = document.getElementById('barcodeList');
+        function lastScanLookup(code) {
+            const key = normalizeManualTitleKey(code);
+            const cached = key ? screeningCache.get(key) : null;
+            return cached ? Promise.resolve(cached) : fetchAddItemScreeningSingle(key);
+        }
+        function lastScanImageSaved(code, url) {
+            const key = normalizeManualTitleKey(code);
+            if (key) screeningCache.set(key, Object.assign({}, screeningCache.get(key) || {}, { image_url: url, missing_image: false }));
+        }
+        const lastScanPreview = window.LastScanPreview
+            ? window.LastScanPreview.mount(barcodeListEl, { lookup: lastScanLookup, onImage: lastScanImageSaved })
+            : null;
         const doneButton = document.getElementById('doneButton');
         const countBadge = document.getElementById('countBadge');
         const scannerInput = document.getElementById('scannerInput');
@@ -2163,6 +2176,7 @@
             
             // Update display and reset timer
             updateList();
+            if (lastScanPreview) lastScanPreview.show(code, screening.title);
             return screening.title;
         }
         
@@ -2360,6 +2374,7 @@
         // Update the barcode list display
         function updateList() {
             if (barcodeItems.length === 0) {
+                if (lastScanPreview) lastScanPreview.hide();
                 barcodeListEl.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-inbox"></i>
