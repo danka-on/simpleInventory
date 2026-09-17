@@ -259,14 +259,6 @@ const translations = {
   prep_plus: { en: 'Prep +', lt: 'Paruošimas +' },
   prep_plus_title: { en: 'Prep + — Bulk Intake', lt: 'Paruošimas + — masinis priėmimas' },
   prep_plus_heading: { en: 'Prep +', lt: 'Paruošimas +' },
-  prep_plus_lede: {
-    en: 'For items no manifest describes: damaged units, things with no readable barcode, and store finds. '
-      + 'Capture what is in your hand, hit Next item, and carry on — each one uploads in the background and '
-      + 'lands on Items to List as a prepped item.',
-    lt: 'Prekėms, kurių nėra jokiame manifeste: pažeistiems vienetams, daiktams be įskaitomo brūkšninio kodo '
-      + 'ir radiniams parduotuvėje. Užfiksuokite tai, ką laikote rankose, spauskite Kita prekė ir tęskite — '
-      + 'kiekviena įkeliama fone ir atsiranda sąraše Paruoštos prekės.'
-  },
   prep_plus_step_photos: { en: 'Photos', lt: 'Nuotraukos' },
   prep_plus_photos_hint: { en: 'first one is the thumbnail', lt: 'pirmoji yra pagrindinė' },
   prep_plus_take_photos: { en: 'Take photos', lt: 'Fotografuoti' },
