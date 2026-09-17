@@ -2503,7 +2503,13 @@ def register(app, deps):
 
     def base_url():
         try:
-            return (request.url_root or '').strip() or 'http://localhost/'
+            root = (request.url_root or '').strip() or 'http://localhost/'
+            # Behind Cloudflare gunicorn is spoken to over plain HTTP, so url_root says http://.
+            # Links we hand to a phone (QR code, Telegram) are opened cold and must not need a redirect.
+            proto = _text(request.headers.get('X-Forwarded-Proto')).split(',')[0].strip().lower()
+            if proto == 'https' and root.startswith('http://'):
+                root = 'https://' + root[len('http://'):]
+            return root
         except Exception:
             return 'http://localhost/'
 

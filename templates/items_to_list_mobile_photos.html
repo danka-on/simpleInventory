@@ -320,6 +320,99 @@
     .cameraGate .big{ margin-top:18px; font-size:26px; font-weight:900; letter-spacing:.01em; }
     .cameraGate .sub{ margin-top:10px; font-size:15px; opacity:.72; max-width:32ch; }
     .cameraGate .upc{ margin-top:16px; font-size:13px; opacity:.55; letter-spacing:.06em; }
+    /* The live viewfinder: what camera mode shows when getUserMedia works. */
+    .cameraLive{
+      position:fixed;
+      inset:0;
+      z-index:70;
+      display:none;
+      background:#000;
+      color:#fff;
+    }
+    .cameraLive.on{ display:block; }
+    .cameraLive video{
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      background:#000;
+    }
+    .cameraLive .liveTop{
+      position:absolute;
+      top:0;
+      left:0;
+      right:0;
+      padding:14px 16px calc(14px + 28px);
+      font-size:13px;
+      font-weight:700;
+      letter-spacing:.02em;
+      text-shadow:0 1px 3px rgba(0,0,0,.8);
+      background:linear-gradient(180deg,rgba(0,0,0,.65),transparent);
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+    }
+    .cameraLive .liveTop .who{ flex:1; min-width:0; }
+    .cameraLive .liveTop .who div{ opacity:.7; font-weight:600; margin-top:3px; }
+    .cameraLive .liveBar{
+      position:absolute;
+      left:0;
+      right:0;
+      bottom:0;
+      padding:18px 20px calc(22px + env(safe-area-inset-bottom));
+      background:linear-gradient(0deg,rgba(0,0,0,.72),transparent);
+      display:grid;
+      grid-template-columns:1fr auto 1fr;
+      align-items:center;
+      gap:12px;
+    }
+    .cameraLive .shutter{
+      justify-self:center;
+      width:78px;
+      height:78px;
+      border-radius:50%;
+      border:5px solid rgba(255,255,255,.92);
+      background:#fff;
+      box-shadow:0 0 0 3px rgba(0,0,0,.35);
+      cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+    }
+    .cameraLive .shutter:active{ transform:scale(.93); }
+    .cameraLive .shutter[disabled]{ opacity:.5; }
+    .cameraLive .liveBtn{
+      appearance:none;
+      border:0;
+      border-radius:999px;
+      padding:12px 18px;
+      font-size:15px;
+      font-weight:900;
+      letter-spacing:.02em;
+      color:#08111f;
+      background:#fff;
+      cursor:pointer;
+    }
+    .cameraLive .liveBtn.ghost{ background:rgba(255,255,255,.18); color:#fff; }
+    .cameraLive .liveBtn[disabled]{ opacity:.4; cursor:not-allowed; }
+    .cameraLive .liveShots{ justify-self:start; display:flex; gap:6px; align-items:center; }
+    .cameraLive .liveShots img{
+      width:44px;
+      height:44px;
+      object-fit:cover;
+      border-radius:8px;
+      border:2px solid rgba(255,255,255,.6);
+    }
+    .cameraLive .liveDone{ justify-self:end; }
+    .cameraLive .liveNote{
+      position:absolute;
+      left:0;
+      right:0;
+      bottom:calc(128px + env(safe-area-inset-bottom));
+      text-align:center;
+      font-size:14px;
+      font-weight:700;
+      text-shadow:0 1px 3px rgba(0,0,0,.8);
+    }
     body.cameraMode .top,
     body.cameraMode .head,
     body.cameraMode #btnShowUploaded{ display:none; }
@@ -372,6 +465,18 @@
           <div id="grid" class="grid"></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div id="cameraLive" class="cameraLive" aria-label="Camera">
+    <video id="liveVideo" playsinline autoplay muted></video>
+    <div class="liveTop"><div class="who"><span id="liveTitle"></span><div id="liveUpc"></div></div>
+      <button id="liveClose" class="liveBtn ghost" type="button" aria-label="Close the camera">&times;</button></div>
+    <div class="liveNote" id="liveNote"></div>
+    <div class="liveBar">
+      <div class="liveShots" id="liveShots"></div>
+      <button id="liveShutter" class="shutter" type="button" aria-label="Take a photo"></button>
+      <div class="liveDone"><button id="liveDone" class="liveBtn" type="button" disabled>Done</button></div>
     </div>
   </div>
 
@@ -613,6 +718,128 @@
       if(gate) gate.style.display = 'none';
     }
 
+    let liveStream = null;
+    let liveCapture = null;
+    let shooting = false;
+
+    function liveOn(on){
+      const box = $('cameraLive');
+      if(box) box.classList.toggle('on', !!on);
+      try{ document.body.style.overflow = on ? 'hidden' : ''; }catch(e){}
+    }
+
+    function stopLiveCamera(){
+      try{ (liveStream ? liveStream.getTracks() : []).forEach(t => t.stop()); }catch(e){}
+      liveStream = null;
+      liveCapture = null;
+      const v = $('liveVideo');
+      if(v) v.srcObject = null;
+      liveOn(false);
+    }
+
+    // No user gesture needed: getUserMedia asks for permission, and once this origin has it the
+    // viewfinder is live as soon as the page paints. Rejection is normal (denied, http, old
+    // browser) and simply falls through to the tap target.
+    async function startLiveCamera(){
+      if(!CAMERA_MODE) return false;
+      if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return false;
+      try{
+        liveStream = await navigator.mediaDevices.getUserMedia({
+          video: {facingMode: {ideal: 'environment'}, width: {ideal: 4096}, height: {ideal: 3072}},
+          audio: false
+        });
+      }catch(e){
+        liveStream = null;
+        return false;
+      }
+      const v = $('liveVideo');
+      v.srcObject = liveStream;
+      try{ await v.play(); }catch(e){}
+      try{
+        const track = liveStream.getVideoTracks()[0];
+        // ImageCapture gets the full sensor frame where it exists; the canvas gets the preview.
+        if(window.ImageCapture && track) liveCapture = new ImageCapture(track);
+      }catch(e){ liveCapture = null; }
+      if($('liveTitle')) $('liveTitle').textContent = TITLE || '';
+      if($('liveUpc')) $('liveUpc').textContent = UPC ? `UPC ${UPC}` : '';
+      renderLiveShots();
+      liveOn(true);
+      return true;
+    }
+
+    function renderLiveShots(){
+      const strip = $('liveShots');
+      if(strip){
+        strip.innerHTML = '';
+        pending.slice(-3).forEach(p => {
+          const img = document.createElement('img');
+          img.src = p.url;
+          img.alt = '';
+          strip.appendChild(img);
+        });
+      }
+      const done = $('liveDone');
+      if(done){
+        done.disabled = pending.length === 0;
+        done.textContent = pending.length ? `Done (${pending.length})` : 'Done';
+      }
+      const note = $('liveNote');
+      if(note) note.textContent = pending.length ? '' : 'Point at the item and press the shutter';
+    }
+
+    // ImageCapture hands back whatever the camera produces, and a 4K PNG is a painful thing to
+    // push up a phone connection. Re-encode at full resolution rather than shrink or ship PNG.
+    async function asJpeg(blob){
+      if((blob.type || '').includes('jpeg')) return blob;
+      try{
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+        try{ bitmap.close(); }catch(e){}
+        return await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92)) || blob;
+      }catch(e){
+        return blob;
+      }
+    }
+
+    async function liveShoot(){
+      if(shooting || !liveStream) return;
+      shooting = true;
+      $('liveShutter').disabled = true;
+      try{
+        let blob = null;
+        if(liveCapture){
+          try{ blob = await liveCapture.takePhoto(); }catch(e){ blob = null; }
+        }
+        if(!blob){
+          const v = $('liveVideo');
+          const canvas = document.createElement('canvas');
+          canvas.width = v.videoWidth || 1280;
+          canvas.height = v.videoHeight || 960;
+          canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+          blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.92));
+        }
+        if(!blob) throw new Error('the camera returned nothing');
+        blob = await asJpeg(blob);
+        const stamp = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+        addPendingFiles([new File([blob], `phone-${stamp}.jpg`, {type: 'image/jpeg'})]);
+        renderLiveShots();
+      }catch(e){
+        const note = $('liveNote');
+        if(note) note.textContent = 'Could not take that photo: ' + e.message;
+      }finally{
+        shooting = false;
+        $('liveShutter').disabled = false;
+      }
+    }
+
+    async function liveFinish(){
+      stopLiveCamera();
+      if(pending.length) await completeUpload();
+    }
+
     function armCameraGate(){
       if(!CAMERA_MODE) return;
       document.body.classList.add('cameraMode');
@@ -628,9 +855,6 @@
       };
       gate.addEventListener('click', fire);
       gate.addEventListener('keydown', fire);
-      // Some browsers do let a fresh page open the picker on its own; when they do the gate
-      // is already hidden and this tap target never gets in the way.
-      try{ openFilePicker(); }catch(e){}
       gate.focus({preventScroll:true});
     }
 
@@ -701,7 +925,13 @@
     renderPending();
 
     if(CAMERA_MODE){
-      armCameraGate();
+      document.body.classList.add('cameraMode');
+      $('liveShutter').addEventListener('click', liveShoot);
+      $('liveDone').addEventListener('click', liveFinish);
+      $('liveClose').addEventListener('click', stopLiveCamera);
+      window.addEventListener('pagehide', stopLiveCamera);
+      // The viewfinder or, if the camera cannot be opened without asking, the tap target.
+      startLiveCamera().then(live => { if(!live) armCameraGate(); });
     } else {
       setTimeout(() => {
         if(pending.length === 0){
