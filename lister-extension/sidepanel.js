@@ -857,13 +857,16 @@
       const [cls, text, sub] = linked ? ['ok', 'LISTED', 'recorded by the panel'] : onStore ? ['warn', 'ON STORE', 'already carries this UPC'] : skipped ? ['off', 'SKIPPED', 'left off this list'] : ['todo', 'NOT LISTED', 'to do'];
       return `<div class="tile ${cls}"><div class="k">${storeName(platform)}</div><div class="v">${text}</div><div class="s">${esc(sub)}</div></div>`;
     };
-    const stockLine = [
-      gate.prepQty != null ? `prep <b>${esc(gate.prepQty)}</b>` : '',
-      `rack <b>${esc(gate.rackQty ?? stock.quantity ?? 0)}</b>${stock.positions?.length ? ' @ ' + esc(stock.positions.join(', ')) : ''}`,
-      `live eBay <b>${esc(gate.liveEbay ?? 0)}</b>`,
-      `Amazon <b>${esc(gate.liveAmazon ?? 0)}</b>`,
-    ].filter(Boolean).join(' · ');
+    const rackQty = gate.rackQty ?? stock.quantity ?? 0;
     const listable = gate.listable ?? (stock.quantity || 0);
+    const warehouseUrl = serverBase() + '/unified-search?q=' + encodeURIComponent(info.upc);
+    const prepUrl = serverBase() + '/item-prep?upc=' + encodeURIComponent(info.upc);
+    const stockLine = [
+      `<b>${esc(listable)}</b> to list`,
+      gate.prepQty != null ? `<a class="prep ${gate.mismatch ? 'differs' : ''}" href="${esc(prepUrl)}" target="_blank" rel="noopener" title="Open Item Prep${gate.mismatch ? ' — prep counted ' + esc(gate.prepQty) + ', the rack holds ' + esc(rackQty) : ''}">prep ${esc(gate.prepQty)}${gate.mismatch ? ' <span class="neq">≠</span>' : ''}</a>` : '',
+      `live eBay ${esc(gate.liveEbay ?? 0)}`,
+      `Amazon ${esc(gate.liveAmazon ?? 0)}`,
+    ].filter(Boolean).join(' · ');
     const tile = p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
         <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}></div>`;
     const copyAll = [
@@ -880,7 +883,9 @@
           ${prep.status ? `<div class="chips"><span class="chip ${prep.status === 'good' ? 'ok' : (prep.status === 'bad' ? 'bad' : 'warn')}" title="${esc(prep.reason || '')}">status: ${esc(prep.status.toUpperCase())}</span>${prep.reason ? `<span class="muted small">${esc(prep.reason)}</span>` : ''}</div>` : ''}
         </div></div>
       <div class="tiles">
-        <div class="tile ${listable ? 'ok' : 'bad'}"><div class="k">Stock</div><div class="v">${esc(listable)} to list</div><div class="s">${stockLine}${gate.mismatch ? ' · <span class="warn">prep and rack differ</span>' : ''}</div></div>
+        <div class="tile stock ${rackQty ? 'ok' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Warehouse stock</div>
+          <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search">${esc(rackQty)} on the rack</a>${stock.positions?.length ? ` <span class="pos">@ ${esc(stock.positions.join(', '))}</span>` : ''}</div>
+          <div class="s">${stockLine}</div></div>
         ${storeTile('ebay')}${storeTile('amazon')}
       </div>
       ${existing.length && !linkedHere ? `<div class="flag warn">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}.

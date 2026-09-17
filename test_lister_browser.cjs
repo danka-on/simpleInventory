@@ -161,12 +161,15 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#viewItem');
     await panel.waitForSelector('.tiles');
     const detailText = await panel.textContent('#detail');
-    for (const expected of ['unit 1', 'status: BAD', '1 to list', 'rack 1 @ B-1', 'Small chip on the rim', 'from the prep notes']) {
+    for (const expected of ['unit 1', 'status: BAD', '1 on the rack', '@ B-1', '1 to list', 'prep 1', 'Small chip on the rim', 'from the prep notes']) {
       assert.ok(detailText.includes(expected), 'item view shows "' + expected + '"');
     }
     for (const gone of ['Prepped:', 'basic values', 'Prepare', 'Location matches']) assert.ok(!detailText.includes(gone), 'item view no longer shows "' + gone + '"');
     const tiles = await panel.$$eval('.tiles .tile', els => els.map(t => ({ k: t.querySelector('.k').textContent, v: t.querySelector('.v').textContent, cls: t.className })));
-    assert.deepEqual(tiles.map(t => t.k), ['Stock', 'eBay', 'Amazon']);
+    assert.deepEqual(tiles.map(t => t.k), ['Warehouse stock', 'eBay', 'Amazon']);
+    assert.ok(!detailText.includes('prep and rack differ'), 'the mismatch is shown visually, not as a sentence');
+    assert.equal(await panel.$eval('.tile.stock .v a', a => a.getAttribute('href')), 'https://pi.nexuscentralhq.org/unified-search?q=883049370897-1', 'the rack count links to the warehouse search');
+    assert.equal(await panel.$eval('.tile.stock a.prep', a => a.getAttribute('href')), 'https://pi.nexuscentralhq.org/item-prep?upc=883049370897-1', 'the prep count links to Item Prep');
     assert.ok(tiles[0].cls.includes('ok') && tiles[1].v === 'NOT LISTED' && tiles[1].cls.includes('todo') && tiles[2].v === 'NOT LISTED', JSON.stringify(tiles));
     assert.ok(!(await panel.$('.qr img')), 'the QR code starts minimized');
     await panel.click('#addPhoto');

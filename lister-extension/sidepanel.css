@@ -144,6 +144,12 @@ h3 .grow { flex: 1; }
 .tile.warn { background: var(--amber-bg); border-color: #f0d18a; } .tile.warn .v { color: var(--amber); }
 .tile.todo { background: var(--blue-bg); border-color: #b9c9f5; } .tile.todo .v { color: var(--blue); }
 .tile.off { opacity: .7; }
+.tile .v a { color: inherit; text-decoration: none; border-bottom: 1px dotted currentColor; }
+.tile .v .pos { font-size: 12px; font-weight: 600; color: var(--muted); }
+.tile .s a.prep { color: var(--muted); text-decoration: none; border-bottom: 1px dotted currentColor; }
+.tile.mismatch { border-left: 5px solid var(--amber); }
+.tile.mismatch .s a.prep { color: var(--amber); font-weight: 700; }
+.tile .neq { display: inline-block; background: var(--amber); color: #fff; border-radius: 4px; padding: 0 4px; font-weight: 800; line-height: 1.3; }
 @media (prefers-color-scheme: dark) {
   .tile.ok { background: #123326; border-color: #1f5c43; } .tile.ok .v { color: #6ee7b7; }
   .tile.bad { border-color: #7f1d1d; } .tile.bad .v { color: #fca5a5; }
