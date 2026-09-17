@@ -266,7 +266,7 @@ class BuildAndReviewTests(ProposalTestCase):
         self.assertEqual(p['quantity'], 2)
         self.assertEqual(p['categoryId'], '133701')
         self.assertEqual(p['aspects'], {'Brand': 'KitchenAid', 'Model': 'KSM150PS', 'Color': 'Empire Red'})
-        self.assertEqual(p['condition'], 'NEW_OTHER')
+        self.assertEqual(p['condition'], 'NEW', 'prep passed it good and wrote nothing about it')
         self.assertEqual(p['fulfillmentPolicyId'], 'F1')
         self.assertEqual(p['lot_number'], 'LOT-A')
         self.assertEqual([im['source'] for im in p['images']], ['prep', 'catalog'])
@@ -276,7 +276,8 @@ class BuildAndReviewTests(ProposalTestCase):
         self.assertEqual(len(item['comps']['results']), 3)
         codes = {f['code'] for f in item['flags']}
         self.assertIn('aspects_inferred', codes)
-        self.assertIn('condition_assumed', codes)
+        self.assertIn('condition_new', codes)
+        self.assertNotIn('condition_assumed', codes)
         self.assertNotIn('missing_required_aspects', codes)
         self.assertEqual([ev['event'] for ev in item['events']], ['proposed'])
         self.assertTrue(item['sources']['dry_run']['ok'])

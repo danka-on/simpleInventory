@@ -371,11 +371,38 @@ class ListerTestCase(unittest.TestCase):
         self.assertFalse(used['assumed'])
         fine = lister_routes.condition_from_notes(['Color checked, all good'], suffixed=True)
         self.assertEqual((fine['condition'], fine['assumed']), ('NEW_OTHER', True))
+        # Prep passed it good and wrote nothing: NEW on eBay, new_new on Amazon, no guessing.
+        new = lister_routes.condition_from_notes([], prep_status='good')
+        self.assertEqual((new['condition'], new['assumed'], new['conditionDescription']), ('NEW', False, ''))
+        self.assertEqual(lister_routes.AMAZON_CONDITIONS[new['condition']], 'new_new')
+        # A note, a suffix or any other prep verdict keeps the assumed default.
+        self.assertEqual(lister_routes.condition_from_notes(['Sealed, two in the box'], prep_status='good')['condition'], 'NEW_OTHER')
+        self.assertEqual(lister_routes.condition_from_notes([], prep_status='good', suffixed=True)['condition'], 'NEW_OTHER')
+        self.assertEqual(lister_routes.condition_from_notes([], prep_status='unchecked')['condition'], 'NEW_OTHER')
         self.assertEqual(lister_routes.note_text_variants('LT: dėžė pažeista | EN: box damaged'), 'box damaged')
         self.assertEqual(lister_routes.note_text_variants('LT: tik lietuviškai'), '')
         self.assertEqual(lister_routes.note_text_variants('plain note'), 'plain note')
         self.assertEqual(lister_routes.fill_fields({}, {}, upc='035886267162-1', base_url='https://x/')['upc'], '035886267162')
         self.assertEqual(lister_routes.fill_fields({}, {}, upc='035886267162-1', base_url='https://x/')['sku'], '035886267162-1')
+
+    def test_good_unit_with_no_notes_is_new_on_both_stores(self):
+        """Item Prep's own verdict answers the condition question: no note, nothing to confirm."""
+        self.detail_payload = {'title': 'Lenox Butterfly Meadow Plate', 'images': [], 'defect': '',
+                               'inventory': {'total_quantity': 2, 'positions': [], 'rows': []},
+                               'prep': {'notes': [], 'images': [], 'voice_notes': [], 'videos': []}}
+        clean = '012345678905'
+        with closing(sqlite3.connect(self.root / 'bol.db')) as conn:
+            conn.execute('CREATE TABLE items_prep_status (id INTEGER PRIMARY KEY, upc TEXT, lot_number TEXT, status TEXT, reason TEXT, note TEXT, updated_at TEXT, quantity INTEGER)')
+            for upc in (clean, UPC):
+                conn.execute("INSERT INTO items_prep_status (upc, lot_number, status, reason, updated_at, quantity) VALUES (?, 'L-1', 'good', '', '2026-09-15', 2)", (upc,))
+            conn.commit()
+        fields = self.client.get(f'/api/lister/queue/{clean}', base_url='https://pi.example').get_json()['item']['fields']
+        self.assertEqual(fields['condition'], 'NEW')
+        self.assertEqual(fields['amazonCondition'], 'new_new')
+        self.assertEqual(fields.get('conditionDescription', ''), '')
+        # The seeded proposal carries "Open box, never used": a note about this unit, so it stays as it is.
+        noted = self.client.get(f'/api/lister/queue/{UPC}', base_url='https://pi.example').get_json()['item']['fields']
+        self.assertEqual((noted['condition'], noted['amazonCondition']), ('NEW_OTHER', 'new_open_box'))
 
     def test_queue_feed_is_per_store_oldest_first_with_store_links(self):
         self.queue_add(UPC + '-1', 'Lenox plate damaged', '2026-09-14T08:00:00')

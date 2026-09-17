@@ -154,9 +154,11 @@ def is_suffixed(upc):
     return '-' in _text(upc)
 
 
-def condition_from_notes(notes, *, suffixed=False, default='NEW_OTHER'):
+def condition_from_notes(notes, *, suffixed=False, default='NEW_OTHER', prep_status=''):
     """Condition + condition note from prep evidence. A flaw word means used; the note text becomes
-    the store's condition description. English voice-note text is expected to be in `notes` already."""
+    the store's condition description. English voice-note text is expected to be in `notes` already.
+    Item Prep passing a plain unit (status good, nothing written or said about it) is evidence the
+    other way: that unit is new, so both stores get NEW instead of the assumed default."""
     cleaned = []
     for note in notes or []:
         text = _text(note)
@@ -168,6 +170,10 @@ def condition_from_notes(notes, *, suffixed=False, default='NEW_OTHER'):
     if damaged:
         return {'condition': 'USED_GOOD', 'conditionDescription': joined[:1000],
                 'reason': 'prep notes mention a flaw', 'assumed': False}
+    # A suffixed unit was split off for a reason, so it never auto-upgrades to NEW.
+    if not joined and not suffixed and _text(prep_status).lower() == 'good':
+        return {'condition': 'NEW', 'conditionDescription': '',
+                'reason': 'Item Prep passed it good with no notes', 'assumed': False}
     if suffixed:
         return {'condition': default, 'conditionDescription': joined[:1000],
                 'reason': 'suffixed unit without a flaw note; confirm the condition', 'assumed': True}
@@ -1585,7 +1591,9 @@ class Lister:
                                   'english': note_text_variants(text), 'createdAt': (n.get('created_at') if isinstance(n, dict) else '') or ''})
         defect = _text(detail.get('defect'))
         note_texts = ([defect] if defect else []) + [n['english'] or n['text'] for n in written_notes if (n['english'] or n['text'])] + english_notes
-        condition = condition_from_notes(note_texts, suffixed=is_suffixed(upc))
+        prep_status = self._prep_status(upc)
+        condition = condition_from_notes(note_texts, suffixed=is_suffixed(upc),
+                                         prep_status=prep_status.get('status') or '')
 
         photos = []
         seen = set()
@@ -1634,13 +1642,16 @@ class Lister:
         if generated.get('description', {}).get('html'):
             fields['descriptionHtml'] = generated['description']['html']
             fields['descriptionText'] = generated['description']['text']
-        if not fields.get('condition') or (condition['condition'] == 'USED_GOOD' and not condition['assumed']):
+        # Evidence beats a proposal's assumed default both ways: a flaw note makes it used, a clean
+        # pass in Item Prep makes it NEW. A condition note already on the proposal says something
+        # about this unit that prep did not see, so it keeps the proposal's condition.
+        evidence = not condition['assumed'] and not (condition['condition'] == 'NEW' and _text(fields.get('conditionDescription')))
+        if not fields.get('condition') or evidence:
             fields['condition'] = condition['condition']
         fields['amazonCondition'] = AMAZON_CONDITIONS.get(fields['condition'], '')
         if not fields.get('conditionDescription') and condition['conditionDescription']:
             fields['conditionDescription'] = condition['conditionDescription']
             fields['conditionDescriptionSource'] = 'notes'  # the panel flags it: read once before listing
-        prep_status = self._prep_status(upc)
         # One-line stock picture for the panel: what prep counted, what the rack holds, what is live.
         def live_units(entries):
             units = 0
