@@ -285,6 +285,15 @@ class NewItemTestCase(unittest.TestCase):
         self.assertEqual(self.telegram_deleted, [{'chat_id': '111', 'message_id': 7}])
         self.panel(f"/api/lister/new/{draft['id']}/submit", expect=409)
 
+        # And from the side panel's own point of view it is now an ordinary queued item, on both
+        # store lists, which is the whole point of submitting.
+        for platform in ('ebay', 'amazon'):
+            listed = self.panel('/api/lister/queue?platform=' + platform, method='GET')['items']
+            row = next((it for it in listed if it['upc'] == '777000000042'), None)
+            self.assertIsNotNone(row, platform)
+            self.assertEqual((row['status'], row['title'], row['source']),
+                             ('queued', 'Ninja blender, 1000 watt, black', 'lister-new'))
+
     def test_a_damage_note_is_what_the_listing_reads_the_condition_out_of(self):
         """The whole reason the note is written as a prep note and not as a photo caption."""
         verdict = lister_routes.condition_from_notes(['Photo 1: Cracked corner'])
