@@ -119,6 +119,28 @@ customElements.define('kat-input', KatInput);
 customElements.define('kat-button', KatButton);
 </script>`;
 
+// Seller Central's "Add offer" page as it really is: two look-alike fulfilment radios, a clickable
+// "Match lowest price", the item condition, and a quantity box that only exists once the radio is
+// answered. See the amazon-add-offer-form note.
+const amazonOffer = `<!doctype html><title>Add offer</title><h1>Add offer</h1>
+<label for="sku">SKU</label><input id="sku" name="sku">
+<fieldset><legend>Fulfillment Channel Code</legend>
+<label><input type="radio" name="fc" id="fba"> I want to use Fulfilled by Amazon (FBA) to ship my items and provide customer service if it sells. (Fulfilled by Amazon)</label>
+<label><input type="radio" name="fc" id="mfn"> I want to ship this item myself or use Amazon Easy Ship if it sells. (Merchant Fulfilled)</label></fieldset>
+<div id="qtyBox" hidden><label for="qty">Quantity</label><input id="qty" name="fulfillment_availability#1.quantity" type="number"></div>
+<label for="price">Your Price</label><span>USD$</span><input id="price" name="price">
+<div><a id="match" href="#">Match lowest price: USD$29.40</a></div>
+<label for="cond">Item Condition</label><select id="cond"><option>Select</option><option>New</option><option>Used - Like New</option><option>Used - Good</option></select>
+<script>
+for (const id of ['mfn', 'fba']) document.getElementById(id).addEventListener('change', () => { document.getElementById('qtyBox').hidden = false; });
+document.getElementById('match').addEventListener('click', event => {
+  event.preventDefault();
+  const price = document.getElementById('price');
+  price.value = '29.40';
+  price.dispatchEvent(new Event('input', { bubbles: true }));
+});
+</script>`;
+
 const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1>Congratulations! Your item is listed.</h1>
 <p>Item number: 335566778899</p><a href="https://www.ebay.com/itm/335566778899">View listing</a>`;
 
@@ -198,6 +220,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const html = body => route.fulfill({ status: 200, contentType: 'text/html', body });
       calls.amazonPages = (calls.amazonPages || []).concat(url.pathname + url.search);
       if (url.pathname === '/product-search') return html(amazonStart);
+      if (url.pathname.startsWith('/abis/listing/syh') && url.searchParams.get('asin')) return html(amazonOffer);
       // /abis/listing/syh resumes the last draft: it redirects to the offer step and errors.
       if (url.pathname.startsWith('/abis/listing/syh')) return html('<title>Add price and inventory</title><h1>We encountered an unexpected error</h1>');
       return html('<title>Seller Central</title><h1>Inventory</h1>');
@@ -716,6 +739,32 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('.item[data-upc="883049370897-1"] button[data-start]');
     await store.waitForURL(/\/listing\/results\?q=883049370897$/, { timeout: 20000 });
     assert.deepEqual(calls.amazonPages.slice(opened), ['/listing/results?q=883049370897'], 'searched in place: ' + calls.amazonPages.slice(opened));
+
+    // The Add offer page: we always ship it ourselves, the quantity box that answer reveals gets
+    // what the rack holds, and the price comes from Amazon's own "Match lowest price" link.
+    await store.goto('https://sellercentral.amazon.com/abis/listing/syh?asin=B0LENOX&sku=883049370897-1');
+    await store.waitForFunction(() => document.getElementById('mfn') && document.getElementById('mfn').checked, null, { timeout: 25000 });
+    assert.ok(!(await store.$eval('#fba', el => el.checked)), 'the FBA radio is never the one picked');
+    await store.waitForFunction(() => document.getElementById('qty') && document.getElementById('qty').value === '1', null, { timeout: 25000 });
+    await store.waitForFunction(() => document.getElementById('price') && document.getElementById('price').value === '29.40', null, { timeout: 25000 });
+    assert.equal(await store.$eval('#cond', el => el.value), 'Used - Good', 'the condition select gets our condition');
+    // Quantity, then price, then the condition - and a value we put in is a violet "check it"
+    // checkpoint until the user lands on it, not a silent green.
+    await store.waitForFunction(() => document.querySelectorAll('#ss-lister-guide [data-ss-cp]').length >= 3, null, { timeout: 25000 });
+    if (!(await store.$('#ss-lister-guide [data-ss-row]'))) await store.click('#ss-lister-guide [data-ss="steps"]');
+    await store.waitForSelector('#ss-lister-guide [data-ss-row]');
+    const offerRows = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(row => ({ text: row.textContent.replace(/\s+/g, ' ').trim(), dot: row.querySelector('span').style.background })));
+    const offerNames = offerRows.map(r => r.text.split(' ')[0]).join(',');
+    assert.ok(offerRows[0].text.startsWith('Quantity') && offerRows[1].text.startsWith('Price'), 'quantity then price lead the Amazon checklist: ' + offerNames);
+    // Seller Central calls it "Item Condition", so the row wears the page's own words.
+    assert.ok(/condition/i.test(offerRows[2].text), 'the condition comes third: ' + offerNames);
+    assert.ok(offerRows[1].dot.includes('124, 58, 237'), 'the price we filled still wants a look (violet): ' + JSON.stringify(offerRows[1]));
+    assert.ok(!offerRows.some(r => r.text.startsWith('Photos') && r.dot.includes('220, 38, 38')), 'photos are not a red must on a catalogue listing: ' + JSON.stringify(offerRows));
+    await store.click('#ss-lister-guide [data-ss-cp="1"]');
+    await store.waitForFunction(() => {
+      const dots = document.querySelectorAll('#ss-lister-guide [data-ss-cp] span');
+      return dots[1] && dots[1].style.background.includes('22, 163, 74');
+    }, null, { timeout: 15000 });
     console.log('lister browser test passed');
   } finally {
     await context.close();

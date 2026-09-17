@@ -296,6 +296,9 @@
     // page gets it without being asked. Both stay checkpoints, so the user still walks past them.
     const fulfilment = chooseFulfilment(store);
     if (fulfilment) (fulfilment.ok ? report.filled : report.skipped).push({ target: 'fulfillment', value: fulfilment.label, label: 'Fulfilment', reason: fulfilment.ok ? '' : 'could not tick it' });
+    // Seller Central only renders the quantity box once that question is answered, so the quantity
+    // is filled again when it turns up.
+    if (fulfilment && fulfilment.ok) fillWhenShown('quantity', values, store);
     const lowest = matchLowestPrice(store);
     if (lowest) (lowest.ok ? report.filled : report.skipped).push({ target: 'matchLowest', value: lowest.label, label: 'Match lowest price', reason: lowest.ok ? '' : 'could not click it' });
 
@@ -337,17 +340,41 @@
     return null;
   }
 
-  // eBay offers "Match lowest price" next to the price box; that is always the answer we want.
-  function matchLowestPrice(store) {
-    if (store !== 'ebay') return null;
-    for (const el of deepQuery('button, [role=button], a, label, kat-button')) {
+  // Both stores offer the number themselves - Seller Central as "Match lowest price: USD$29.40"
+  // under the price box, eBay beside its own - and pressing it beats typing our reading of it.
+  // The wrappers around the link carry the same words, so the innermost match is the control.
+  function matchLowestPrice() {
+    const hits = [];
+    for (const el of deepQuery('a, button, [role=button], [role=link], kat-link, kat-button, label, span, div')) {
       if (!isVisible(el) || buttonDisabled(el)) continue;
-      const text = M.normalize(el.textContent || '');
-      if (!/^match (the )?lowest price/.test(text)) continue;
-      try { el.click(); } catch { return { ok: false, label: 'Match lowest price' }; }
-      return { ok: true, label: 'Match lowest price' };
+      const text = clip(el.textContent || el.getAttribute('label') || '');
+      if (!/match\s+(the\s+)?lowest\s+price/i.test(text) || text.length > 60) continue;
+      hits.push({ el, text });
     }
-    return null;
+    const inner = hits.filter(h => !hits.some(other => other !== h && h.el.contains(other.el)));
+    const pick = inner[0] || hits[0];
+    if (!pick) return null;
+    try { pick.el.click(); flash(pick.el); } catch { return { ok: false, label: pick.text }; }
+    return { ok: true, label: pick.text };
+  }
+
+  // A box the page adds in reaction to something we clicked (Seller Central's quantity): keep
+  // looking for a short while, and fill it the moment it is there and still empty.
+  function fillWhenShown(target, values, store, attempts = 8) {
+    setTimeout(() => {
+      const elements = collect();
+      const descriptors = elements.map(describe);
+      const assigned = M.assign(descriptors, [target]);
+      const hit = assigned[target];
+      let done = false;
+      if (hit && M.isEmptyValue(descriptors[hit.index])) {
+        try { done = setField(elements[hit.index], valueFor(target, values, store)); } catch { done = false; }
+        if (done) flash(elements[hit.index]);
+      } else if (hit) {
+        done = true;  // the page (or the user) already put a value in it
+      }
+      if (!done && attempts > 0) fillWhenShown(target, values, store, attempts - 1);
+    }, 400);
   }
 
   function flash(el) {
