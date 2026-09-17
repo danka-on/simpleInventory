@@ -768,12 +768,14 @@
     const info = detail();
     const page = state.page;
     if (!info || !state.settings.autoSendPhotos || !page?.store || !(page.kind === 'listing-form' || page.kind === 'offer-form')) return;
-    if (state.settings.autoAiPhotos && pendingAiPhotos(info)) return;  // maybeAutoPhotos sends when done
+    if (state.aiBusy) return;  // an AI run is in progress: maybeAutoPhotos sends when it finishes
     const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc;
     if (state.autoSent.has(key)) return;
-    const urls = bestPhotoUrls(info);
-    if (!urls.length) return;
+    let urls = bestPhotoUrls(info);
+    if (!urls.length) urls = (info.photos || []).filter(p => p.source === 'catalog').map(p => p.url).slice(0, 12);  // nothing of ours: the catalog picture
+    if (!urls.length) { toast('Auto send: this item has no photos yet', true); return; }
     state.autoSent.add(key);
+    toast(`Auto send: ${urls.length} photo${urls.length === 1 ? '' : 's'} to the page…`);
     await sendPhotoUrls(info, urls);
   }
 
@@ -805,8 +807,8 @@
     if (!info || !state.settings.autoAiPhotos || state.aiBusy) return;
     const done = new Set((info.photos || []).filter(p => p.source === 'ai').map(p => p.from).filter(Boolean));
     const urls = (info.photos || []).filter(p => (p.source === 'listing' || p.source === 'prep') && !done.has(p.name) && !state.autoPhotos.has(p.url)).map(p => p.url);
-    if (!urls.length) return;
-    for (const url of urls) state.autoPhotos.add(url);
+    if (!urls.length) { await maybeAutoSend(); return; }
+    toast(`Auto AI photoshop: ${urls.length} photo${urls.length === 1 ? '' : 's'}…`);
     await aiPhotoshopUrls(info, urls);
     await maybeAutoSend();
   }
@@ -827,6 +829,7 @@
         state.selectedPhotos.add(data.photo.url);
         done += 1;
       } catch (error) {
+        state.autoPhotos.delete(url);
         toast('AI photoshop: ' + error.message, true);
         break;
       }

@@ -114,7 +114,7 @@
   function setNativeValue(el, value) {
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
-    el.focus();
+    try { el.focus({ preventScroll: true }); } catch { el.focus(); }
     if (descriptor && descriptor.set) descriptor.set.call(el, value);
     else el.value = value;
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -123,7 +123,7 @@
   }
 
   function setContentEditable(el, html, text) {
-    el.focus();
+    try { el.focus({ preventScroll: true }); } catch { el.focus(); }
     const doc = ownDocument(el);
     const selection = doc.getSelection();
     if (selection) {
@@ -146,7 +146,7 @@
     const options = Array.from(el.options).map(o => o.textContent.trim());
     const index = M.chooseOption(options, labels);
     if (index < 0) return false;
-    el.focus();
+    try { el.focus({ preventScroll: true }); } catch { el.focus(); }
     el.selectedIndex = index;
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -185,6 +185,17 @@
   }
 
   function fill({ values = {}, store = '', targets = null, aspects = {}, learned = {}, includeDescription = true } = {}) {
+    const before = { x: window.scrollX, y: window.scrollY, active: document.activeElement };
+    try { return fillNow({ values, store, targets, aspects, learned, includeDescription }); }
+    finally {
+      // Automatic work must not move the page around: put the scroll and the focus back.
+      window.scrollTo(before.x, before.y);
+      try { if (before.active && before.active !== document.body && before.active.isConnected) before.active.focus({ preventScroll: true }); else if (document.activeElement) document.activeElement.blur(); } catch { /* ignore */ }
+      setTimeout(() => window.scrollTo(before.x, before.y), 50);
+    }
+  }
+
+  function fillNow({ values = {}, store = '', targets = null, aspects = {}, learned = {}, includeDescription = true } = {}) {
     const elements = collect();
     const descriptors = elements.map(describe);
     const report = { filled: [], skipped: [], unmatched: [], aspects: [], fieldCount: elements.length };
@@ -413,7 +424,8 @@
       if (!files.length) throw new Error('empty photo');
       const transfer = new DataTransfer();
       transfer.items.add(files[0]);
-      const input = uploaderNear(event.target);
+      // The same uploader "Send to page" uses (the multi-image input), not whatever input sits nearest the drop.
+      const input = fileInputs()[0] || uploaderNear(event.target);
       if (input) {
         input.files = transfer.files;
         input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -702,7 +714,8 @@
     document.addEventListener('change', handlers.change, true);
     guide.handlers = handlers;
     guide.ticker = setInterval(() => { if (guide) { guideRefresh(); guideRender(); } }, 2000);
-    if (rows.some(r => !r.done)) guideNext(); else { guideRender(); notifyGuide(); }
+    guide.index = rows.findIndex(r => !r.done);
+    guideRender(false); notifyGuide();
     return guideState();
   }
 
