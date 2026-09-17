@@ -583,28 +583,119 @@
     chrome.runtime.sendMessage({ type: 'ss-lister-action', action, ...(extra || {}) }).catch(() => {});
   }
 
+  // The HUD's dragged position is remembered for this browser: localStorage answers instantly on the next
+  // page, chrome.storage.local carries it across stores/tabs and survives the site's storage being cleared.
+  const GUIDE_POS_KEY = 'ss-lister-guide-pos';
+  let guidePos = null;
+
+  function readGuidePos(raw) {
+    try {
+      const pos = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) return { left: pos.left, top: pos.top };
+    } catch { /* ignore */ }
+    return null;
+  }
+
+  function applyGuidePos(panel, pos) {
+    if (!panel || !pos) return;
+    panel.style.left = Math.max(0, Math.min(pos.left, window.innerWidth - 80)) + 'px';
+    panel.style.top = Math.max(0, Math.min(pos.top, window.innerHeight - 60)) + 'px';
+    panel.style.bottom = 'auto';
+  }
+
+  function saveGuidePos(pos) {
+    guidePos = pos;
+    try { localStorage.setItem(GUIDE_POS_KEY, JSON.stringify(pos)); } catch { /* private mode */ }
+    try { chrome.storage?.local?.set({ [GUIDE_POS_KEY]: pos }); } catch { /* ignore */ }
+  }
+
+  // Both stores share the position, so read the profile-wide copy too and move the HUD when it wins.
+  function loadGuidePos(panel) {
+    try {
+      chrome.storage?.local?.get(GUIDE_POS_KEY).then(data => {
+        const pos = readGuidePos(data?.[GUIDE_POS_KEY]);
+        if (pos && !guidePos && panel.isConnected) { guidePos = pos; applyGuidePos(panel, pos); }
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  }
+
+  // The HUD wears the side panel's theme: day by default, night when the panel's moon button says so.
+  const GUIDE_THEMES = {
+    light: {
+      bg: '#ffffff', text: '#0f172a', head: '#f1f5f9', bar: '#e2e8f0', foot: '#f8fafc', line: '#e2e8f0',
+      muted: '#475569', value: '#0f172a', hint: '#1d4ed8', good: '#15803d', req: '#b91c1c', current: '#eef2ff',
+      btn: '#e2e8f0', btnText: '#0f172a', shadow: '0 12px 40px rgba(15,23,42,.22)',
+    },
+    dark: {
+      bg: '#0f172a', text: '#f8fafc', head: '#1e293b', bar: '#334155', foot: '#111827', line: '#334155',
+      muted: '#cbd5e1', value: '#e2e8f0', hint: '#93c5fd', good: '#86efac', req: '#fca5a5', current: '#1e293b',
+      btn: '#334155', btnText: '#ffffff', shadow: '0 12px 40px rgba(0,0,0,.45)',
+    },
+  };
+  const GUIDE_SETTINGS_KEY = 'ssListerSettings';
+  let guideTheme = GUIDE_THEMES.light;
+
+  function useGuideTheme(name) {
+    const theme = GUIDE_THEMES[name === 'dark' ? 'dark' : 'light'];
+    if (theme === guideTheme) return;
+    guideTheme = theme;
+    paintGuide();
+  }
+
+  function loadGuideTheme() {
+    try {
+      chrome.storage?.local?.get(GUIDE_SETTINGS_KEY)
+        .then(data => useGuideTheme(data?.[GUIDE_SETTINGS_KEY]?.theme))
+        .catch(() => {});
+    } catch { /* ignore */ }
+  }
+
+  try {
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area === 'local' && changes[GUIDE_SETTINGS_KEY]) useGuideTheme(changes[GUIDE_SETTINGS_KEY].newValue?.theme);
+    });
+  } catch { /* ignore */ }
+
+  // Repaint the chrome that guideRender does not rebuild (the rows carry their own colours).
+  function paintGuide() {
+    const panel = guide?.panel;
+    if (!panel) return;
+    const t = guideTheme;
+    panel.style.background = t.bg;
+    panel.style.color = t.text;
+    panel.style.boxShadow = t.shadow;
+    panel.querySelector('[data-ss="head"]').style.background = t.head;
+    panel.querySelector('[data-ss="bar"]').style.background = t.bar;
+    const foot = panel.querySelector('[data-ss="foot"]');
+    foot.style.background = t.foot;
+    foot.style.borderTop = '1px solid ' + t.line;
+    for (const button of panel.querySelectorAll('[data-ss="collapse"],[data-ss="done"]')) button.style.color = t.muted;
+    const next = panel.querySelector('[data-ss="next"]');
+    next.style.background = t.btn;
+    next.style.color = t.btnText;
+    guideRender(false);
+  }
+
   function guidePanel() {
     if (guide.panel) return guide.panel;
     const panel = document.createElement('div');
     panel.id = 'ss-lister-guide';
-    panel.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:#0f172a;color:#f8fafc;font:13px/1.4 system-ui,sans-serif;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.45);overflow:hidden';
-    // Remembered position for this site (the user can drag it by the header).
-    try {
-      const saved = JSON.parse(sessionStorage.getItem('ss-lister-guide-pos') || 'null');
-      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) { panel.style.left = Math.max(0, Math.min(saved.left, window.innerWidth - 80)) + 'px'; panel.style.top = Math.max(0, Math.min(saved.top, window.innerHeight - 60)) + 'px'; panel.style.bottom = 'auto'; }
-    } catch { /* ignore */ }
+    panel.style.cssText = `position:fixed;left:16px;bottom:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:${guideTheme.bg};color:${guideTheme.text};font:13px/1.4 system-ui,sans-serif;border-radius:14px;box-shadow:${guideTheme.shadow};overflow:hidden`;
+    // Wherever the user dragged it last stays put for this browser (the header is the drag handle).
+    try { guidePos = guidePos || readGuidePos(localStorage.getItem(GUIDE_POS_KEY)); } catch { /* private mode */ }
+    applyGuidePos(panel, guidePos);
     panel.innerHTML = `
-      <div data-ss="head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e293b;cursor:pointer">
+      <div data-ss="head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:${guideTheme.head};cursor:pointer">
         <span style="width:10px;height:10px;border-radius:50%;background:#0a9c6c;flex:none"></span>
         <b data-ss="title" style="flex:1">Sweet Shelves Lister</b>
-        <button data-ss="collapse" title="Collapse" style="background:transparent;border:0;color:#cbd5e1;font-size:16px;cursor:pointer;padding:0 4px">–</button>
-        <button data-ss="done" title="Close the overlay (Esc)" style="background:transparent;border:0;color:#cbd5e1;font-size:16px;cursor:pointer;padding:0 4px">×</button>
+        <button data-ss="collapse" title="Collapse" style="background:transparent;border:0;color:${guideTheme.muted};font-size:16px;cursor:pointer;padding:0 4px">–</button>
+        <button data-ss="done" title="Close the overlay (Esc)" style="background:transparent;border:0;color:${guideTheme.muted};font-size:16px;cursor:pointer;padding:0 4px">×</button>
       </div>
-      <div data-ss="bar" style="height:5px;background:#334155"><div data-ss="fill" style="height:100%;width:0;background:linear-gradient(90deg,#f59e0b,#16a34a);transition:width .3s"></div></div>
+      <div data-ss="bar" style="height:5px;background:${guideTheme.bar}"><div data-ss="fill" style="height:100%;width:0;background:linear-gradient(90deg,#f59e0b,#16a34a);transition:width .3s"></div></div>
       <div data-ss="body" style="overflow:auto;padding:6px 0"></div>
-      <div data-ss="foot" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid #334155;background:#111827">
+      <div data-ss="foot" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid ${guideTheme.line};background:${guideTheme.foot}">
         <button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:600">Use suggestion (Ctrl+Enter)</button>
-        <button data-ss="next" style="background:#334155;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
+        <button data-ss="next" style="background:${guideTheme.btn};color:${guideTheme.btnText};border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
         <button data-ss="ready" title="Everything has a value: jump to the page's List it button" style="display:none;flex:1 1 100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 14px system-ui,sans-serif;box-shadow:0 4px 14px rgba(22,163,74,.45)">✓ All set — go to List it</button>
 
       </div>`;
@@ -631,13 +722,15 @@
       };
       const up = () => {
         document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
-        if (moved) { panel.dataset.ssDragged = '1'; try { sessionStorage.setItem('ss-lister-guide-pos', JSON.stringify({ left: parseFloat(panel.style.left), top: parseFloat(panel.style.top) })); } catch { /* ignore */ } }
+        if (moved) { panel.dataset.ssDragged = '1'; saveGuidePos({ left: parseFloat(panel.style.left), top: parseFloat(panel.style.top) }); }
       };
       document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
       event.preventDefault();
     });
     document.documentElement.appendChild(panel);
     guide.panel = panel;
+    loadGuidePos(panel);
+    loadGuideTheme();
     return panel;
   }
 
@@ -671,15 +764,15 @@
       const fromNotes = row.fromNotes && row.done;
       const colour = fromNotes ? '#2563eb' : (row.done ? '#16a34a' : (row.required ? '#dc2626' : '#f59e0b'));
       const isCurrent = current === row;
-      return `<div data-ss-row="${i}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;${isCurrent ? 'background:#1e293b;' : ''}">
+      return `<div data-ss-row="${i}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;${isCurrent ? `background:${guideTheme.current};` : ''}">
         <span style="width:10px;height:10px;border-radius:50%;background:${colour};flex:none"></span>
-        <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.value ? ` <span style="color:#e2e8f0;font-weight:700">· ${escapeHtml(row.value)}</span>` : ''}${row.required && !row.done ? ' <span style="color:#fca5a5;font-size:11px">required</span>' : ''}
-          ${!row.done && row.suggestion ? `<div style="color:#cbd5e1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}
-          ${fromNotes ? '<div style="color:#93c5fd;font-size:11px">Filled from the warehouse prep notes. Read it once before listing.</div>' : ''}
-          ${row.done && guide.options.aiFields?.[row.target] ? `<div style="color:#86efac;font-size:11px">generated with AI${guide.options.aiFields[row.target] === 'auto' ? ' (automatically)' : ''}</div>` : ''}</span>
+        <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.value ? ` <span style="color:${guideTheme.value};font-weight:700">· ${escapeHtml(row.value)}</span>` : ''}${row.required && !row.done ? ` <span style="color:${guideTheme.req};font-size:11px">required</span>` : ''}
+          ${!row.done && row.suggestion ? `<div style="color:${guideTheme.muted};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}
+          ${fromNotes ? `<div style="color:${guideTheme.hint};font-size:11px">Filled from the warehouse prep notes. Read it once before listing.</div>` : ''}
+          ${row.done && guide.options.aiFields?.[row.target] ? `<div style="color:${guideTheme.good};font-size:11px">generated with AI${guide.options.aiFields[row.target] === 'auto' ? ' (automatically)' : ''}</div>` : ''}</span>
         ${row.target === 'title' || row.target === 'description' ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="background:#0a9c6c;color:#fff;border:0;border-radius:6px;padding:2px 8px;cursor:pointer;font:600 11px system-ui,sans-serif">AI</button>` : ''}
         <span style="color:${colour};font-weight:700">${row.done ? (fromNotes ? 'ⓘ' : '✓') : (row.required ? '!' : '·')}</span></div>`;
-    }).join('') || '<div style="padding:10px 12px;color:#cbd5e1">No listing fields found on this page yet.</div>';
+    }).join('') || `<div style="padding:10px 12px;color:${guideTheme.muted}">No listing fields found on this page yet.</div>`;
     for (const el of body.querySelectorAll('[data-ss-row]')) el.onclick = () => guideGo(Number(el.dataset.ssRow));
     for (const el of body.querySelectorAll('[data-ss-ai]')) el.onclick = event => { event.stopPropagation(); el.textContent = '…'; panelAction('generate', { kind: el.dataset.ssAi }); };
     panel.querySelector('[data-ss="use"]').style.display = current && !current.done && current.suggestion && current.kind === 'field' ? '' : 'none';

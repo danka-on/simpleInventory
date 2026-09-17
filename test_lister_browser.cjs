@@ -394,6 +394,12 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok((await panel.textContent('#pageCard')).includes('of'), 'the store card shows the checklist progress');
     // The actions live on the overlay now, not on the store card.
     assert.ok(!(await panel.$('#fillBtn')) && !(await panel.$('#pickBtn')), 'no Fill / Pick buttons on the store card');
+    // The HUD wears the panel's day theme and follows its moon/sun switch.
+    assert.equal(await store.$eval('#ss-lister-guide', el => el.style.background), 'rgb(255, 255, 255)', 'the HUD is light like the panel');
+    await panel.click('#themeBtn');
+    await store.waitForFunction(() => document.querySelector('#ss-lister-guide')?.style.background === 'rgb(15, 23, 42)', null, { timeout: 10000 });
+    await panel.click('#themeBtn');
+    await store.waitForFunction(() => document.querySelector('#ss-lister-guide')?.style.background === 'rgb(255, 255, 255)', null, { timeout: 10000 });
     const footButtons = await store.$$eval('#ss-lister-guide [data-ss="foot"] button', els => els.map(b => b.textContent.trim()));
     assert.ok(footButtons.includes('Next (Tab)'), 'overlay footer has Next (Tab): ' + footButtons);
     assert.ok(!footButtons.includes('Fill page'), 'the overlay has no Fill page button: ' + footButtons);
@@ -406,6 +412,23 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.waitForFunction(() => Array.from(document.querySelectorAll('#ss-lister-guide [data-ss-row]')).some(r => r.textContent.includes('generated with AI')), null, { timeout: 10000 });
     const titleRowText = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(r => r.textContent.replace(/\s+/g, ' ').trim()).find(t => t.startsWith('Title')));
     assert.ok(await store.$eval('#ss-lister-guide', el => el.style.left === '16px' && el.style.right === ''), 'the overlay starts on the left');
+    // Dragging the HUD by its header remembers the spot for this browser (localStorage + chrome.storage.local).
+    const head = await store.$('#ss-lister-guide [data-ss="head"]');
+    const box = await head.boundingBox();
+    await store.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await store.mouse.down();
+    await store.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 - 90, { steps: 6 });
+    await store.mouse.up();
+    const dragged = await store.$eval('#ss-lister-guide', el => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top), bottom: el.style.bottom }));
+    assert.ok(dragged.left > 16 && dragged.bottom === 'auto', 'the HUD moved with the pointer: ' + JSON.stringify(dragged));
+    const savedPos = await store.evaluate(() => JSON.parse(localStorage.getItem('ss-lister-guide-pos') || 'null'));
+    assert.ok(savedPos && Math.round(savedPos.left) === Math.round(dragged.left) && Math.round(savedPos.top) === Math.round(dragged.top),
+      'the dragged position is saved for this browser: ' + JSON.stringify(savedPos));
+    // Put it back where it was so the HUD does not sit over the fields the rest of this test clicks.
+    await store.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 - 90);
+    await store.mouse.down();
+    await store.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
+    await store.mouse.up();
     assert.ok(titleRowText.includes('generated with AI') && !titleRowText.includes('automatically'), 'a manual AI run is marked, without "(automatically)": ' + titleRowText);
     // Re-reading the page while the guide is up must not throw (0.2.2 did: "reading 'length'").
     await panel.click('#pageRefresh');
