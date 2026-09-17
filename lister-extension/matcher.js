@@ -297,8 +297,9 @@
     if (/search for anything|gh ac|site search|search ebay/.test(text)) return 0;
     let score = 0;
     if (store === 'amazon') {
-      if (/search term|product name|upc|ean|isbn|asin/.test(text)) score += 6;
-      if (/product title|keywords|title description|your catalog|amazon s catalog/.test(text)) score += 6;  // "List Your Products" search box
+      if (/search term|product name|upc|ean|isbn|asin|gtin/.test(text)) score += 6;
+      if (/product title|keywords|keyword|title description|your catalog|amazon s catalog/.test(text)) score += 6;  // "List Your Products" search box
+      if (/search products|search for products|find products|search by|product id/.test(text)) score += 6;  // /product-search
       if (descriptor.id === 'search-term' || descriptor.name === 'search-term') score += 6;
     } else {
       if (/what are you selling|what you re selling|tell us what|brand model|upc|isbn|ean|product|find your item|item you re selling|search/.test(text)) score += 4;

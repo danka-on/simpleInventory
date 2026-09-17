@@ -99,6 +99,8 @@ assert.equal(M.detectPage('https://sellercentral.amazon.com/abis/listing/syh?asi
 assert.equal(M.detectPage('https://sellercentral.amazon.com/product-search').kind, 'listing-start', 'the product search is the first step');
 assert.equal(M.detectPage('https://sellercentral.amazon.com/interactive/listing/workflow/offer/offer').kind, 'offer-form', 'the resumed draft lands on the offer step');
 assert.ok(M.searchBoxScore('amazon', field({ placeholder: 'Product name, UPC, EAN, ISBN or ASIN' })) >= 6, 'the product-search box');
+assert.ok(M.searchBoxScore('amazon', field({ ariaLabel: 'Search products' })) >= 6, 'the product-search box by its label');
+assert.ok(M.searchBoxScore('amazon', field({ placeholder: 'Search by keyword or product ID' })) >= 6, 'keyword / product ID wording');
 assert.ok(M.searchBoxScore('amazon', field({ placeholder: 'Enter product title, description, or keywords' })) >= 6, 'the List Your Products search box');
 assert.equal(M.detectPage('https://sellercentral.amazon.com/inventory').kind, 'inventory');
 assert.equal(M.detectPage('https://www.amazon.com/dp/B0TESTASIN').store, '', 'the retail site is not a listing page');

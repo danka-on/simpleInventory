@@ -804,8 +804,11 @@
     const key = tabKey('search|' + item.upc);
     // A click / double-click (pendingSearch) always searches, even a UPC this tab searched before.
     if (!force && !state.pendingSearch && state.searched.has(key)) return;
+    // Booked before the await: submitting is asynchronous now, and the second half of a
+    // double-click must not fire a second search (two navigations abort each other).
+    state.searched.add(key);
     const result = await searchUpc({ auto: true });
-    if (result?.ok) state.searched.add(key);  // otherwise the next page update tries again
+    if (!result?.ok) state.searched.delete(key);  // otherwise the next page update tries again
   }
 
   async function searchUpc({ auto = false } = {}) {
@@ -814,7 +817,8 @@
     try {
       const result = await pageMessage({ type: 'search', options: { query: item.baseUpc || item.upc, store: state.page.store } });
       state.pendingSearch = null;
-      toast(`Searched ${item.baseUpc || item.upc} on ${storeName(state.page.store)}`);
+      if (result?.ok) toast(`Searched ${item.baseUpc || item.upc} on ${storeName(state.page.store)}`);
+      else toast(`Could not search on ${storeName(state.page.store)}${result?.reason ? ': ' + result.reason : ''}`, true);
       return result;
     } catch (error) {
       if (!auto) toast('Search: ' + error.message, true);

@@ -258,7 +258,13 @@ def _agent_rack_rows(upc):
     try:
         with ss_database.db_connection('searchRack.db') as conn:
             cur = conn.cursor()
-            return ss_warehouse_matching._searchrack_matches_for_barcode(cur, upc)
+            rows = ss_warehouse_matching._searchrack_matches_for_barcode(cur, upc)
+            if not rows:
+                # The shelf row can carry the unit suffix while the queue holds the base UPC
+                # ("076440150179" queued, "076440150179-1" scanned onto the shelf). The matcher
+                # only walks the other way (suffixed target -> base row), so ask for the units.
+                rows = ss_warehouse_matching._ready_to_ship_suffix_inventory_matches(cur, upc)
+            return rows
     except Exception:
         return []
 

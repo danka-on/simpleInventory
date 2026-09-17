@@ -277,42 +277,69 @@
     return bestScore >= 4 ? best : null;
   }
 
-  function submitSearch(el) {
+  // The search button next to the box, when it is usable. Seller Central keeps its "Next" button
+  // disabled until React has processed our typing, so this is re-run until one answers.
+  function searchButton(el) {
     const form = el.form || el.closest('form');
     const doc = ownDocument(el);
-    // A visible search/continue button next to the box is the most reliable trigger.
     const scope = form || el.closest('[class*="search" i], [class*="prelist" i], section, main') || doc.body;
     // The submit button comes AFTER the box in the page: Seller Central also has a "Search" tab tile before it.
     const candidates = Array.from(scope.querySelectorAll('button, input[type=submit], [role=button]')).filter(b => {
-      if (!isVisible(b)) return false;
+      if (!isVisible(b) || b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
       const text = M.normalize((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.value || ''));
       return /^(search|get started|continue|find|go|next|submit|search now)$/.test(text) || /search|get started/.test(text);
     });
-    const button = candidates.find(b => el.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) || candidates[0];
+    return candidates.find(b => el.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) || candidates[0] || null;
+  }
+
+  // Enter first (some pages submit on it), then the button as soon as the page enables it.
+  function submitSearch(el, done) {
+    const form = el.form || el.closest('form');
     for (const type of ['keydown', 'keypress', 'keyup']) {
       el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
     }
-    if (button) { button.click(); return 'button'; }
-    if (form) { form.requestSubmit ? form.requestSubmit() : form.submit(); return 'form'; }
-    return 'enter';
-  }
-
-  function searchNow(query, store) {
-    const box = findSearchBox(store);
-    if (!box) return null;
-    setNativeValue(box, String(query || ''));
-    flash(box);
-    const how = submitSearch(box);
-    return { ok: true, label: describe(box).placeholder || describe(box).labelText || box.id, submitted: how };
-  }
-
-  // Store pages render the search box after load; wait up to ~4 s for it.
-  function search({ query = '', store = '' } = {}, done) {
     const started = Date.now();
     const attempt = () => {
-      const result = searchNow(query, store);
-      if (result) return done(result);
-      if (Date.now() - started > 4000) return done({ ok: false, reason: 'no product search box on this page' });
+      let button = null;
+      try { button = searchButton(el); } catch { /* page navigated away */ }
+      if (button) { try { button.click(); } catch { /* gone */ } return done('button'); }
+      if (Date.now() - started < 3000) return setTimeout(attempt, 200);
+      if (form) { try { form.requestSubmit ? form.requestSubmit() : form.submit(); } catch { /* ignore */ } return done('form'); }
+      done('enter');
+    };
+    attempt();
+  }
+
+  function searchNow(query, store, done) {
+    const box = findSearchBox(store);
+    if (!box) return false;
+    const text = String(query || '');
+    setNativeValue(box, text);
+    // A controlled input can throw our value away; retype it as keystrokes before giving up.
+    if (box.value !== text) {
+      try { box.focus({ preventScroll: true }); document.execCommand('insertText', false, text); } catch { /* ignore */ }
+      if (box.value !== text) setNativeValue(box, text);
+    }
+    flash(box);
+    const label = describe(box).placeholder || describe(box).labelText || box.id;
+    submitSearch(box, how => done({ ok: box.value === text, typed: box.value, label, submitted: how,
+      reason: box.value === text ? '' : 'the page kept clearing the search box' }));
+    return true;
+  }
+
+  // Store pages render the search box after load; Seller Central can take a while, so wait ~12 s.
+  // A double-click reaches us twice (click + start); the second one must not submit a second time.
+  let searchJob = null;
+  function search({ query = '', store = '' } = {}, done) {
+    const text = String(query || '');
+    if (searchJob && searchJob.query === text && Date.now() - searchJob.at < 8000) {
+      return done({ ok: true, submitted: 'already running', label: searchJob.label || '' });
+    }
+    searchJob = { query: text, at: Date.now(), label: '' };
+    const started = Date.now();
+    const attempt = () => {
+      if (searchNow(text, store, result => { searchJob = { query: text, at: Date.now(), label: result.label }; done(result); })) return;
+      if (Date.now() - started > 12000) { searchJob = null; return done({ ok: false, reason: 'no product search box on this page' }); }
       setTimeout(attempt, 300);
     };
     attempt();

@@ -89,7 +89,7 @@ const amazonStart = `<!doctype html><title>Search products</title><h1>Search pro
 <section><p>Search your catalog or Amazon's catalog for a listing (or a variation) to sell or copy.</p>
 <input id="kw" placeholder="Product name, UPC, EAN, ISBN or ASIN"><button id="go" type="button" disabled>Next</button></section>
 <script>const kw = document.getElementById('kw'), go = document.getElementById('go');
-kw.addEventListener('input', () => { go.disabled = !kw.value; });
+kw.addEventListener('input', () => { setTimeout(() => { go.disabled = !kw.value; }, 700); });
 go.addEventListener('click', () => { location.href = 'https://sellercentral.amazon.com/listing/results?q=' + encodeURIComponent(kw.value); });</script>`;
 
 const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1>Congratulations! Your item is listed.</h1>
