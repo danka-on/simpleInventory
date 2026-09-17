@@ -1158,9 +1158,10 @@ function _listagentQueueUiState(queueItem){
   }
   return {
     label: 'In queue',
-    title: 'In Listing Agent queue',
-    disabled: true,
-    active: true
+    title: 'In Listing Agent queue (click to remove)',
+    disabled: false,
+    active: true,
+    removable: true
   };
 }
 
@@ -3049,6 +3050,35 @@ async function onAddToListingAgentQueue(e){
   btn.disabled = true;
   btn.textContent = '...';
 
+  // "In queue" is a toggle: clicking it takes the UPC back out of the queue.
+  if(_listagentQueueUiState(listingAgentQueueState[upc] || null).removable){
+    try{
+      const resp = await fetch('/api/listingagent/queue/remove', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({upc})
+      });
+      const j = await resp.json().catch(()=> ({}));
+      if(resp.ok && j && j.success){
+        listingAgentQueueState[upc] = null;
+        const queueUi = _listagentQueueUiState(null);
+        btn.textContent = queueUi.label;
+        btn.title = queueUi.title;
+        btn.classList.remove('btn-copied');
+        btn.disabled = false;
+        return;
+      }
+      btn.textContent = oldText;
+      btn.disabled = false;
+      alert('Error: ' + ((j && j.error) ? j.error : ('HTTP ' + resp.status)));
+    }catch(err){
+      btn.textContent = oldText;
+      btn.disabled = false;
+      alert('Error: ' + err);
+    }
+    return;
+  }
+
   try{
     const title = btn.dataset.title ? decodeURIComponent(btn.dataset.title) : '';
     const item_status = (btn.dataset.itemStatus || '').toString().trim();
@@ -3064,7 +3094,7 @@ async function onAddToListingAgentQueue(e){
       btn.textContent = queueUi.label;
       btn.title = queueUi.title;
       btn.classList.add('btn-copied');
-      btn.disabled = true;
+      btn.disabled = queueUi.disabled;
       return;
     }
     btn.textContent = oldText;
