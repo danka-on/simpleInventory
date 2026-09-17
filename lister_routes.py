@@ -18,6 +18,7 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import sqlite3
 import threading
 import time
@@ -131,11 +132,17 @@ def _absolute(url, base_url):
     return value
 
 
-def mobile_photos_url(upc, base_url, *, camera=True):
-    """The phone camera page for one unit. camera=1 makes it open the camera on the first tap
-    instead of showing a file picker the user has to find (the QR and the Telegram link share it)."""
-    url = (base_url or '').rstrip('/') + '/items-to-list/mobile-photos?upc=' + quote(_text(upc), safe='') + '&return=%2Fitems-to-list'
-    return url + '&camera=1' if camera else url
+def mobile_photos_url(upc, base_url, *, camera=True, back=True, token=''):
+    """The phone camera page for one unit. camera=1 opens the camera by itself; the QR code keeps
+    a Back link, the Telegram message does not, because there the URL is the whole message."""
+    url = (base_url or '').rstrip('/') + '/items-to-list/mobile-photos?upc=' + quote(_text(upc), safe='')
+    if back:
+        url += '&return=%2Fitems-to-list'
+    if camera:
+        url += '&camera=1'
+    if token:
+        url += '&t=' + quote(_text(token), safe='')
+    return url
 
 
 def _base_upc(upc):
@@ -620,6 +627,7 @@ class Lister:
         # Telegram (optional): "+ Photo link" sends the phone camera page to the configured chats.
         self.telegram_send = deps.get('_telegram_send_message')
         self.telegram_recipients = deps.get('_telegram_collect_recipient_rows')
+        self.telegram_token = deps.get('_telegram_get_bot_token')
         self.base_dir = deps.get('BASE_DIR')
         self.static_folder = Path(static_folder)
         self.feed_dir = self.static_folder / 'lister'
@@ -714,6 +722,18 @@ class Lister:
                 auto INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 PRIMARY KEY (upc, kind)
+            )
+        ''')
+        # "+ Photo link": the message the bot sent, so opening the link can delete it again.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS lister_photo_links (
+                token TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                message_id INTEGER,
+                upc TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                opened_at TEXT,
+                PRIMARY KEY (token, chat_id)
             )
         ''')
         # Per-store "X" on the side panel: the item leaves that store's list but stays queued for the other.
@@ -1718,23 +1738,13 @@ class Lister:
         if not targets:
             raise ListerError('No enabled Telegram recipients. Add one on the Telegram page first.', 400)
 
-        url = mobile_photos_url(upc, base_url)
-        title = ''
-        try:
-            with self.db('bol.db') as conn:
-                row = conn.execute('SELECT item_description FROM bol_items WHERE upc = ? COLLATE NOCASE '
-                                   'ORDER BY import_date DESC, id DESC LIMIT 1', (_base_upc(upc),)).fetchone()
-            title = _text((_row(row) or {}).get('item_description'), 120)
-        except Exception:
-            title = ''
-        text = '\n'.join(filter(None, [
-            '\U0001F4F7 Photos for ' + (title or ('UPC ' + upc)),
-            ('UPC ' + upc) if title else '',
-            url,
-            'Opens straight into the camera. Shoot, then press Complete.',
-        ]))
+        token = secrets.token_urlsafe(9)
+        url = mobile_photos_url(upc, base_url, back=False, token=token)
+        title = self._photo_link_title(upc)
+        # Nothing but the icon, the name and the link: the message is read on a lock screen.
+        text = '\U0001F4F7 ' + (title or ('UPC ' + upc)) + '\n' + url
 
-        sent, errors = [], []
+        sent, errors, delivered = [], [], []
         for target in targets:
             try:
                 # disable_notification=False: the phone should buzz, that is the point of the button.
@@ -1743,11 +1753,92 @@ class Lister:
                 ok, result = False, str(e)
             if ok:
                 sent.append(target['name'])
+                try:
+                    message_id = int((result or {}).get('message_id') or 0)
+                except Exception:
+                    message_id = 0
+                delivered.append((target['chatId'], message_id))
             else:
                 errors.append({'chatId': target['chatId'], 'error': _text(result, 200)})
+
+        if delivered:
+            try:
+                with self.db('listagent.db') as conn:
+                    cur = conn.cursor()
+                    self.init_tables(cur)
+                    cur.executemany(
+                        'INSERT OR REPLACE INTO lister_photo_links (token, chat_id, message_id, upc, created_at, opened_at) '
+                        'VALUES (?, ?, ?, ?, ?, NULL)',
+                        [(token, chat_id, message_id, upc, _now()) for chat_id, message_id in delivered])
+                    conn.commit()
+            except Exception:
+                # A link that cannot be cleaned up later still has to reach the phone.
+                pass
         if not sent:
             raise ListerError('Telegram refused the message: ' + (errors[0]['error'] if errors else 'unknown error'), 502)
         return {'url': url, 'sent': sent, 'errors': errors}
+
+    def _photo_link_title(self, upc):
+        """What to call this unit in a chat message: the proposal title, else the BOL line."""
+        try:
+            with self.db('listagent.db') as conn:
+                cur = conn.cursor()
+                # A proposal is usually filed under the base code, the queue row under the
+                # suffixed one, so ask for both.
+                keys = list(dict.fromkeys(self.upc_variants(upc) + self.upc_variants(_base_upc(upc))))
+                proposals = self._latest_proposals(cur, keys)
+            for entry in proposals.values():
+                found = _text((entry.get('proposal') or {}).get('title'), 120)
+                if found:
+                    return found
+        except Exception:
+            pass
+        try:
+            with self.db('bol.db') as conn:
+                row = conn.execute('SELECT item_description FROM bol_items WHERE upc = ? COLLATE NOCASE '
+                                   'ORDER BY import_date DESC, id DESC LIMIT 1', (_base_upc(upc),)).fetchone()
+            return _text((_row(row) or {}).get('item_description'), 120)
+        except Exception:
+            return ''
+
+    def photo_link_opened(self, token):
+        """The phone opened the link, so the bot takes its own message back down."""
+        token = _text(token, 64)
+        if not token:
+            raise ListerError('token is required')
+        try:
+            with self.db('listagent.db') as conn:
+                cur = conn.cursor()
+                self.init_tables(cur)
+                rows = [_row(r) for r in cur.execute(
+                    'SELECT chat_id, message_id FROM lister_photo_links WHERE token = ? AND opened_at IS NULL',
+                    (token,)).fetchall()]
+                cur.execute('UPDATE lister_photo_links SET opened_at = ? WHERE token = ?', (_now(), token))
+                conn.commit()
+        except Exception as e:
+            raise ListerError('Could not look the link up: ' + str(e), 500)
+        if not rows:
+            return {'deleted': 0}
+
+        token_value = _text(self.telegram_token() if callable(self.telegram_token) else '')
+        if not token_value:
+            return {'deleted': 0}
+        import requests
+        deleted = 0
+        for row in rows:
+            message_id = int(row.get('message_id') or 0)
+            if not message_id:
+                continue
+            try:
+                response = requests.post(f'https://api.telegram.org/bot{token_value}/deleteMessage',
+                                         json={'chat_id': str(row.get('chat_id') or ''), 'message_id': message_id},
+                                         timeout=15)
+                if response.ok and (response.json() or {}).get('ok'):
+                    deleted += 1
+            except Exception:
+                # Telegram refusing a delete must never break the page that is about to take photos.
+                pass
+        return {'deleted': deleted}
 
     def prepare(self, upc, *, base_url='http://localhost/', force=False, actor='lister'):
         """Build the Listing Agent proposal (title, price, category, specifics, description) in the background."""
@@ -2761,6 +2852,13 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:photo-link')
 
+    def api_lister_photo_link_opened():
+        try:
+            data = request.get_json(silent=True) or {}
+            return jsonify({'success': True, **lister.photo_link_opened(_text(data.get('token')))})
+        except Exception as e:
+            return failure(e, 'lister:photo-link-opened')
+
     def api_lister_qr():
         text = _text(request.args.get('text'), 1000)
         if not text:
@@ -2796,6 +2894,7 @@ def register(app, deps):
     app.add_url_rule('/api/lister/photos/fetch', 'api_lister_photo_fetch', api_lister_photo_fetch)
     app.add_url_rule('/api/lister/qr', 'api_lister_qr', api_lister_qr)
     app.add_url_rule('/api/lister/photo-link', 'api_lister_photo_link', api_lister_photo_link, methods=['POST'])
+    app.add_url_rule('/api/lister/photo-link/opened', 'api_lister_photo_link_opened', api_lister_photo_link_opened, methods=['POST'])
     app.add_url_rule('/api/lister/ledger', 'api_lister_ledger', api_lister_ledger)
     app.add_url_rule('/lister-ledger', 'lister_ledger_page', lister_ledger_page)
 

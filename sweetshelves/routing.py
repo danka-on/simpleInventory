@@ -634,5 +634,6 @@ def register_routes():
         # "+ Photo link": Telegram the phone camera page instead of scanning the QR code.
         '_telegram_send_message': ss_telegram._telegram_send_message,
         '_telegram_collect_recipient_rows': ss_telegram._telegram_collect_recipient_rows,
+        '_telegram_get_bot_token': ss_telegram._telegram_get_bot_token,
         'BASE_DIR': BASE_DIR,
     })

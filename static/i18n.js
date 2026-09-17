@@ -1231,6 +1231,11 @@ function ensureTopBannerStyles(){
 }
 
 function createTopBanner(){
+  // A page can opt out with data-ss-no-topbar on <html>: full-screen pages (the phone camera
+  // page) need the whole viewport, and the banner would sit on top of their own controls.
+  try{
+    if(document.documentElement.hasAttribute('data-ss-no-topbar')) return;
+  }catch(e){}
   if(document.getElementById('ss-top-banner')) return;
   ensureTopBannerStyles();
 

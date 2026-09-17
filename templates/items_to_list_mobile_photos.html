@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-ss-no-topbar>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -504,8 +504,11 @@
     const ROW_STATUS = {{ (row_status or '')|tojson }};
     const TITLE = {{ (title or '')|tojson }};
     const RETURN_PATH = {{ (return_path or '')|tojson }};
-    // Both ways in (QR code, Telegram "+ Photo link") carry camera=1.
-    const CAMERA_MODE = new URLSearchParams(window.location.search).get('camera') === '1';
+    // Both ways in (QR code, Telegram "+ Photo link") carry camera=1; only the Telegram one
+    // carries a token, and opening the page is the click that takes its message back down.
+    const PARAMS = new URLSearchParams(window.location.search);
+    const CAMERA_MODE = PARAMS.get('camera') === '1';
+    const LINK_TOKEN = PARAMS.get('t') || '';
     const $ = (id) => document.getElementById(id);
 
     function esc(s){
@@ -923,6 +926,19 @@
       $('titleBox').textContent = TITLE;
     }
     renderPending();
+
+    if(LINK_TOKEN){
+      // Best effort and deliberately unawaited: a bot message left in the chat is a nuisance,
+      // not a reason to hold up the camera.
+      try{
+        fetch('/api/lister/photo-link/opened', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({token: LINK_TOKEN}),
+          keepalive: true
+        }).catch(() => {});
+      }catch(e){}
+    }
 
     if(CAMERA_MODE){
       document.body.classList.add('cameraMode');
