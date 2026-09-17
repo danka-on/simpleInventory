@@ -107,23 +107,6 @@ h3 .grow { flex: 1; }
 .litem .meta { font-size: 11px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .litem .meta .suffix { background: var(--amber-bg); color: var(--amber); padding: 0 5px; border-radius: 4px; font-weight: 800; }
 .litem .meta a { color: inherit; }
-.tab.listed .count { font-size: 11px; font-weight: 700; color: var(--green); }
-.tab.listed.active .count { color: inherit; }
-
-/* "Listed" side bar: what the Lister recorded, slides over the panel from the right. */
-.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); z-index: 40; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0, 0, 0, .18); display: flex; flex-direction: column; padding: 8px; gap: 6px; overflow: hidden; }
-.drawer[hidden] { display: none; }
-.drawer-head { display: flex; align-items: center; gap: 6px; }
-.drawer-filters { display: flex; flex-wrap: wrap; gap: 6px; }
-.drawer-filters .seg-btn { padding: 4px 9px; font-size: 12px; }
-.drawer-summary { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.drawer-summary b { color: var(--ink); }
-.drawer .list { overflow-y: auto; flex: 1; }
-.drawer .day { margin: 8px 0 2px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-.litem { display: grid; grid-template-columns: 40px 1fr; gap: 8px; align-items: center; padding: 6px; border-radius: 8px; background: var(--card); border: 1px solid var(--line); margin-bottom: 4px; }
-.litem img, .litem .noimg { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; background: var(--chip); }
-.litem .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.litem .meta { font-size: 11px; color: var(--muted); display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 
 .page .store { display: flex; gap: 8px; align-items: center; }
 .page .badge { font-weight: 700; font-size: 11px; padding: 2px 8px; border-radius: 6px; }
