@@ -292,6 +292,13 @@
       }
     }
 
+    // Who ships it (Amazon) and eBay's own lowest-price suggestion: always the same answer, so the
+    // page gets it without being asked. Both stay checkpoints, so the user still walks past them.
+    const fulfilment = chooseFulfilment(store);
+    if (fulfilment) (fulfilment.ok ? report.filled : report.skipped).push({ target: 'fulfillment', value: fulfilment.label, label: 'Fulfilment', reason: fulfilment.ok ? '' : 'could not tick it' });
+    const lowest = matchLowestPrice(store);
+    if (lowest) (lowest.ok ? report.filled : report.skipped).push({ target: 'matchLowest', value: lowest.label, label: 'Match lowest price', reason: lowest.ok ? '' : 'could not click it' });
+
     // Item specifics by exact label (Brand, Color, Material, ...).
     const aspectHits = M.matchAspects(descriptors.map((d, i) => used.has(i) ? { tag: 'input', type: 'hidden' } : d), aspects);
     for (const [aspect, hit] of Object.entries(aspectHits)) {
@@ -303,6 +310,44 @@
       if (ok) flash(el);
     }
     return report;
+  }
+
+  // Every word around a control, shadow host included: Amazon's choice is a long sentence in a label.
+  function controlText(el) {
+    const host = shadowHost(el);
+    const label = el.closest ? el.closest('label') : null;
+    const hostLabel = host && host.closest ? host.closest('label') : null;
+    return M.normalize([labelTextFor(el), label && label.textContent, hostLabel && hostLabel.textContent,
+      nearbyText(host || el), el.getAttribute && el.getAttribute('aria-label'), host && host.getAttribute('label'),
+      el.value].filter(Boolean).join(' '));
+  }
+
+  // "I want to ship this item myself or use Amazon Easy Ship if it sells. (Merchant Fulfilled)".
+  function chooseFulfilment(store) {
+    if (store !== 'amazon') return null;
+    for (const radio of deepQuery('input[type=radio], kat-radiobutton')) {
+      if (!isVisible(radio)) continue;
+      const text = controlText(radio);
+      if (!/ship this item myself|merchant fulfill|easy ship/.test(text)) continue;
+      if (/amazon (ships|will ship|fulfills)|fulfilled by amazon|\bfba\b/.test(text)) continue;
+      const already = radio.checked === true || radio.getAttribute('checked') !== null;
+      if (!already) { try { radio.click(); } catch { return { ok: false, label: 'Merchant Fulfilled' }; } }
+      return { ok: true, label: 'Merchant Fulfilled' };
+    }
+    return null;
+  }
+
+  // eBay offers "Match lowest price" next to the price box; that is always the answer we want.
+  function matchLowestPrice(store) {
+    if (store !== 'ebay') return null;
+    for (const el of deepQuery('button, [role=button], a, label, kat-button')) {
+      if (!isVisible(el) || buttonDisabled(el)) continue;
+      const text = M.normalize(el.textContent || '');
+      if (!/^match (the )?lowest price/.test(text)) continue;
+      try { el.click(); } catch { return { ok: false, label: 'Match lowest price' }; }
+      return { ok: true, label: 'Match lowest price' };
+    }
+    return null;
   }
 
   function flash(el) {
@@ -591,7 +636,8 @@
     return null;
   }
 
-  function guideNeeded({ values = {}, store = '', aspects = {}, noteFields = [] } = {}) {
+  function guideNeeded({ values = {}, store = '', aspects = {}, noteFields = [], confirmFields = [] } = {}) {
+    const confirmSet = new Set(confirmFields || []);
     const elements = collect();
     const descriptors = elements.map(describe);
     const assigned = M.assign(descriptors, Object.keys(M.TARGETS));
@@ -612,19 +658,24 @@
       else if (target) suggestion = valueFor(target, values, store);
       else if (conditionSelect && values.condition) suggestion = (M.conditionLabels(values.condition, store) || [])[0] || '';
       rows.push({ index, target: target || (conditionSelect ? 'condition' : ''), required, done: !M.isEmptyValue(d),
+        confirm: confirmSet.has(target || (conditionSelect ? 'condition' : '')),
         label: (target && TARGET_LABELS[target]) || d.labelText || d.ariaLabel || d.placeholder || d.name || d.id || d.tag,
         suggestion: String(suggestion || ''), tag: d.tag, kind: 'field',
         value: target === 'quantity' || target === 'price' ? String(d.value || '') : '',
         fromNotes: noteSet.has(target) });
     });
     const photos = photoState();
-    if (photos) rows.unshift({ index: -1, target: 'photos', required: true, done: photos.count > 0, label: 'Photos', suggestion: 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
+    // A ready-made Amazon catalogue listing carries the catalogue's pictures: photos are optional there.
+    if (photos) rows.unshift({ index: -1, target: 'photos', required: store !== 'amazon', done: photos.count > 0, label: 'Photos', suggestion: store === 'amazon' ? 'Optional on a catalogue listing' : 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
     const payment = store === 'amazon' ? null : policyState();
     // Only worth a row while it is still empty: once a policy is picked there is nothing to do.
     if (payment && !payment.done) rows.push({ index: -1, target: 'paymentPolicy', required: true, done: false, label: 'Payment policy', suggestion: 'Pick a payment policy', tag: 'policy', kind: 'policy', el: payment.el, value: payment.value });
     // Required first, then our fields, keeping page order inside each group; price and then
     // quantity go last because that is where eBay's form ends, and the payment policy after them.
-    const tail = r => (r.target === 'price' ? 1 : r.target === 'quantity' ? 2 : r.target === 'paymentPolicy' ? 3 : 0);
+    // Seller Central's offer page is the other way round: quantity, price, then the condition.
+    const tail = store === 'amazon'
+      ? r => (r.target === 'quantity' ? -3 : r.target === 'price' ? -2 : r.target === 'condition' ? -1 : 0)
+      : r => (r.target === 'price' ? 1 : r.target === 'quantity' ? 2 : r.target === 'paymentPolicy' ? 3 : 0);
     rows.sort((a, b) => (tail(a) - tail(b)) || (Number(b.required) - Number(a.required)));
     return { elements, rows };
   }
@@ -788,7 +839,22 @@
   }
 
   // Red = required and empty, amber = optional and empty, green = filled, blue = filled from the prep notes.
+  // We put the value in (warehouse quantity, eBay's lowest price): green would say "nothing to do
+  // here", and the user asked to be walked past it anyway. So it is its own kind of checkpoint.
+  function rowCheck(row) {
+    return Boolean(row && row.confirm && row.done && guide && !guide.seen.has(row.target || row.label));
+  }
+
+  function rowOpen(row) {
+    return !row.done || rowCheck(row);
+  }
+
+  function markSeen(row) {
+    if (row && row.confirm && guide) guide.seen.add(row.target || row.label);
+  }
+
   function rowColour(row) {
+    if (rowCheck(row)) return '#7c3aed';
     if (row.done) return row.fromNotes ? '#2563eb' : '#16a34a';
     return row.required ? '#dc2626' : '#f59e0b';
   }
@@ -810,7 +876,7 @@
       return;
     }
     const colour = rowColour(row);
-    const flag = row.done ? (row.fromNotes ? 'from the notes' : 'filled') : (row.required ? 'required' : 'optional');
+    const flag = rowCheck(row) ? 'check it' : row.done ? (row.fromNotes ? 'from the notes' : 'filled') : (row.required ? 'required' : 'optional');
     const ai = guide.options.aiFields?.[row.target];
     const said = row.done
       ? (row.value ? escapeHtml(row.value) : '<span style="opacity:.75">already on the page</span>') + (ai ? ` <span style="color:${t.good}">\u00b7 written by AI${ai === 'auto' ? ' automatically' : ''}</span>` : '')
@@ -1055,15 +1121,33 @@
 
   function guideState() {
     if (!guide) return { active: false, needed: [], rows: [], index: -1 };
-    const rows = guide.rows.map(r => ({ index: r.index, target: r.target, required: r.required, done: r.done, label: r.label, suggestion: r.suggestion, kind: r.kind, value: r.value || '', fromNotes: Boolean(r.fromNotes) }));
-    return { active: true, index: guide.index, rows, needed: rows.filter(r => !r.done), open: rows.filter(r => !r.done).length, total: rows.length };
+    const rows = guide.rows.map(r => ({ index: r.index, target: r.target, required: r.required, done: r.done, label: r.label, suggestion: r.suggestion, kind: r.kind, value: r.value || '', fromNotes: Boolean(r.fromNotes), check: rowCheck(r) }));
+    const open = rows.filter(r => !r.done || r.check);
+    return { active: true, index: guide.index, rows, needed: open, open: open.length, total: rows.length };
+  }
+
+  // Seller Central's catalogue steps - the product search and the "Product information" flyout that
+  // follows a UPC - are not the offer form: there is no price or quantity to set, so the HUD has
+  // nothing to say and would only cover the page. The real form can render late, so keep looking.
+  let guideWaitUntil = 0;
+  let guideWaitTimer = null;
+  function offerPage(rows) {
+    return rows.some(r => r.target === 'price' || r.target === 'quantity');
   }
 
   function guideStart(options) {
     // Already up on this page (the URL changed, the fill ran again): refresh in place, never jump back to the first row.
     if (guide) { guide.options = options || guide.options; guideRefresh(); guideRender(false); notifyGuide(); return guideState(); }
     const { elements, rows } = guideNeeded(options || {});
-    guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, qtyTag: null, collapsed: false, steps: false, preview: null };
+    if (!offerPage(rows)) {
+      if (!guideWaitUntil) guideWaitUntil = Date.now() + 20000;
+      clearTimeout(guideWaitTimer);
+      if (Date.now() < guideWaitUntil) guideWaitTimer = setTimeout(() => { if (!guide) guideStart(options); }, 1500);
+      return guideState();
+    }
+    guideWaitUntil = 0;
+    clearTimeout(guideWaitTimer);
+    guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, qtyTag: null, collapsed: false, steps: false, preview: null, seen: new Set() };
     const handlers = {
       key(event) {
         if (!guide) return;
@@ -1088,7 +1172,8 @@
     window.addEventListener('resize', handlers.reposition);
     guide.handlers = handlers;
     guide.ticker = setInterval(() => { if (guide) { guideRefresh(); guideRender(); } }, 2000);
-    guide.index = rows.findIndex(r => !r.done);
+    guide.index = rows.findIndex(rowOpen);
+    markSeen(guide.rows[guide.index]);
     guideRender(false); notifyGuide();
     return guideState();
   }
@@ -1121,10 +1206,11 @@
   function guideNext() {
     if (!guide) return guideState();
     guideRefresh();
-    const open = guide.rows.map((r, i) => (r.done ? -1 : i)).filter(i => i >= 0);
+    const open = guide.rows.map((r, i) => (rowOpen(r) ? i : -1)).filter(i => i >= 0);
     if (!open.length) { guide.index = -1; guideRender(); notifyGuide(); return guideState(); }
     const after = open.find(i => i > guide.index);
     guide.index = after !== undefined ? after : open[0];
+    markSeen(guide.rows[guide.index]);  // landing on it is the look it was asking for
     guideRender(true);
     notifyGuide();
     return guideState();
@@ -1135,6 +1221,7 @@
     guideRefresh();
     if (!guide.rows.length) { guideRender(); return guideState(); }
     guide.index = ((index % guide.rows.length) + guide.rows.length) % guide.rows.length;
+    markSeen(guide.rows[guide.index]);
     guideRender(true);
     notifyGuide();
     return guideState();

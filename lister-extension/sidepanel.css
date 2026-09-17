@@ -22,6 +22,8 @@
   --blue: #2c5fd0;
   --blue-soft: #e7eefc;
   --chip: #eef2f0;
+  --ai: #6d3fd4;
+  --ai-soft: #ece4fb;
   --ebay: #1a6fd4;
   --ebay-soft: #e6eefb;
   --amazon: #c26a00;
@@ -55,6 +57,8 @@
   --blue: #8fb2f2;
   --blue-soft: #16203c;
   --chip: #22302a;
+  --ai: #b79cf5;
+  --ai-soft: #251a45;
   --ebay: #74aaf5;
   --ebay-soft: #14243f;
   --amazon: #f0a23c;
@@ -81,6 +85,11 @@ button.link { background: none; border: none; color: var(--green); padding: 0; t
 button.mini { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
 button.tiny { padding: 3px 7px; font-size: 11px; border-radius: 6px; background: var(--card); color: var(--muted); }
 button.tiny:hover { color: var(--ink); border-color: var(--faint); }
+/* The phone is the fast way to photograph a thing, so it leads the row and looks like a real button. */
+button.tiny.phone { background: var(--blue-soft); color: var(--blue); border-color: var(--blue); font-weight: 600; padding: 3px 9px; }
+button.tiny.phone:hover:not(:disabled) { background: var(--blue); color: #fff; border-color: var(--blue); }
+button.mini.ai { background: var(--ai-soft); color: var(--ai); border-color: var(--ai); font-weight: 600; }
+button.mini.ai:hover:not(:disabled) { background: var(--ai); color: #fff; border-color: var(--ai); }
 button .btn-ico { width: 13px; height: 13px; flex: none; }
 input, select, textarea { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }
 textarea { min-height: 70px; resize: vertical; }

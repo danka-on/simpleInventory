@@ -46,7 +46,7 @@
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', promptDraft: null, titlePrompt: '', savedTitlePrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
-    voiceBusy: new Set(), qrOpen: false, advOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
+    voiceBusy: new Set(), qrOpen: false, photosOpen: null, advOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
     // "+ NEW": the draft the phone is filling from the other end.
@@ -542,9 +542,16 @@
 
   // -- Preload: everything the automatic switches would do, run on the server ahead of time -------------
   const PRELOAD_LABEL = { prepare: 'values', title: 'AI title', description: 'AI description', photos: 'AI photos' };
+  // Amazon lists from the catalogue, which brings its own pictures: no photo work happens on that
+  // side, however the switches are set.
+  function photoAutomationOff() {
+    return (state.page?.store || state.platform) === 'amazon';
+  }
+
   function preloadSteps() {
     const s = state.settings;
-    return ['prepare', s.autoAiTitle && 'title', s.autoAiDescription && 'description', s.autoAiPhotos && 'photos'].filter(Boolean);
+    return ['prepare', s.autoAiTitle && 'title', s.autoAiDescription && 'description',
+      s.autoAiPhotos && !photoAutomationOff() && 'photos'].filter(Boolean);
   }
   function preloadOf(upc) { return state.preload.items[upc] || state.items.find(it => it.upc === upc)?.preload || null; }
   function preloadRunning(upc) { const p = preloadOf(upc); return !!(p && p.running); }
@@ -690,6 +697,21 @@
   }
 
   // Values as edited in the panel (edits win over the prepared fields).
+  // How many of this thing we actually have: the gate's listable count, then the rack, then whatever
+  // the proposal said. Both stores get the same number.
+  // Folded away on Amazon by default (its catalogue listings need no photos), open on eBay; once the
+  // user works the caret, their choice wins for the rest of the session.
+  function photosDefault() {
+    return state.photosOpen === null || state.photosOpen === undefined ? state.platform !== 'amazon' : state.photosOpen;
+  }
+
+  function stockQty(info) {
+    const g = info?.gate || {}, inv = info?.inventory || {};
+    const v = values(info) || {};
+    const n = [g.listable, g.rackQty, inv.quantity].find(x => Number.isFinite(x) && x > 0);
+    return String(n ?? (v.quantity || ''));
+  }
+
   function values(item) {
     if (!item) return null;
     const edits = state.edits[item.upc] || {};
@@ -890,7 +912,8 @@
     try {
       const store = state.page.store;
       const learned = state.learned[store + ':' + (state.page.kind || '')] || {};
-      const result = await pageMessage({ type: 'fill', options: { values: values(info), store, aspects: info.fields.aspects || {}, learned, includeDescription: store === 'ebay' } });
+      // The quantity to list is what the warehouse holds, not whatever the proposal guessed.
+      const result = await pageMessage({ type: 'fill', options: { values: { ...values(info), quantity: stockQty(info) }, store, aspects: info.fields.aspects || {}, learned, includeDescription: store === 'ebay' } });
       state.report = result.report;
       state.fillSessions[state.tab.id] = item.upc;
       const filled = (result.report.filled || []).map(f => f.target);
@@ -919,7 +942,8 @@
         // What the rack really holds, so the overlay can pin it under the store's quantity box.
         const inv = info.inventory || {}, g = info.gate || {};
         const stock = { rack: g.rackQty ?? inv.quantity ?? null, listable: g.listable ?? inv.quantity ?? null, positions: inv.positions || [] };
-        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, stock, aiFields: state.aiGenerated[info.upc] || {} } });
+        // Quantity and price are put in for the user, so the HUD still stops at them for a look.
+        response = await pageMessage({ type: 'guide-start', options: { values: { ...v, quantity: stockQty(info) }, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, stock, confirmFields: ['quantity', 'price'], aiFields: state.aiGenerated[info.upc] || {} } });
         if (!silent && !response.state.needed.length) toast('Nothing left to fill on this page');
       } else if (action === 'go') response = await pageMessage({ type: 'guide-go', index });
       else response = await pageMessage({ type: 'guide-' + action });
@@ -1205,6 +1229,7 @@
   async function maybeAutoSend() {
     const info = detail();
     const page = state.page;
+    if (photoAutomationOff()) return;
     if (!info || !state.settings.autoSendPhotos || !page?.store || !(page.kind === 'listing-form' || page.kind === 'offer-form')) return;
     if (state.aiBusy) return;  // an AI run is in progress: maybeAutoPhotos sends when it finishes
     const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc;
@@ -1249,6 +1274,7 @@
 
   // Auto mode: every photo of ours (listing + prep) that has no AI version yet, once per item and session.
   async function maybeAutoPhotos(info) {
+    if (photoAutomationOff()) return;
     if (!info || !state.settings.autoAiPhotos || state.aiBusy || preloadRunning(info.upc)) return;
     const done = new Set((info.photos || []).filter(p => p.source === 'ai').map(p => p.from).filter(Boolean));
     const fresh = p => !done.has(p.name) && !state.autoPhotos.has(p.url);
@@ -1300,6 +1326,7 @@
   // New photos of an item already open: AI photoshop just those (auto switch), then send just those
   // (their AI versions) to the listing form (auto send switch) — the earlier ones are on the page already.
   async function autoNewPhotos(info, added) {
+    if (photoAutomationOff()) return;
     const page = state.page;
     const onForm = !!(page?.store && (page.kind === 'listing-form' || page.kind === 'offer-form'));
     const sentKey = (state.tab?.id || 0) + '|' + (page?.store || '') + '|' + info.upc;
@@ -1763,6 +1790,7 @@
     const notes = info.notes || [];
     const voice = info.voiceNotes || [];
     const photos = info.photos || [];
+    const photosOpen = photosDefault();
     const existing = (info.existing || {})[state.platform] || [];
     const linkedHere = (info.links || []).find(l => l.platform === state.platform);
     const aspects = Object.entries(info.fields.aspects || {});
@@ -1840,17 +1868,18 @@
         <audio id="notePlayer" preload="none" hidden></audio>
       </div>
 
-      <div class="sect">
+      <div class="sect photos-sect" data-open="${photosOpen ? '1' : '0'}">
         <div class="sect-h"><span class="lbl">Photos</span><span class="n">${photos.length}${state.usedPhotos.size ? ` \u00b7 ${state.usedPhotos.size} sent` : ''}</span><span class="sp"></span>
+          <button id="photoLink" class="tiny phone" type="button" title="Telegram the same camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : '\ud83d\udcf1 Phone'}</button>
           <button id="addPhoto" class="tiny" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : 'QR'}</button>
-          <button id="photoLink" class="tiny" type="button" title="Telegram the same camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : 'Phone'}</button>
-          <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button></div>
+          <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button>
+          <button id="photosToggle" class="tiny" type="button" title="${photosOpen ? 'Fold the photos away' : 'Show the photos'}">${photosOpen ? '\u25be' : '\u25b8'}</button></div>
         ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone \u2014 it opens straight into the camera. Press \u21bb when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
-        ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use QR or Phone to shoot some.</div>'}
+        ${photosOpen ? `${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use Phone or QR to shoot some.</div>'}
         <div class="row tight">
           <button id="sendPhotos" class="primary mini" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending\u2026' : '\u2b05 Send to page'}</button>
-          <button id="aiPhotos" class="mini" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '\u2728 AI photoshop'}</button>
-        </div>
+          <button id="aiPhotos" class="mini ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '\u2728 AI photoshop'}</button>
+        </div>` : `<div class="muted small">${photos.length} photo${photos.length === 1 ? '' : 's'} folded away \u2014 an Amazon catalogue listing brings its own.</div>`}
       </div>
 
       <div class="autoline">By itself: <b>${esc(autoSummary())}</b><button class="edit" id="autoEdit" type="button">Change</button></div>
@@ -1915,8 +1944,8 @@
         }
       };
     }
-    $('sendPhotos').onclick = () => sendPhotos();
-    $('aiPhotos').onclick = () => aiPhotoshop();
+    if ($('sendPhotos')) $('sendPhotos').onclick = () => sendPhotos();
+    if ($('aiPhotos')) $('aiPhotos').onclick = () => aiPhotoshop();
     $('aiPrompt').oninput = () => {
       state.promptDraft = { upc: info.upc, text: $('aiPrompt').value };
       $('aiPromptWhere').textContent = 'this item only';
@@ -1942,6 +1971,8 @@
       renderDetail();
     };
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
+    // The item card has variants without a photo section (the "+ NEW" draft), so never assume it.
+    if ($('photosToggle')) $('photosToggle').onclick = () => { state.photosOpen = !photosDefault(); renderDetail(); };
     $('photoLink').onclick = () => sendPhotoLink(info);
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
     renderActionBar();
