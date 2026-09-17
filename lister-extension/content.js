@@ -487,8 +487,10 @@
     });
     const photos = photoState();
     if (photos) rows.unshift({ index: -1, target: 'photos', required: true, done: photos.count > 0, label: 'Photos', suggestion: 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
-    // Required first, then our fields, keeping page order inside each group.
-    rows.sort((a, b) => Number(b.required) - Number(a.required));
+    // Required first, then our fields, keeping page order inside each group; price and then
+    // quantity go last because that is where eBay's form ends.
+    const tail = r => (r.target === 'price' ? 1 : r.target === 'quantity' ? 2 : 0);
+    rows.sort((a, b) => (tail(a) - tail(b)) || (Number(b.required) - Number(a.required)));
     return { elements, rows };
   }
 
@@ -514,6 +516,25 @@
     const el = guideElement(row);
     if (!el) return;
     try { el.style.outline = el.dataset.ssGuidePrev || ''; el.style.outlineOffset = ''; delete el.dataset.ssGuidePrev; delete el.dataset.ssGuideDone; } catch { /* ignore */ }
+  }
+
+  // The page's own "List it" / "Save and finish" button: scroll there and flash it (the user presses it).
+  function findSubmitButton() {
+    const words = /^(list it|list item|list your item|save and finish|save and continue|submit listing|publish|list now|continue to listing)$/i;
+    const candidates = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button], [role=button]'))
+      .filter(isVisible)
+      .filter(b => words.test(clip((b.textContent || '') + (b.value || '')).trim()));
+    return candidates[candidates.length - 1] || null;
+  }
+
+  function goToSubmit() {
+    const button = findSubmitButton();
+    if (!button) { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); return false; }
+    try { button.scrollIntoView({ block: 'center', behavior: 'smooth' }); button.focus({ preventScroll: true }); } catch { /* ignore */ }
+    const previous = button.style.boxShadow;
+    button.style.boxShadow = '0 0 0 4px rgba(22,163,74,.75)';
+    setTimeout(() => { button.style.boxShadow = previous; }, 2500);
+    return true;
   }
 
   // Buttons on the overlay that need the server go through the side panel.
@@ -544,11 +565,13 @@
         <button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:600">Use suggestion (Ctrl+Enter)</button>
         <button data-ss="next" style="background:#334155;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
         <button data-ss="fill" title="Fill the form from the item's values" style="background:#1d4ed8;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Fill page</button>
+        <button data-ss="ready" title="Everything has a value: jump to the page's List it button" style="display:none;flex:1 1 100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 14px system-ui,sans-serif;box-shadow:0 4px 14px rgba(22,163,74,.45)">✓ All set — go to List it</button>
 
       </div>`;
     panel.querySelector('[data-ss="use"]').onclick = () => guideUse();
     panel.querySelector('[data-ss="next"]').onclick = () => guideNext();
     panel.querySelector('[data-ss="fill"]').onclick = () => panelAction('fill');
+    panel.querySelector('[data-ss="ready"]').onclick = () => goToSubmit();
 
     panel.querySelector('[data-ss="done"]').onclick = () => { guideStop(); notifyGuide(); };
     panel.querySelector('[data-ss="collapse"]').onclick = event => { event.stopPropagation(); guide.collapsed = !guide.collapsed; guideRender(); };
@@ -621,6 +644,8 @@
     for (const el of body.querySelectorAll('[data-ss-row]')) el.onclick = () => guideGo(Number(el.dataset.ssRow));
     for (const el of body.querySelectorAll('[data-ss-ai]')) el.onclick = event => { event.stopPropagation(); el.textContent = '…'; panelAction('generate', { kind: el.dataset.ssAi }); };
     panel.querySelector('[data-ss="use"]').style.display = current && !current.done && current.suggestion && current.kind === 'field' ? '' : 'none';
+    panel.querySelector('[data-ss="ready"]').style.display = total && !open.length ? '' : 'none';
+    panel.querySelector('[data-ss="next"]').style.display = open.length ? '' : 'none';
     for (const row of guide.rows) guideStyle(row, row.done ? (row.fromNotes ? 'notes' : 'done') : (row.required ? 'required' : 'optional'));
     const pointer = guidePointer();
     const el = current ? guideElement(current) : null;

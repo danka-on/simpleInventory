@@ -78,7 +78,7 @@ const ebayForm = `<!doctype html><title>Create your listing | eBay</title>
 <div><span>Description</span><div id="desc" contenteditable="true" aria-label="Item description"></div></div>
 <input type="file" id="photos" accept="image/*" multiple>
 <input type="search" placeholder="Search eBay" aria-label="Search for anything">
-<a href="https://www.ebay.com/sl/list/success?itemId=335566778899&mode=AddItem">List it</a>
+<a role="button" href="https://www.ebay.com/sl/list/success?itemId=335566778899&mode=AddItem">List it</a>
 <script>window.events = []; for (const el of document.querySelectorAll('input,textarea,select,[contenteditable]')) el.addEventListener('input', e => window.events.push(e.target.id));
 document.getElementById('photos').addEventListener('change', e => { window.photoNames = Array.from(e.target.files).map(f => f.name); });</script>`;
 
@@ -290,6 +290,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(rowFor('Title').dot.includes('22, 163, 74'), 'the filled title is green');
     assert.ok(rowFor('Quantity').text.includes('· 1'), 'the quantity row shows the entered quantity: ' + rowFor('Quantity').text);
     assert.ok(!rowFor('UPC'), 'the UPC is not on the checklist');
+    assert.ok(rows.at(-1).text.startsWith('Quantity') && rows.at(-2).text.startsWith('Price'), 'price then quantity close the checklist: ' + rows.map(r => r.text.split(' ')[0]).join(','));
     assert.ok(rowFor('Condition description').dot.includes('37, 99, 235') && rowFor('Condition description').text.includes('prep notes'), 'the note-sourced condition description is blue with a disclaimer');
     assert.ok((await panel.textContent('#pageCard')).includes('of'), 'the store card shows the checklist progress');
     // The actions live on the overlay now, not on the store card.
@@ -324,6 +325,8 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(!(await panel.$eval('#detail', el => el.hidden)));
     assert.ok(calls.events.length >= 1 && calls.events[0].event === 'helper_filled' && calls.events[0].proposal_id === 7, 'fill reported to the proposal timeline');
 
+    // Once every row is green the overlay offers one clear button that jumps to the page's List it.
+    assert.equal(await store.$eval('#ss-lister-guide [data-ss="ready"]', b => b.style.display), 'none', 'not ready while Color and Photos are open');
     // Photos reach the page's uploader through the file input (the item view is already up: locked).
     detail.photos.push({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/own.jpg', source: 'listing', id: 1, name: 'own.jpg' });
     await panel.click('#photoRefresh');
@@ -352,6 +355,11 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     });
     await store.waitForFunction(() => window.photoNames && window.photoNames.length === 1 && window.photoNames[0] === 'own.jpg', null, { timeout: 15000 });
 
+    // Fill the last open row by hand and pretend the counter moved: the ready button shows and jumps to List it.
+    await store.evaluate(() => { const c = document.getElementById('color'); c.value = 'White'; c.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('h2 + p').textContent = '1/25'; });
+    await store.waitForFunction(() => document.querySelector('#ss-lister-guide [data-ss="ready"]').style.display !== 'none', null, { timeout: 15000 });
+    await store.click('#ss-lister-guide [data-ss="ready"]');
+    await store.waitForFunction(() => document.activeElement && document.activeElement.textContent.trim() === 'List it', null, { timeout: 10000 });
     // eBay's success page carries the item number: the listing is recorded without a click.
     await store.click('a[href*="/sl/list/success"]');
     await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('recorded'), null, { timeout: 20000 });
