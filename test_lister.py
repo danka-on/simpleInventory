@@ -25,7 +25,9 @@ UPC = '883049370897'
 
 class ListerTestCase(unittest.TestCase):
     def setUp(self):
-        self.folder = tempfile.TemporaryDirectory()
+        # Windows keeps a handle on an open sqlite file, so the temp folder cannot always be
+        # removed; a failed cleanup is the harness tidying up, never a fact about the code.
+        self.folder = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.folder.cleanup)
         self.root = Path(self.folder.name)
         (self.root / 'static').mkdir()

@@ -72,6 +72,49 @@
     FOR_PARTS_OR_NOT_WORKING: { ebay: ['For parts or not working'], amazon: [] },
   };
 
+  // Seller Central asks who ships before it will show the quantity box. We always ship ourselves,
+  // so the merchant option is the one to take - and the Amazon one must never be taken by accident.
+  // Both sentences say "Amazon" ("...or use Amazon Easy Ship..."), so only whole phrases count.
+  const FULFILLMENT_WORDS = {
+    merchant: ['merchant fulfilled', 'fulfilled by merchant', 'ship this item myself', 'ship this myself',
+      'ship it myself', 'i will ship', 'seller fulfilled', 'easy ship', 'mfn'],
+    amazon: ['amazon fulfilled', 'fulfilled by amazon', 'i want amazon to ship', 'amazon to ship',
+      'amazon ships', 'amazon will ship', 'provide customer service', 'fba'],
+  };
+
+  // Which side of the fulfilment question an option's wording is: 'merchant', 'amazon' or ''.
+  function fulfillmentChoice(text) {
+    const value = normalize(text);
+    if (!value) return '';
+    const count = words => words.reduce((total, word) => total + (hasWord(value, normalize(word)) ? 1 : 0), 0);
+    const merchant = count(FULFILLMENT_WORDS.merchant);
+    const amazon = count(FULFILLMENT_WORDS.amazon);
+    if (merchant > amazon) return 'merchant';
+    if (amazon > merchant) return 'amazon';
+    return '';
+  }
+
+  // "Match lowest" is whatever the offer page itself says the lowest offer is: our own boxes
+  // (your price, minimum price) are never it, and the figure has to sit next to the wording.
+  const LOWEST_SHAPES = [
+    { label: 'lowest price', re: /lowest[a-z ]{0,20}price[^$]{0,30}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+    { label: 'lowest offer', re: /lowest[a-z ]{0,20}offer[^$]{0,30}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+    { label: 'featured offer price', re: /(?:featured offer|buy box)[a-z ]{0,30}[^$]{0,30}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+    // The item panel beside the form: "Competing Marketplace Offers: 2 New from $29.40 + $0.00 shipping".
+    { label: 'competing offer', re: /competing[a-z ]{0,20}offers[^$]{0,40}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+  ];
+
+  function lowestPrice(text) {
+    const sample = String(text || '').replace(/\s+/g, ' ').slice(0, 40000);
+    for (const shape of LOWEST_SHAPES) {
+      const match = sample.match(shape.re);
+      if (!match) continue;
+      const price = Number(String(match[1]).replace(/,/g, ''));
+      if (Number.isFinite(price) && price > 0) return { price, label: shape.label };
+    }
+    return null;
+  }
+
   const SKIP_TYPES = new Set(['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'color', 'range', 'date', 'password']);
 
   function normalize(value) {
@@ -394,6 +437,6 @@
   return {
     TARGETS, CONDITION_LABELS, normalize, scoreTarget, assign, suggestTargets, matchAspects,
     signature, matchesSignature, detectPage, successInfo, isRequired, isEmptyValue, searchBoxScore,
-    conditionLabels, prelistCondition, tokens, candidateScore, rankCandidates, categoryScore, chooseOption,
+    conditionLabels, prelistCondition, fulfillmentChoice, lowestPrice, tokens, candidateScore, rankCandidates, categoryScore, chooseOption,
   };
 });

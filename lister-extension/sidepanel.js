@@ -635,16 +635,9 @@
 
   // -- Preload: everything the automatic switches would do, run on the server ahead of time -------------
   const PRELOAD_LABEL = { prepare: 'values', title: 'AI title', description: 'AI description', photos: 'AI photos' };
-  // Amazon lists from the catalogue, which brings its own pictures: no photo work happens on that
-  // side, however the switches are set.
-  function photoAutomationOff() {
-    return (state.page?.store || state.platform) === 'amazon';
-  }
-
   function preloadSteps() {
     const s = state.settings;
-    return ['prepare', s.autoAiTitle && 'title', s.autoAiDescription && 'description',
-      s.autoAiPhotos && !photoAutomationOff() && 'photos'].filter(Boolean);
+    return ['prepare', s.autoAiTitle && 'title', s.autoAiDescription && 'description', s.autoAiPhotos && 'photos'].filter(Boolean);
   }
   function preloadOf(upc) { return state.preload.items[upc] || state.items.find(it => it.upc === upc)?.preload || null; }
   function preloadRunning(upc) { const p = preloadOf(upc); return !!(p && p.running); }
@@ -790,21 +783,6 @@
   }
 
   // Values as edited in the panel (edits win over the prepared fields).
-  // How many of this thing we actually have: the gate's listable count, then the rack, then whatever
-  // the proposal said. Both stores get the same number.
-  // Folded away on Amazon by default (its catalogue listings need no photos), open on eBay; once the
-  // user works the caret, their choice wins for the rest of the session.
-  function photosDefault() {
-    return state.photosOpen === null || state.photosOpen === undefined ? state.platform !== 'amazon' : state.photosOpen;
-  }
-
-  function stockQty(info) {
-    const g = info?.gate || {}, inv = info?.inventory || {};
-    const v = values(info) || {};
-    const n = [g.listable, g.rackQty, inv.quantity].find(x => Number.isFinite(x) && x > 0);
-    return String(n ?? (v.quantity || ''));
-  }
-
   function values(item) {
     if (!item) return null;
     const edits = state.edits[item.upc] || {};
@@ -1009,8 +987,7 @@
     try {
       const store = state.page.store;
       const learned = state.learned[store + ':' + (state.page.kind || '')] || {};
-      // The quantity to list is what the warehouse holds, not whatever the proposal guessed.
-      const result = await pageMessage({ type: 'fill', options: { values: { ...values(info), quantity: stockQty(info) }, store, aspects: info.fields.aspects || {}, learned, includeDescription: store === 'ebay' } });
+      const result = await pageMessage({ type: 'fill', options: { values: values(info), store, aspects: info.fields.aspects || {}, learned, includeDescription: store === 'ebay' } });
       state.report = result.report;
       state.fillSessions[state.tab.id] = item.upc;
       const filled = (result.report.filled || []).map(f => f.target);
@@ -1039,8 +1016,7 @@
         // What the rack really holds, so the overlay can pin it under the store's quantity box.
         const inv = info.inventory || {}, g = info.gate || {};
         const stock = { rack: g.rackQty ?? inv.quantity ?? null, listable: g.listable ?? inv.quantity ?? null, positions: inv.positions || [] };
-        // Quantity and price are put in for the user, so the HUD still stops at them for a look.
-        response = await pageMessage({ type: 'guide-start', options: { values: { ...v, quantity: stockQty(info) }, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, stock, confirmFields: ['quantity', 'price'], aiFields: state.aiGenerated[info.upc] || {} } });
+        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, stock, aiFields: state.aiGenerated[info.upc] || {} } });
         if (!silent && !response.state.needed.length) toast('Nothing left to fill on this page');
       } else if (action === 'go') response = await pageMessage({ type: 'guide-go', index });
       else response = await pageMessage({ type: 'guide-' + action });
@@ -1244,6 +1220,36 @@
     return state.photoFiles[url];
   }
 
+  // A picture can fail to load on one machine and be fine on another: a store CDN that refuses the
+  // request from a chrome-extension:// page, or our own server behind Cloudflare Access, which an
+  // <img> cannot sign in to. When one fails it is fetched once more through the server - the same
+  // signed-in route the drag-and-drop photos use - and shown as its own bytes.
+  const proxiedPics = new Map();
+  function proxiedPic(url) {
+    if (!proxiedPics.has(url))
+      proxiedPics.set(url, photoFile(url).then(p => 'data:' + (p.type || 'image/jpeg') + ';base64,' + p.base64));
+    return proxiedPics.get(url);
+  }
+
+  // The picture a row should show, remembered on the node so a re-render does not reload it and
+  // does not undo a picture that had to come through the server.
+  function showPic(img, url) {
+    if (img.dataset.src === url) return;
+    img.dataset.src = url;
+    delete img.dataset.retried;
+    img.src = url;
+  }
+
+  document.addEventListener('error', event => {
+    const img = event.target;
+    if (!img || img.tagName !== 'IMG' || img.dataset.retried) return;
+    const url = img.dataset.src || img.getAttribute('src') || '';
+    if (!/^https?:/i.test(url)) return;
+    img.dataset.src = url;
+    img.dataset.retried = '1';
+    proxiedPic(url).then(src => { img.src = src; }).catch(() => {});
+  }, true);
+
   // Photos that already went into the store page (sent, or dragged in) are greyed out on the tiles.
   function markPhotosUsed(urls) {
     const fresh = (urls || []).filter(u => u && !state.usedPhotos.has(u));
@@ -1328,7 +1334,6 @@
   async function maybeAutoSend() {
     const info = detail();
     const page = state.page;
-    if (photoAutomationOff()) return;
     if (!info || !state.settings.autoSendPhotos || !page?.store || !(page.kind === 'listing-form' || page.kind === 'offer-form')) return;
     if (state.aiBusy) return;  // an AI run is in progress: maybeAutoPhotos sends when it finishes
     const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc;
@@ -1373,7 +1378,6 @@
 
   // Auto mode: every photo of ours (listing + prep) that has no AI version yet, once per item and session.
   async function maybeAutoPhotos(info) {
-    if (photoAutomationOff()) return;
     if (!info || !state.settings.autoAiPhotos || state.aiBusy || preloadRunning(info.upc)) return;
     const done = new Set((info.photos || []).filter(p => p.source === 'ai').map(p => p.from).filter(Boolean));
     const fresh = p => !done.has(p.name) && !state.autoPhotos.has(p.url);
@@ -1425,7 +1429,6 @@
   // New photos of an item already open: AI photoshop just those (auto switch), then send just those
   // (their AI versions) to the listing form (auto send switch) — the earlier ones are on the page already.
   async function autoNewPhotos(info, added) {
-    if (photoAutomationOff()) return;
     const page = state.page;
     const onForm = !!(page?.store && (page.kind === 'listing-form' || page.kind === 'offer-form'));
     const sentKey = (state.tab?.id || 0) + '|' + (page?.store || '') + '|' + info.upc;
@@ -1807,8 +1810,8 @@
       if (el.title !== tip) el.title = tip;
       // The picture is only touched when the picture itself changed, so it never reloads.
       const pic = el.children[1];
-      if (it.thumb && pic.tagName === 'IMG') { if (pic.getAttribute('src') !== it.thumb) pic.setAttribute('src', it.thumb); }
-      else if (it.thumb) { const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; img.setAttribute('src', it.thumb); el.replaceChild(img, pic); }
+      if (it.thumb && pic.tagName === 'IMG') showPic(pic, it.thumb);
+      else if (it.thumb) { const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; showPic(img, it.thumb); el.replaceChild(img, pic); }
       else if (pic.tagName === 'IMG') { const box = document.createElement('div'); box.className = 'noimg'; el.replaceChild(box, pic); }
       const body = el.children[2];
       const text = it.title || '(no title)';
@@ -1904,7 +1907,6 @@
     const notes = info.notes || [];
     const voice = info.voiceNotes || [];
     const photos = info.photos || [];
-    const photosOpen = photosDefault();
     const existing = (info.existing || {})[state.platform] || [];
     const linkedHere = (info.links || []).find(l => l.platform === state.platform);
     const aspects = Object.entries(info.fields.aspects || {});
@@ -1982,20 +1984,22 @@
         <audio id="notePlayer" preload="none" hidden></audio>
       </div>
 
-      <div class="sect photos-sect" data-open="${photosOpen ? '1' : '0'}">
+      <div class="sect">
         <div class="sect-h"><span class="lbl">Photos</span><span class="n">${photos.length}${state.usedPhotos.size ? ` \u00b7 ${state.usedPhotos.size} sent` : ''}</span><span class="sp"></span>
-          <button id="photoLink" class="tiny phone" type="button" title="Telegram the same camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : '\ud83d\udcf1 Phone'}</button>
           <button id="addPhoto" class="tiny" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : 'QR'}</button>
-          <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button>
-          <button id="photosToggle" class="tiny" type="button" title="${photosOpen ? 'Fold the photos away' : 'Show the photos'}">${photosOpen ? '\u25be' : '\u25b8'}</button></div>
+          <button id="photoLink" class="tiny" type="button" title="Telegram the same camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : 'Phone'}</button>
+          <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button></div>
         ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone \u2014 it opens straight into the camera. Press \u21bb when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
-        ${photosOpen ? `${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use Phone or QR to shoot some.</div>'}
+        ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use QR or Phone to shoot some.</div>'}
         <div class="row tight">
           <button id="sendPhotos" class="primary mini" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending\u2026' : '\u2b05 Send to page'}</button>
-          <button id="aiPhotos" class="mini ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '\u2728 AI photoshop'}</button>
-        </div>` : `<div class="muted small">${photos.length} photo${photos.length === 1 ? '' : 's'} folded away \u2014 an Amazon catalogue listing brings its own.</div>`}
+          <button id="aiPhotos" class="mini" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '\u2728 AI photoshop'}</button>
+        </div>
       </div>
 
+      <div class="gearrow"><button id="gearBtn" class="gear" type="button" aria-expanded="${state.gearOpen ? 'true' : 'false'}" title="What happens by itself, prompts and specifics, and the manual Confirm &amp; link">⚙ Options${state.gearOpen ? '' : ' · <span class="gearsum">' + esc(autoSummary()) + '</span>'}</button></div>
+
+      <div class="gearbox" ${state.gearOpen ? '' : 'hidden'}>
       <div class="autoline">By itself: <b>${esc(autoSummary())}</b><button class="edit" id="autoEdit" type="button">Change</button></div>
 
       <details class="adv" id="advBox" ${state.advOpen ? 'open' : ''}><summary>Advanced \u2014 prompts, specifics, manual link</summary>
@@ -2008,11 +2012,13 @@
             <div class="row tight"><button id="titlePromptSave" class="tiny" type="button" title="Keep this prompt for every session, on every item">Save for all</button><button id="titlePromptReset" class="tiny" type="button" title="Back to the built-in title prompt">Reset</button></div></div>
           ${aspects.length ? `<div><h3>Item specifics (${aspects.length})</h3><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></div>` : ''}
         </div></details>
+      </div>
       `;
     // Nothing about the item changed: leave the card alone, photos, open boxes, caret and all.
     if (!setHtml(el, html)) return;
 
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
+    $('gearBtn').onclick = () => { state.gearOpen = !state.gearOpen; renderDetail(); renderConfirm(); };
     $('advBox').ontoggle = () => { state.advOpen = $('advBox').open; };
     $('autoEdit').onclick = () => { $('settings').hidden = false; renderAutoMenu(); $('settings').scrollIntoView({ block: 'nearest' }); };
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
@@ -2058,8 +2064,8 @@
         }
       };
     }
-    if ($('sendPhotos')) $('sendPhotos').onclick = () => sendPhotos();
-    if ($('aiPhotos')) $('aiPhotos').onclick = () => aiPhotoshop();
+    $('sendPhotos').onclick = () => sendPhotos();
+    $('aiPhotos').onclick = () => aiPhotoshop();
     $('aiPrompt').oninput = () => {
       state.promptDraft = { upc: info.upc, text: $('aiPrompt').value };
       $('aiPromptWhere').textContent = 'this item only';
@@ -2085,8 +2091,6 @@
       renderDetail();
     };
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
-    // The item card has variants without a photo section (the "+ NEW" draft), so never assume it.
-    if ($('photosToggle')) $('photosToggle').onclick = () => { state.photosOpen = !photosDefault(); renderDetail(); };
     $('photoLink').onclick = () => sendPhotoLink(info);
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
     renderActionBar();
@@ -2177,14 +2181,18 @@
     const item = current();
     const info = detail();
     const el = $('confirm');
-    el.hidden = !item || !info || state.view !== 'item';
-    if (!item || !info || state.view !== 'item') return;
+    if (!item || !info || state.view !== 'item') { el.hidden = true; return; }
     const page = state.page || {};
     const platform = page.store || state.platform;
     const v = values(info);
     const linked = info.links || [];
     const lastLink = state.lastLink && state.lastLink.upc === info.upc ? state.lastLink : null;
     const successPage = page.kind === 'listing-success' || page.kind === 'offer-success' || page.kind === 'listing-live';
+    // The store just confirmed (or we recorded a link): the manual card is the thing to look at,
+    // so open the gear for them instead of leaving it behind the button.
+    if ((successPage || lastLink) && !state.gearOpen) { state.gearOpen = true; queueMicrotask(renderDetail); }
+    el.hidden = !item || !info || state.view !== 'item' || !state.gearOpen;
+    if (el.hidden) return;
     const html = `
       <details ${successPage || lastLink ? 'open' : ''}><summary><b>Confirm &amp; link</b> <span class="muted">(recorded automatically when the store confirms; use this if it did not)</span></summary>
       ${linked.length ? `<div class="flag info">Linked: ${linked.map(l => `${esc(l.platform)} ${esc(l.listing_id || l.sku || l.asin)}${l.url ? ` <a href="${esc(l.url)}" target="_blank" rel="noopener">open</a>` : ''}`).join(' · ')}</div>` : ''}
