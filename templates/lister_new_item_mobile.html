@@ -212,6 +212,12 @@
   };
   let recording = null;
 
+  // Both the pause watcher and the transcription let go of the analyser, whichever gets there
+  // first; closing an already closed context rejects, so ask before closing.
+  function releaseAudio(context) {
+    try { if (context && context.state !== 'closed') context.close().catch(() => {}); } catch (error) {}
+  }
+
   function micState(which, state) {
     const config = DICTATION[which];
     const button = $(config.button);
@@ -263,7 +269,7 @@
     let spoke = false, quietSince = 0;
     session.audio = context;
     const tick = () => {
-      if (!recording || recording !== session || session.stopping) { try { context.close(); } catch (e) {} return; }
+      if (!recording || recording !== session || session.stopping) { releaseAudio(context); return; }
       analyser.getByteTimeDomainData(data);
       let peak = 0;
       for (const value of data) peak = Math.max(peak, Math.abs(value - 128));
@@ -290,7 +296,7 @@
     const session = recording;
     recording = null;
     try { (session.stream.getTracks() || []).forEach(track => track.stop()); } catch (error) {}
-    try { session.audio && session.audio.close(); } catch (error) {}
+    releaseAudio(session.audio);
     const config = DICTATION[which];
     if (!chunks.length) { micState(which, 'idle'); setStatus(config.status, 'Nothing was recorded. Try again.', 'bad'); return; }
     const blob = new Blob(chunks, { type: type || 'audio/webm' });
