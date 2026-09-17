@@ -1208,7 +1208,6 @@
     const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
     const g = state.guide;
     const actions = item ? [
-      page.kind === 'listing-start' ? `<button id="searchBtn" class="primary" type="button" title="Type the UPC into the store's product search">Search UPC</button>` : '',
       onForm && !g?.active ? `<button id="guideBtn" class="primary" type="button" title="Show the checklist overlay on the page (fill, AI text, pick a field live there)">Show checklist</button>` : '',
     ].filter(Boolean).join('') : '';
     el.innerHTML = `
@@ -1221,7 +1220,6 @@
       ${toggles}
       ${page.error ? `<div class="flag warn">Page script: ${esc(page.error)}</div>` : ''}`;
     $('pageRefresh').onclick = () => refreshTab();
-    if ($('searchBtn')) $('searchBtn').onclick = () => { state.pendingSearch = { upc: item.upc, platform: state.platform }; void searchUpc(); };
     if ($('guideBtn')) $('guideBtn').onclick = () => guide('start');
     wireToggles();
   }
@@ -1377,7 +1375,7 @@
       `live eBay ${esc(gate.liveEbay ?? 0)}`,
       `Amazon ${esc(gate.liveAmazon ?? 0)}`,
     ].filter(Boolean).join(' · ');
-    const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : p.source === 'catalog' ? 'catalog' : '');
+    const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : '');
     const tile = p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
         <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}>
         ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px — never sent automatically">too small</span></div>`;
