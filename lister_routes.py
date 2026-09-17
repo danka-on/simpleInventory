@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.13'
+VERSION = '0.2.15'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'

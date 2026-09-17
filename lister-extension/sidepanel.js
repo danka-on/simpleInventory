@@ -14,7 +14,7 @@
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, theme: 'light' };
   const CONDITIONS = ['NEW', 'NEW_OTHER', 'NEW_WITH_DEFECTS', 'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE', 'FOR_PARTS_OR_NOT_WORKING'];
   const VALUE_LABELS = {
     title: 'Title', price: 'Price', quantity: 'Quantity', sku: 'SKU / custom label', upc: 'UPC', asin: 'ASIN',
@@ -58,7 +58,9 @@
     const id = Symbol(label);
     state.busyTasks.set(id, label);
     renderBusy();
-    return () => { state.busyTasks.delete(id); renderBusy(); };
+    const release = () => { state.busyTasks.delete(id); renderBusy(); };
+    release.update = next => { if (state.busyTasks.has(id)) { state.busyTasks.set(id, next); renderBusy(); } };
+    return release;
   }
 
   function renderBusy() {
@@ -91,6 +93,15 @@
   async function saveSettings(settings) {
     state.settings = { ...DEFAULTS, ...settings };
     await chrome.storage.local.set({ [SETTINGS_KEY]: state.settings });
+    applyTheme();
+  }
+
+  // Day theme by default; the moon/sun button in the header switches to night and back.
+  function applyTheme() {
+    const dark = state.settings.theme === 'dark';
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    const button = $('themeBtn');
+    if (button) { button.textContent = dark ? '☀' : '🌙'; button.title = dark ? 'Switch to the day theme' : 'Switch to the night theme'; }
   }
 
   async function saveLearned() {
@@ -174,9 +185,12 @@
     const pending = state.items.filter(it => it.status === 'queued' && !it.amazonCheck && !state.checkingAmazon.has(it.baseUpc));
     if (!pending.length) return;
     state.amazonRunning = true;
-    const done = busy('Checking Amazon listability…');
+    const done = busy('Checking Amazon…');
     try {
+      let n = 0;
       for (const it of pending) {
+        n += 1;
+        done.update(`Checking Amazon: "${(it.title || it.upc).slice(0, 40)}" (${n}/${pending.length})`);
         state.checkingAmazon.add(it.baseUpc); renderItems();
         try {
           const data = await api('/api/lister/queue/' + encodeURIComponent(it.upc) + '/amazon-check', { method: 'POST', body: {} });
@@ -226,6 +240,9 @@
   async function maybePrepare(item, { force = false } = {}) {
     if (!item || (!state.settings.autoPrepare && !force)) return;
     if (item.proposal?.ready && !force) return;
+    // Not from the queue list: only once the item is opened, or a listing for it is under way on a store page.
+    const listing = state.page?.store && (ASSIST_KINDS.has(state.page.kind) || state.page.kind === 'listing-form' || state.page.kind === 'offer-form');
+    if (!force && state.view !== 'item' && !listing) return;
     const key = item.upc;
     if (!force && state.prepareAsked.has(key)) return;
     state.prepareAsked.add(key);
@@ -234,7 +251,7 @@
       if (result.status === 'ready') { await loadDetail(key, { force: true }); return; }
       state.details[key].preparing = { running: true };
       if (key === state.currentUpc) renderDetail();
-      const release = busy('Preparing title, price, specifics and description…');
+      const release = busy(`Preparing "${(item.title || item.fields?.title || key).slice(0, 40)}": title, price, specifics, description…`);
       let tries = 0;
       clearTimeout(state.prepareTimers[key]);
       const poll = async () => {
@@ -369,6 +386,7 @@
       if (state.page.kind !== 'listing-success' && state.page.kind !== 'offer-success') state.view = 'list';
     }
     renderStoreBar(); renderPage(); renderDetail(); renderConfirm();
+    if (detail()) void maybePrepare(detail());
     await maybeAutoSearch();
     await maybeAssist();
     await maybeAutoFill();
@@ -799,7 +817,7 @@
     let done = 0;
     const release = busy('AI photoshop…');
     for (const url of urls) {
-      state.aiBusy = `AI photoshop ${done + 1}/${urls.length}…`; renderDetail();
+      state.aiBusy = `AI photoshop ${done + 1}/${urls.length}…`; release.update(`AI photoshop ${done + 1} of ${urls.length}…`); renderDetail();
       try {
         const data = await api('/api/lister/photos/ai', { method: 'POST', body: { upc: info.upc, url, prompt } });
         info.photos.unshift(data.photo);
@@ -963,8 +981,8 @@
       if (ps.status) chips.push(`<span class="chip ${ps.status === 'good' ? 'ok' : (ps.status === 'bad' ? 'bad' : 'warn')}" title="Item Prep status">${esc(ps.status)}${ps.reason ? ' · ' + esc(ps.reason) : ''}</span>`);
       if (it.defect && (it.defect || '').toLowerCase() !== (ps.reason || '').toLowerCase()) chips.push(`<span class="chip defect" title="Defect noted on the BOL">${esc(it.defect)}</span>`);
       if (it.preparing) chips.push('<span class="chip"><span class="spin"></span> preparing</span>');
-      const ac = it.amazonCheck;
-      if (state.checkingAmazon.has(it.baseUpc)) chips.push('<span class="chip checking"><span class="spin"></span> Amazon check</span>');
+      const ac = state.platform === 'amazon' ? it.amazonCheck : null;
+      if (state.platform === 'amazon' && state.checkingAmazon.has(it.baseUpc)) chips.push('<span class="chip checking"><span class="spin"></span> Amazon check</span>');
       else if (ac?.status === 'restricted') chips.push(`<span class="chip bad" title="${esc((ac.reasons || []).join(' · ') || 'Amazon restricts this listing for us')}">Amazon ✕ restricted</span>`);
       else if (ac?.status === 'no_asin') chips.push('<span class="chip warn" title="No ASIN for this UPC: Amazon has no product page to list against">not in Amazon catalog</span>');
       else if (ac?.status === 'listable') chips.push(`<span class="chip ok" title="ASIN ${esc(ac.asin)}${ac.brand ? ' · ' + esc(ac.brand) : ''}">Amazon ✓</span>`);
@@ -1282,6 +1300,7 @@
   }
 
   function wireStatic() {
+    $('themeBtn').onclick = () => { void saveSettings({ ...state.settings, theme: state.settings.theme === 'dark' ? 'light' : 'dark' }); };
     $('settingsBtn').onclick = () => {
       const s = $('settings'); s.hidden = !s.hidden;
       $('setServer').value = state.settings.server; $('setActor').value = state.settings.actor;
@@ -1329,6 +1348,7 @@
   async function main() {
     await loadStorage();
     wireStatic();
+    applyTheme();
     renderAll();
     await connect();
     // The queue first, so a panel opened on the store's search page already has an item to search.

@@ -196,7 +196,8 @@ assert.ok(manifest.content_scripts[0].matches.every(m => m.endsWith('/lister/*')
 const panel = fs.readFileSync(path.join(root, 'sidepanel.html'), 'utf8');
 assert.ok(panel.includes('src="matcher.js"') && panel.includes('src="sidepanel.js"'));
 for (const id of ['connStatus', 'pageCard', 'itemList', 'detail', 'confirm', 'pickCard', 'settings', 'signin', 'toast',
-  'storeEbay', 'storeAmazon', 'viewList', 'viewItem', 'modal', 'toastAction', 'setAutoLink', 'setAutoPrepare']) {
+  'storeEbay', 'storeAmazon', 'viewList', 'viewItem', 'modal', 'toastAction', 'setAutoLink', 'setAutoPrepare', 'themeBtn', 'busy']) {
+  assert.ok(!fs.readFileSync(path.join(root, 'sidepanel.css'), 'utf8').includes('prefers-color-scheme'), 'the theme is chosen in the panel, not by the OS');
   assert.ok(panel.includes(`id="${id}"`), 'side panel has #' + id);
 }
 const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');

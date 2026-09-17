@@ -20,6 +20,7 @@ const queue = {
   ],
   amazon: [],
 };
+queue.amazon = queue.ebay.map(it => ({ ...it, platform: 'amazon', existing: [], storeUrl: '', alreadyOnStore: false }));
 const detail = {
   upc: UPC + '-1', baseUpc: UPC, suffixed: true, title: 'Lenox Butterfly Meadow Dinner Plate 10.75 in Porcelain',
   fields: {
@@ -155,11 +156,16 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.equal(await panel.$eval('.item[data-upc="883049370897-1"] .suffix', el => el.textContent), '1');
     assert.ok(firstRow.includes('bad · chip'), 'the Item Prep status and reason are on the row: ' + firstRow);
     assert.equal(await panel.$eval('.item[data-upc="883049370897-1"] .chip.defect', el => el.textContent), 'Missing pieces', 'the BOL defect is its own bubble');
-    // Every queued item is checked against Amazon in the background; a restricted one turns red.
-    await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]').classList.contains('restricted'), null, { timeout: 15000 });
+    // Every queued item is checked against Amazon in the background; the verdict shows on the Amazon list only.
+    await panel.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 15000 });
+    assert.ok(!(await panel.$('.item.restricted')), 'the eBay list does not carry Amazon verdicts');
+    await panel.click('#storeAmazon');
+    await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]')?.classList.contains('restricted'), null, { timeout: 15000 });
     assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('Amazon ✕ restricted'));
     assert.ok((await panel.textContent('.item[data-upc="883049370897-1"]')).includes('Amazon ✓'));
-    await panel.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 10000 });
+    await panel.click('#storeEbay');
+    await panel.waitForFunction(() => document.getElementById('countEbay').textContent.includes('2') && document.querySelector('.item.current')?.dataset.upc === '883049370897-1', null, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 15000 });
     // Note marker, store-coloured badge, and the status / listed filters.
     assert.ok(firstRow.includes('📝 1') && firstRow.includes('🎤 1'), 'the row shows its note counts: ' + firstRow);
     assert.ok(await panel.$('.item[data-upc="012345678905"] .chip.store.ebay'), 'a UPC the store carries gets an eBay-coloured badge');
@@ -170,6 +176,13 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#statusAll');
     assert.equal((await panel.$$('.item')).length, 2);
     assert.ok(await panel.$('#autoSendPhotos'), 'the auto send-to-page switch is on the store card');
+    // Day theme by default; the header button switches to night and remembers it.
+    assert.equal(await panel.$eval('html', el => el.dataset.theme), 'light');
+    await panel.click('#themeBtn');
+    await panel.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    assert.equal(await panel.$eval('#themeBtn', el => el.textContent), '☀');
+    await panel.click('#themeBtn');
+    await panel.waitForFunction(() => document.documentElement.dataset.theme === 'light');
     assert.ok((await panel.textContent('#pageCard')).includes('no store page'));
 
     // The X asks first, then tells the server which store list to leave.

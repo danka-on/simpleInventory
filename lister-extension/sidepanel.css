@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --bg: #f6f7f5;
   --card: #ffffff;
   --ink: #1b2a24;
@@ -19,8 +19,8 @@
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme="dark"] {
+    color-scheme: dark;
     --bg: #0f1614;
     --card: #17211d;
     --ink: #e8f0ec;
@@ -31,7 +31,7 @@
     --blue-bg: #14213f;
     --chip: #223029;
   }
-}
+
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); line-height: 1.45; padding-bottom: 44px; }
 button { font: inherit; color: inherit; background: var(--chip); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
@@ -111,9 +111,11 @@ h3 .grow { flex: 1; }
 .chip.store.ebay { background: var(--ebay); color: #fff; }
 .chip.store.amazon { background: var(--amazon); color: #111; }
 .chip.store a { color: inherit; text-decoration: none; }
-.chip.note { background: var(--blue-bg); color: var(--blue); }
+.chip.note { background: #fff3b0; color: #7a5b00; }
+:root[data-theme="dark"] .chip.note { background: #4a3d0a; color: #f5e17a; }
 .chip.defect { background: #fde2c8; color: #9a3412; font-weight: 700; }
-@media (prefers-color-scheme: dark) { .chip.defect { background: #4a2a12; color: #fdba74; } }
+:root[data-theme="dark"] .chip.defect { background: #4a2a12; color: #fdba74; }
+
 /* status filter next to the search box */
 .seg.small .seg-btn { padding: 3px 9px; font-size: 12px; }
 .seg.small .seg-btn.good.active { background: var(--green); }
@@ -173,12 +175,15 @@ h3 .grow { flex: 1; }
 .tile.mismatch { border-left: 5px solid var(--amber); }
 .tile.mismatch .s a.prep { color: var(--amber); font-weight: 700; }
 .tile .neq { display: inline-block; background: var(--amber); color: #fff; border-radius: 4px; padding: 0 4px; font-weight: 800; line-height: 1.3; }
-@media (prefers-color-scheme: dark) {
-  .tile.ok { background: #123326; border-color: #1f5c43; } .tile.ok .v { color: #6ee7b7; }
-  .tile.bad { border-color: #7f1d1d; } .tile.bad .v { color: #fca5a5; }
-  .tile.warn { border-color: #78500f; } .tile.warn .v { color: #fcd34d; }
-  .tile.todo { border-color: #1e3a8a; } .tile.todo .v { color: #93c5fd; }
-}
+:root[data-theme="dark"] .tile.ok { background: #123326; border-color: #1f5c43; }
+:root[data-theme="dark"] .tile.ok .v { color: #6ee7b7; }
+:root[data-theme="dark"] .tile.bad { border-color: #7f1d1d; }
+:root[data-theme="dark"] .tile.bad .v { color: #fca5a5; }
+:root[data-theme="dark"] .tile.warn { border-color: #78500f; }
+:root[data-theme="dark"] .tile.warn .v { color: #fcd34d; }
+:root[data-theme="dark"] .tile.todo { border-color: #1e3a8a; }
+:root[data-theme="dark"] .tile.todo .v { color: #93c5fd; }
+
 /* the two photo actions: their own colours, an icon each */
 button.act { font-weight: 700; border: 0; color: #fff; padding: 7px 14px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,.15); }
 button.act.send { background: linear-gradient(135deg, #1d4ed8, #2563eb); }
@@ -194,12 +199,14 @@ button.act .spin { border-color: rgba(255,255,255,.4); border-top-color: #fff; }
 .sticky .note2 { background: rgba(255,255,255,.6); color: #3b2f00; }
 .sticky .note2 .lt { color: #6b5a1f; }
 .sticky .note2 .en { color: #2a2200; }
-@media (prefers-color-scheme: dark) {
-  .sticky { background: #3a3110; border-color: #6b5a1f; }
-  .sticky::after { border-color: var(--card) #7a6a2a #7a6a2a var(--card); }
-  .sticky h3 { color: #f5e17a; } .sticky h3 .muted { color: #cdb85a; }
-  .sticky .note2 { background: rgba(0,0,0,.18); color: #f8f1c8; } .sticky .note2 .lt { color: #d9c77a; } .sticky .note2 .en { color: #fff7d1; }
-}
+:root[data-theme="dark"] .sticky { background: #3a3110; border-color: #6b5a1f; }
+:root[data-theme="dark"] .sticky::after { border-color: var(--card) #7a6a2a #7a6a2a var(--card); }
+:root[data-theme="dark"] .sticky h3 { color: #f5e17a; }
+:root[data-theme="dark"] .sticky h3 .muted { color: #cdb85a; }
+:root[data-theme="dark"] .sticky .note2 { background: rgba(0,0,0,.18); color: #f8f1c8; }
+:root[data-theme="dark"] .sticky .note2 .lt { color: #d9c77a; }
+:root[data-theme="dark"] .sticky .note2 .en { color: #fff7d1; }
+
 /* notes: icon · Lithuanian · English · actions */
 .note2 { display: grid; grid-template-columns: 22px 1fr 1fr auto; gap: 6px 8px; align-items: start; padding: 6px 8px; margin-top: 4px; background: var(--chip); border-radius: 8px; font-size: 12px; }
 .note2 .ico { font-size: 14px; line-height: 1.2; }
