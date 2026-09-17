@@ -275,6 +275,9 @@ label.sw .txt { display: flex; flex-direction: column; min-width: 0; line-height
 label.sw .txt b { font-size: 13px; font-weight: 600; }
 label.sw .txt small { font-size: 11px; color: var(--muted); }
 .photo.too-small img { opacity: .55; }
+/* Already put into the store page: greyed out, but still selectable and draggable again. */
+.photo.used img { opacity: .4; filter: grayscale(1); }
+.photo.used .tag.used { background: #475569; top: 3px; right: 3px; bottom: auto; left: auto; }
 label.check.small { font-size: 12px; margin: 0; }
 /* locked on a listing page: the item view takes over */
 .lock { display: none; align-items: center; gap: 8px; margin: 8px 8px 0; padding: 8px 12px; border-radius: 12px; background: var(--green); color: var(--green-ink); font-weight: 600; }

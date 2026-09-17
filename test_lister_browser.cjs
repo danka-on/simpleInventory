@@ -434,6 +434,10 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#sendPhotos');
     await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 15000 });
     assert.deepEqual(await store.evaluate(() => window.photoNames), ['own.jpg']);
+    // A photo that went to the page is greyed out on its tile, so it is not sent twice by hand.
+    await panel.waitForFunction(() => document.querySelector('.photo.listing.used'), null, { timeout: 10000 });
+    assert.equal(await panel.$eval('.photo.listing .tag.used', t => t.textContent), 'used', 'the used tile carries a used bubble');
+    assert.ok(!(await panel.$('.photo.prep.used')), 'a photo that never went to the page stays normal');
 
     // A photo dragged from the panel arrives on the page as our JSON drag type (a File cannot cross
     // from an extension page); the page script turns it into a real file for the uploader it landed on.

@@ -435,7 +435,7 @@
         if (!zone) throw new Error('no photo uploader near the drop');
         for (const type of ['dragenter', 'dragover', 'drop']) zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
       }
-      chrome.runtime.sendMessage({ type: 'ss-lister-dropped', ok: true, name: files[0].name }).catch(() => {});
+      chrome.runtime.sendMessage({ type: 'ss-lister-dropped', ok: true, name: files[0].name, url: entry.url }).catch(() => {});
     } catch (error) {
       chrome.runtime.sendMessage({ type: 'ss-lister-dropped', ok: false, reason: String(error && error.message || error) }).catch(() => {});
     }

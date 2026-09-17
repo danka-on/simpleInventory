@@ -41,7 +41,7 @@
     platform: 'ebay', view: 'list', filter: '', items: [], counts: {}, currentUpc: null, details: {}, edits: {},
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
-    guide: null, selectedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
+    guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
     voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
@@ -796,6 +796,7 @@
       else if (message.action === 'generate' && detail()) void generate(detail(), message.kind === 'description' ? 'description' : 'title');
     } else if (message?.type === 'ss-lister-dropped') {
       toast(message.ok ? `Dropped ${message.name} into the page's uploader` : 'Drop failed: ' + message.reason, !message.ok);
+      if (message.ok && message.url) markPhotosUsed([message.url]);
     }
   });
 
@@ -968,6 +969,14 @@
     return state.photoFiles[url];
   }
 
+  // Photos that already went into the store page (sent, or dragged in) are greyed out on the tiles.
+  function markPhotosUsed(urls) {
+    const fresh = (urls || []).filter(u => u && !state.usedPhotos.has(u));
+    if (!fresh.length) return;
+    for (const url of fresh) state.usedPhotos.add(url);
+    renderDetail();
+  }
+
   async function sendPhotos() {
     const info = detail();
     if (!info || !state.page?.store) { toast('Open the store listing form first', true); return; }
@@ -1052,6 +1061,7 @@
       for (const url of urls) { const f = await photoFile(url); files.push({ name: f.name, type: f.type, base64: f.base64 }); }
       const result = await pageMessage({ type: 'add-photos', options: { files } });
       toast(result.ok ? `Sent ${result.count} photo${result.count === 1 ? '' : 's'} to the page (${result.method})` : result.reason, !result.ok);
+      if (result.ok) markPhotosUsed(urls);
     } catch (error) {
       toast('Photos: ' + error.message, true);
     } finally {
@@ -1456,9 +1466,9 @@
       `Amazon ${esc(gate.liveAmazon ?? 0)}`,
     ].filter(Boolean).join(' · ');
     const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : '');
-    const tile = p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
+    const tile = p => { const used = state.usedPhotos.has(p.url); return `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''} ${used ? 'used' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)}${used ? ' · already on the page' : ' · drag onto the store page'}">
         <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}>
-        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px — never sent automatically">too small</span></div>`;
+        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px — never sent automatically">too small</span>${used ? '<span class="tag used" title="This photo already went into the page">used</span>' : ''}</div>`; };
     const noteRow = (icon, lt, en, extra = '') => `<div class="note2"><span class="ico" title="${icon === '🎤' ? 'Voice note' : 'Written note'}">${icon}</span>
         <div class="lt">${lt ? esc(lt) : '<span class="muted">—</span>'}</div><div class="en">${en ? esc(en) : '<span class="muted">—</span>'}</div>${extra}</div>`;
     el.innerHTML = `
