@@ -33,7 +33,8 @@ def _now():
 
 
 class ListerToReadyToShipTest(unittest.TestCase):
-    """The Lister's own link is the only thing tying the order to the shelf."""
+    """Two keys tie a sale to the shelf: the SKU the panel listed under, and the listing the panel
+    logged. Each of these tests takes one of them away to see whether the other still holds."""
 
     setUp = test_lister.ListerTestCase.setUp
     seed = test_lister.ListerTestCase.seed
@@ -79,9 +80,26 @@ class ListerToReadyToShipTest(unittest.TestCase):
         self.assertEqual(res.status_code, 201, res.get_json())
         return res.get_json()['link']
 
+    def store_listing(self, sku=UNIT, upc=UPC):
+        """The row the eBay store sync keeps for the live listing ('None' is eBay's empty SKU)."""
+        with closing(sqlite3.connect(self.root / 'ebayStore.db')) as conn:
+            conn.execute('''INSERT INTO INVENTORY (Title, ItemID, SKU, UPC, List_State)
+                            VALUES ('NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', ?, ?, ?, 'Active')''',
+                         (LISTING_ID, sku, upc))
+            conn.commit()
+
     def sell_it(self, **overrides):
-        """The order row the eBay sync writes: item number and SKU, no warehouse knowledge."""
+        """The sale, through the real eBay ingest: an order line with no warehouse knowledge of its own."""
         order = {'order_id': '02-13579-24680', 'item_id': LISTING_ID, 'sku': UNIT, 'store': 'ebay',
+                 'title': 'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', 'quantity': 1, 'price': 39.99,
+                 'paid_time': _now().isoformat(sep=' '), 'barcode': None}
+        order.update(overrides)
+        DBmanager.store_ebay_order(order)
+        return self.sql('sold.db', 'SELECT * FROM orders ORDER BY id DESC LIMIT 1')[0]
+
+    def sell_raw(self, **overrides):
+        """A sold row written without the ingest's enrichment (a legacy or hand-made row)."""
+        order = {'order_id': '02-13579-24680', 'item_id': LISTING_ID, 'sku': '', 'store': 'ebay',
                  'title': 'NEW Nambe Hug Salt & Pepper Shakers | 2-Piece Set', 'quantity': 1, 'price': 39.99,
                  'paid_time': _now().isoformat(sep=' '), 'barcode': '', 'source_upc': ''}
         order.update(overrides)
@@ -128,6 +146,7 @@ class ListerToReadyToShipTest(unittest.TestCase):
 
     def test_the_sold_order_lands_on_that_exact_shelf_unit(self):
         self.setUpFixture()
+        self.store_listing()
         self.list_it()
         self.sell_it()
         orders = self.ready_to_ship()
@@ -139,20 +158,29 @@ class ListerToReadyToShipTest(unittest.TestCase):
         self.assertEqual(order['finder_matched_barcode'], UNIT)
         self.assertNotIn(DECOY_SHELF, str(order.get('locations') or order.get('location')))
 
-    def test_an_order_with_no_sku_still_reaches_the_unit_through_the_listing_link(self):
-        """Amazon-style: the order carries the item number only. The panel's link is the whole trail."""
+    def test_an_order_with_no_sku_at_all_still_reaches_the_unit(self):
+        """The live shape of an eBay listing with an empty SKU: the item number is the only key.
+
+        The ingest resolves it through the listing log the panel wrote, and stamps the order with our
+        suffixed UPC, so the rest of the chain runs as if the SKU had been there.
+        """
         self.setUpFixture()
+        self.store_listing(sku='None')  # eBay's empty SKU
         self.list_it()
-        self.sell_it(sku='', barcode='', source_upc='')
+        row = self.sell_it(sku='')
+        self.assertEqual((row['source_upc'], row['barcode']), (UNIT, UNIT))
+        self.assertEqual(row['listing_listing_id'], LISTING_ID)
+        self.assertTrue(row['listing_trace_id'], 'the sale points back at the listing the panel logged')
         order = self.ready_to_ship()[0]
-        self.assertEqual(order['location'], SHELF)
-        self.assertEqual(order['finder_searchrack_id'], 101)
-        self.assertEqual(order['finder_matched_barcode'], UNIT)
-        self.assertEqual(order.get('location_match_source'), 'store_listing_fallback')
+        self.assertEqual((order['location'], order['finder_searchrack_id']), (SHELF, 101))
+        options, data, status = self.confirm(order)
+        self.assertEqual((status, data.get('success')), (200, True), data)
+        self.assertEqual(self.rack(), {101: 0, 102: 1, 103: 4})
 
     def test_a_store_sku_that_is_not_our_barcode_resolves_through_the_queue_row(self):
         """The listing's SKU need not be the UPC: listed_sku on the queue row carries the trail."""
         self.setUpFixture()
+        self.store_listing(sku='NAMBE-HUG-SET')
         self.list_it(sku='NAMBE-HUG-SET')
         self.sell_it(sku='NAMBE-HUG-SET')
         order = self.ready_to_ship()[0]
@@ -164,6 +192,7 @@ class ListerToReadyToShipTest(unittest.TestCase):
 
     def test_a_sale_of_the_other_unit_does_not_borrow_this_link(self):
         self.setUpFixture()
+        self.store_listing()
         self.list_it()
         self.sell_it(order_id='02-99999-11111', item_id='999888777666', sku=DECOY_UNIT)
         order = self.ready_to_ship()[0]
@@ -185,6 +214,7 @@ class ListerToReadyToShipTest(unittest.TestCase):
 
     def test_confirming_the_order_takes_the_unit_off_that_shelf_and_no_other(self):
         self.setUpFixture()
+        self.store_listing()
         self.list_it()
         self.sell_it()
         order = self.ready_to_ship()[0]
@@ -195,17 +225,18 @@ class ListerToReadyToShipTest(unittest.TestCase):
         self.assertEqual(removed_from, [SHELF])
         self.assertEqual(self.rack(), {101: 0, 102: 1, 103: 4}, 'only the listed unit left the shelf')
 
-    def test_an_order_with_no_sku_shows_the_shelf_but_cannot_be_confirmed_from_it(self):
-        """Where the trail is thin today: the page finds the unit, the confirm step still wants a barcode.
+    def test_a_row_that_missed_the_ingest_shows_the_shelf_but_cannot_be_confirmed_from_it(self):
+        """The one thin spot: a sold row with no barcode of its own, written around the ingest.
 
-        `/sold-orders` resolves the shelf through the Lister's link, but both the location options and
-        `/mark-order-handled` return early on the order's own empty barcode, before the suggested
-        (linked) one is considered. The operator has to match the order by hand or complete it
-        without taking the unit off the shelf.
+        `/sold-orders` still finds the unit through the inventory match the panel wrote, so the page
+        shows the right shelf. The location options and `/mark-order-handled` return early on the
+        order's own empty barcode, before that suggested one is considered, so the operator has to
+        match the order by hand or complete it without taking the unit off the shelf.
         """
         self.setUpFixture()
+        self.store_listing(sku='None')
         self.list_it()
-        self.sell_it(sku='', barcode='', source_upc='')
+        self.sell_raw()
         order = self.ready_to_ship()[0]
         self.assertEqual((order['location'], order['finder_matched_barcode']), (SHELF, UNIT))
         options, data, status = self.confirm(order)
@@ -216,6 +247,7 @@ class ListerToReadyToShipTest(unittest.TestCase):
 
     def test_the_ledger_ties_the_order_back_to_the_listing_the_panel_made(self):
         self.setUpFixture()
+        self.store_listing()
         self.list_it()
         self.sell_it()
         entries = self.client.get('/api/lister/ledger').get_json()['links']
@@ -227,13 +259,16 @@ class ListerToReadyToShipTest(unittest.TestCase):
     def test_unlinking_takes_the_shelf_mapping_back_out(self):
         self.setUpFixture()
         link = self.list_it()
+        self.store_listing(sku='None')
         self.assertEqual(self.client.delete(f"/api/lister/links/{link['id']}").status_code, 200)
         self.assertEqual(self.sql('listing_alerts.db', 'SELECT COUNT(*) AS n FROM listing_inventory_matches')[0]['n'], 0)
         queue = self.sql('listagent.db', 'SELECT * FROM listing_queue WHERE upc = ?', (UNIT,))[0]
         self.assertEqual((queue['status'], queue['listed_ebay_at'], queue['listed_sku']), ('queued', None, None))
-        self.sell_it(sku='', barcode='', source_upc='')
+        self.sell_it(sku='')
         order = self.ready_to_ship()[0]
-        self.assertFalse(str(order.get('location') or '').strip(), 'with the link gone the item-number-only order claims no shelf')
+        # Without the panel's link the store listing only says "761323062839", so the sale lands on the
+        # plain-barcode shelf instead of the unit: identifying the exact one of one is what the link adds.
+        self.assertEqual((order['barcode'], order['location'], order['finder_searchrack_id']), (UPC, BASE_SHELF, 103))
 
 
 if __name__ == '__main__':
