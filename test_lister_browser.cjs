@@ -627,6 +627,23 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#photoRefresh');
     await panel.waitForFunction(() => !document.querySelector('.photo[data-url$="phone.jpg"]'));
 
+    // Walking away from a half-filled form keeps it: the queue offers the way back, and one click
+    // puts the same tab back on the form with the item picked again.
+    const formUrl = store.url();
+    assert.ok(await panel.$eval('#sessionCard', el => el.hidden), 'nothing to come back to while we are on the form');
+    await store.goto('https://www.ebay.com/mye/myebay/summary');
+    await panel.waitForFunction(() => !document.getElementById('sessionCard').hidden, null, { timeout: 20000 });
+    assert.ok(await panel.$eval('#crumbLock', el => el.hidden), 'off the form, so the lock is released');
+    const resumeRow = await panel.textContent('#sessionCard');
+    assert.ok(resumeRow.includes('Lenox') && resumeRow.includes('eBay'), 'the unfinished listing says which item and which store: ' + resumeRow);
+    await panel.click('#sessionCard [data-resume]');
+    await store.waitForURL(formUrl.split('#')[0], { timeout: 20000 });
+    await panel.waitForFunction(() => document.getElementById('sessionCard').hidden, null, { timeout: 20000 });
+    assert.equal(await panel.$eval('#crumbNow', el => el.textContent), 'Lenox Butterfly Meadow Dinner Plate (unit 1)', 'back on the item we left');
+    // The form is filled and guided again, as it would be on any freshly opened one.
+    await store.waitForSelector('#ss-lister-guide', { timeout: 30000 });
+    await panel.waitForFunction(() => !document.getElementById('crumbLock').hidden, null, { timeout: 20000 });
+
     // Fill the last open row by hand and pretend the counter moved: the ready button shows and jumps to List it.
     await store.evaluate(() => { const c = document.getElementById('color'); c.value = 'White'; c.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('h2 + p').textContent = '1/25'; });
     await store.waitForFunction(() => document.querySelector('#ss-lister-guide [data-ss="ready"]').style.display !== 'none', null, { timeout: 15000 });

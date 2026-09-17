@@ -18,6 +18,9 @@
   const PROMPT_KEY = 'ssListerAiPrompt';
   const TITLE_PROMPT_KEY = 'ssListerTitlePrompt';
   const NEW_KEY = 'ssListerNewDraft';
+  // A listing walked away from half done: the store form it was on, kept so it can be clicked open again.
+  const SESSIONS_KEY = 'ssListerSessions';
+  const SESSION_MAX = 6, SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
   const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
   // The automatic switches, shown in the folding menu on the store card (all of them) and by the photos (the photo ones).
   const AUTO_TOGGLES = [
@@ -46,8 +49,8 @@
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', promptDraft: null, titlePrompt: '', savedTitlePrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
-    voiceBusy: new Set(), qrOpen: false, photosOpen: null, advOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
-    busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
+    voiceBusy: new Set(), qrOpen: false, advOpen: false, gearOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
+    busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, sessions: [], lastForm: null, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
     // "+ NEW": the draft the phone is filling from the other end.
     newItem: { id: null, draft: null, barcodeDraft: '', timer: null },
@@ -129,13 +132,14 @@
   // -- storage ------------------------------------------------------------------------
 
   async function loadStorage() {
-    const stored = await chrome.storage.local.get([SETTINGS_KEY, LEARNED_KEY, CURRENT_KEY, PLATFORM_KEY, PROMPT_KEY, TITLE_PROMPT_KEY, NEW_KEY]);
+    const stored = await chrome.storage.local.get([SETTINGS_KEY, LEARNED_KEY, CURRENT_KEY, PLATFORM_KEY, PROMPT_KEY, TITLE_PROMPT_KEY, NEW_KEY, SESSIONS_KEY]);
     state.settings = { ...DEFAULTS, ...(stored[SETTINGS_KEY] || {}) };
     state.learned = stored[LEARNED_KEY] || {};
     state.currentUpc = stored[CURRENT_KEY] || null;
     state.platform = stored[PLATFORM_KEY] === 'amazon' ? 'amazon' : 'ebay';
     state.aiPrompt = stored[PROMPT_KEY] || '';
     state.newItem.id = stored[NEW_KEY] || null;
+    state.sessions = freshSessions(stored[SESSIONS_KEY] || []);
     // The saved title prompt is the starting point of every session; editing it only changes this
     // session until "Save for all sessions" writes it back.
     state.savedTitlePrompt = stored[TITLE_PROMPT_KEY] || '';
@@ -164,6 +168,92 @@
   function remember() {
     void chrome.storage.local.set({ [CURRENT_KEY]: state.currentUpc, [PLATFORM_KEY]: state.platform, [PROMPT_KEY]: state.aiPrompt,
       [NEW_KEY]: state.newItem.id });
+  }
+
+  // -- unfinished listings -------------------------------------------------------------------
+  // Walking away from a half-filled store form used to cost the whole way back: find the item,
+  // search the UPC, step through the category and the match again. The form that was left is kept
+  // instead - per item and store, for a week - and one click on it puts you back where you were.
+
+  const sessionKey = s => s.upc + '|' + s.platform;
+  const freshSessions = list => (list || [])
+    .filter(s => s && s.upc && s.url && s.platform && Date.now() - (s.at || 0) < SESSION_TTL)
+    .slice(0, SESSION_MAX);
+
+  function saveSessions() {
+    state.sessions = freshSessions(state.sessions);
+    void chrome.storage.local.set({ [SESSIONS_KEY]: state.sessions });
+    renderSessions();
+  }
+
+  // Standing on the form: remember the spot, and stop offering a way back to the page we are on.
+  function noteForm(item, platform, page) {
+    dropSession(item.upc, platform);
+    state.lastForm = { upc: item.upc, platform, title: item.title || '', url: (page.url || '').split('#')[0],
+      kind: page.kind || '', tabId: state.tab?.id || 0, at: Date.now() };
+  }
+
+  function keepSession(session) {
+    if (!session?.url) return;
+    const kept = { ...session, at: Date.now() };
+    state.sessions = [kept, ...state.sessions.filter(s => sessionKey(s) !== sessionKey(kept))];
+    state.lastForm = null;
+    saveSessions();
+  }
+
+  // Listed, removed from the list, or back on the form: there is nothing to come back to.
+  function dropSession(upc, platform) {
+    const gone = s => s.upc === upc && (!platform || s.platform === platform);
+    const kept = state.sessions.filter(s => !gone(s));
+    if (state.lastForm && gone(state.lastForm)) state.lastForm = null;
+    if (kept.length === state.sessions.length) return;
+    state.sessions = kept;
+    saveSessions();
+  }
+
+  async function resumeSession(session) {
+    const s = state.sessions.find(x => sessionKey(x) === sessionKey(session)) || session;
+    if (state.platform !== s.platform) { state.platform = s.platform; state.report = null; state.guide = null; remember(); await loadQueue({ keep: true }); }
+    state.currentUpc = s.upc; state.view = 'item'; state.report = null; state.guide = null; remember();
+    void loadDetail(s.upc);
+    // The tab the form was left in: still on it, just come forward; wandered off somewhere else on
+    // the same store, go back there; anywhere else (or closed), a new tab, so nothing is thrown away.
+    let tab = null;
+    if (s.tabId) { try { tab = await chrome.tabs.get(s.tabId); } catch { tab = null; } }
+    const url = tab ? (tab.url || '').split('#')[0] : '';
+    let tabId = 0;
+    if (tab && (url === s.url || M.detectPage(url).store === s.platform)) {
+      tabId = tab.id;
+      await chrome.tabs.update(tab.id, { active: true, ...(url === s.url ? {} : { url: s.url }) });
+      try { await chrome.windows?.update(tab.windowId, { focused: true }); } catch { /* window gone */ }
+    } else {
+      const created = await chrome.tabs.create({ url: s.url, active: true });
+      tabId = created?.id || 0;
+    }
+    if (tabId) { s.tabId = tabId; forgetTabWork(tabId); bindTab(s.upc, s.platform, tabId); }
+    saveSessions();
+    renderAll();
+    scheduleRefresh();
+  }
+
+  // Putting a form back on screen is a fresh start for that tab: the panel filled it once and
+  // marked it done, and without forgetting that it would leave the reopened form untouched.
+  function forgetTabWork(tabId) {
+    for (const set of [state.autoFilled, state.autoText, state.autoSent, state.searched, state.autoLinked, state.autoPhotos])
+      for (const key of [...set]) if (typeof key === 'string' && key.startsWith(tabId + '|')) set.delete(key);
+    delete state.fillSessions[tabId];
+    if (state.tab?.id === tabId) state.guide = null;
+  }
+
+  // "4 min ago" - how cold the unfinished listing is, in the fewest words.
+  function ago(at) {
+    const mins = Math.max(0, Math.round((Date.now() - (at || 0)) / 60000));
+    if (mins < 1) return 'just now';
+    if (mins < 60) return mins + ' min ago';
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return hours + (hours === 1 ? ' hour ago' : ' hours ago');
+    const days = Math.round(hours / 24);
+    return days === 1 ? 'yesterday' : days + ' days ago';
   }
 
   // -- server -------------------------------------------------------------------------
@@ -291,6 +381,9 @@
       renderPreloadBar();
       state.counts[state.platform] = data.counts || {};
       state.connected = true; state.signIn = false;
+      // An item that is no longer waiting on this store has no unfinished listing to go back to.
+      const waiting = new Set(state.items.filter(it => it.status === 'queued').map(it => it.upc));
+      for (const s of [...state.sessions]) if (s.platform === state.platform && !waiting.has(s.upc)) dropSession(s.upc, s.platform);
       const active = state.items.filter(it => it.status === 'queued');
       const exists = state.items.some(it => it.upc === state.currentUpc);
       if (!keep || !exists || !state.currentUpc) state.currentUpc = active.length ? active[0].upc : (state.items[0]?.upc || null);
@@ -774,11 +867,15 @@
     // On the listing form the current item locks in and its details take over the panel;
     // leaving that page (success, another site) brings the queue back.
     const onForm = state.page.kind === 'listing-form' || state.page.kind === 'offer-form';
+    if (onForm && state.page.store && current()) noteForm(current(), state.page.store, state.page);
     if (onForm && current() && !state.locked) { state.locked = current().upc; state.view = 'item'; }
     else if (!onForm && state.locked) {
       // Out of the listing window (back to search, the success page, another site): show the queue again.
+      // Unless the store says it is listed, the form we left is kept, one click away, on the queue.
+      const left = state.lastForm && state.lastForm.upc === state.locked ? state.lastForm : null;
       state.locked = null;
-      if (state.page.kind !== 'listing-success' && state.page.kind !== 'offer-success') state.view = 'list';
+      if (state.page.kind === 'listing-success' || state.page.kind === 'offer-success') state.lastForm = null;
+      else { keepSession(left); state.view = 'list'; }
     }
     renderStoreBar(); renderPage(); renderDetail(); renderConfirm();
     if (detail()) void maybePrepare(detail());
@@ -1020,6 +1117,7 @@
     try {
       const data = await api('/api/lister/links', { method: 'POST', body });
       state.lastLink = data.link;
+      dropSession(upc, body.platform);
       const label = body.platform === 'ebay' ? ('item ' + body.listing_id) : ('SKU ' + (body.sku || body.asin));
       toast((data.duplicate ? 'Already linked: ' : (auto ? 'Listed and recorded: ' : 'Linked and recorded: ')) + label, false,
         data.duplicate ? null : { label: 'Undo', run: () => undoLink(data.link.id) });
@@ -1106,6 +1204,7 @@
       toast(`Removed from ${storeName(platform)}` + (data.queue === 'removed' ? ' and the queue' : ''), false,
         { label: 'Undo', run: async () => { await api('/api/lister/queue/' + encodeURIComponent(item.upc) + '/skip', { method: 'POST', body: { platform, undo: true } }); await loadQueue(); } });
       delete state.details[item.upc];
+      dropSession(item.upc, platform);
       await loadQueue({ keep: state.currentUpc !== item.upc });
     } catch (error) {
       toast(error.message, true);
@@ -1389,7 +1488,7 @@
   // -- rendering ---------------------------------------------------------------------------
 
   function renderAll() {
-    renderHeader(); renderStoreBar(); renderPage(); renderItems(); renderDetail(); renderConfirm(); renderNew(); renderActionBar();
+    renderHeader(); renderStoreBar(); renderPage(); renderSessions(); renderItems(); renderDetail(); renderConfirm(); renderNew(); renderActionBar();
   }
 
   // The server is a dot: green when it answers, red when it does not. The detail is its tooltip.
@@ -1614,6 +1713,21 @@
       state.autoText.add(key);
       await generate(info, kind, { auto: true });
     }
+  }
+
+  // The way back into a listing that was left half done, at the top of the queue.
+  function renderSessions() {
+    const el = $('sessionCard');
+    if (!el) return;
+    const list = freshSessions(state.sessions);
+    const row = s => `<div class="rsrow"><button class="rsgo" type="button" data-resume="${esc(sessionKey(s))}" title="Back to the ${storeName(s.platform)} form you left">`
+      + `<span class="where ${s.platform}">${storeName(s.platform)}</span><span class="what">${esc(s.title || s.upc)}</span><span class="when">${esc(ago(s.at))}</span></button>`
+      + `<button class="rsdrop" type="button" data-drop="${esc(sessionKey(s))}" title="Forget this one" aria-label="Forget this unfinished listing">×</button></div>`;
+    const html = list.length ? `<div class="rshead">↩ Carry on where you left off</div>${list.map(row).join('')}` : '';
+    el.hidden = !html;
+    if (!setHtml(el, html)) return;
+    for (const b of el.querySelectorAll('[data-resume]')) b.onclick = () => { const s = list.find(x => sessionKey(x) === b.dataset.resume); if (s) void resumeSession(s); };
+    for (const b of el.querySelectorAll('[data-drop]')) b.onclick = () => { const s = list.find(x => sessionKey(x) === b.dataset.drop); if (s) dropSession(s.upc, s.platform); };
   }
 
   function renderItems() {
@@ -2553,6 +2667,8 @@
     });
     chrome.windows?.onFocusChanged?.addListener(() => scheduleRefresh());
     setInterval(renderBusy, 30000);
+    // "4 min ago" on the unfinished listings goes stale on its own; keep it honest.
+    setInterval(renderSessions, 60000);
     chrome.tabs.onRemoved.addListener(tabId => { delete state.tabItems[tabId]; try { void chrome.storage.session?.set({ ssListerTabs: state.tabItems }); } catch { /* ignore */ } });
     // Store pages render their forms after load; look again a little later.
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (tab?.active && info.status === 'complete') setTimeout(scheduleRefresh, 2500); });

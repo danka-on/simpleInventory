@@ -218,6 +218,23 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .preloadbar .track i { display: block; height: 100%; background: var(--green); transition: width .4s; }
 .preloadbar b { color: var(--ink); }
 
+/* -- carry on where you left off --------------------------------------------------------------- */
+/* A listing left half done on a store form. It sits above the queue, is never more than a few rows,
+   and each row is one click back onto the form it was left on. */
+.resume { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--line-2); background: var(--chip); }
+.resume[hidden] { display: none; }
+.rshead { font-size: 11px; color: var(--muted); letter-spacing: .02em; }
+.rsrow { display: flex; align-items: center; gap: 4px; }
+.rsgo { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); font-size: 12px; text-align: left; }
+.rsgo:hover { border-color: var(--green); }
+.rsgo .where { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
+.rsgo .where.ebay { color: var(--ebay); }
+.rsgo .where.amazon { color: var(--amazon); }
+.rsgo .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rsgo .when { color: var(--faint); font-size: 11px; white-space: nowrap; }
+.rsdrop { border: 0; background: none; color: var(--faint); font-size: 14px; line-height: 1; padding: 4px 6px; border-radius: 6px; }
+.rsdrop:hover { color: var(--red); background: none; filter: none; }
+
 /* -- item ------------------------------------------------------------------------------------- */
 .detail[hidden], .confirm[hidden] { display: none; }
 /* The waiting card holds roughly the room the real one needs, so the panel does not lurch when it lands. */
