@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.12'
+VERSION = '0.2.13'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -170,6 +170,61 @@ def note_text_variants(note):
     if text.upper().startswith('LT:') and '|' not in text:
         return ''  # Lithuanian only; the caller may translate it
     return text
+
+
+# The user's eBay description layout (2026-09-17): a warm boxed card, serif centred title, then
+# Key Features / Condition / Product Details. Claude supplies the words; this renders them.
+DESCRIPTION_OUTER = '<div style="max-width: 900px; margin: 0px auto; line-height: 1.7;">'
+DESCRIPTION_BOX = ('<div style="color: rgb(77, 74, 67); font-family: Arial, Helvetica, sans-serif; background: rgb(250, 247, 240); '
+                   'border: 1px solid rgb(216, 207, 189); padding: 30px; margin-bottom: 18px;">')
+DESCRIPTION_TITLE = ('<div style="font-family:Georgia,\'Times New Roman\',serif; font-size:25px; color:#596456; text-align:center; '
+                     'letter-spacing:1px; margin-bottom:20px;">{title}</div>')
+
+
+def _esc_html(value):
+    return html_module.escape(_text(value), quote=False)
+
+
+def parse_description_json(text):
+    """The JSON object Claude was asked for; tolerant of code fences and stray prose around it."""
+    raw = re.sub(r'^```[^\n]*\n?', '', _text(text)).rstrip('`').strip()
+    start, end = raw.find('{'), raw.rfind('}')
+    candidate = raw[start:end + 1] if start >= 0 and end > start else raw
+    try:
+        data = json.loads(candidate)
+    except Exception:
+        return {'intro': html_to_text(raw)}
+    return data if isinstance(data, dict) else {'intro': html_to_text(raw)}
+
+
+def render_description(title, data, *, upc=''):
+    """Fill the user's template. Missing parts are left out rather than shown empty."""
+    data = data or {}
+    intro = _text(data.get('intro'), 1200)
+    features = [_text(f, 200) for f in (data.get('features') or []) if _text(f)] if isinstance(data.get('features'), list) else []
+    condition = _text(data.get('condition'), 800)
+    details = []
+    for entry in data.get('details') or []:
+        if isinstance(entry, dict) and _text(entry.get('label')) and _text(entry.get('value')):
+            details.append((_text(entry.get('label'), 60), _text(entry.get('value'), 200)))
+        elif isinstance(entry, str) and ':' in entry:
+            label, value = entry.split(':', 1)
+            if _text(label) and _text(value):
+                details.append((_text(label, 60), _text(value, 200)))
+    base = _base_upc(upc)
+    if base and not any(label.lower() == 'upc' for label, _ in details):
+        details.append(('UPC', base))
+    parts = [DESCRIPTION_OUTER, DESCRIPTION_BOX, DESCRIPTION_TITLE.format(title=_esc_html(title))]
+    if intro:
+        parts.append(f'<p>{_esc_html(intro)}</p>')
+    if features:
+        parts.append('<h2>Key Features</h2>\n<ul>\n' + '\n'.join(f'<li>{_esc_html(f)}</li>' for f in features) + '\n</ul>')
+    if condition:
+        parts.append(f'<h2>Condition</h2>\n<p>{_esc_html(condition)}</p>')
+    if details:
+        parts.append('<h2>Product Details</h2>\n<ul>\n' + '\n'.join(f'<li>{_esc_html(label)}: {_esc_html(value)}</li>' for label, value in details) + '\n</ul>')
+    parts.append('</div>\n</div>')
+    return '\n\n'.join(parts)
 
 
 def qr_svg(text):
@@ -1528,10 +1583,12 @@ class Lister:
                       'key attributes (size, color, count, material) and nothing else. No quotes, no emojis, no ALL CAPS, '
                       'no words like "wow" or "look". Reply with the title only.\n\n' + facts_text)
         else:
-            prompt = ('Write an eBay listing description for this product in plain HTML using only h2, p, ul and li tags. '
-                      'Be concise and factual, highlight the key features, and state the condition honestly using the warehouse '
-                      'condition notes (mention any flaw plainly). Do not include a price, shipping terms, or the word eBay. '
-                      'Reply with the HTML only.\n\n' + facts_text)
+            prompt = ('Write the copy for an eBay listing description of this product and reply with ONE JSON object only, no markdown, '
+                      'with these keys: "intro" (one or two plain sentences presenting the product), "features" (3 to 6 short bullet '
+                      'strings with the key features), "condition" (one or two honest sentences: the condition, and any flaw from the '
+                      'warehouse condition notes stated plainly), "details" (a list of {"label", "value"} facts such as Brand, Material, '
+                      'Color, Pieces, Size, Model; only facts given below, no guesses). Do not include a price, shipping terms, or the '
+                      'word eBay.\n\n' + facts_text)
         import requests
         try:
             response = requests.post(
@@ -1561,7 +1618,8 @@ class Lister:
             pass
         if kind == 'title':
             return {'kind': kind, 'title': text.strip('"\'').splitlines()[0][:80]}
-        return {'kind': kind, 'descriptionHtml': text, 'descriptionText': html_to_text(text)}
+        html = render_description(title, parse_description_json(text), upc=upc)
+        return {'kind': kind, 'descriptionHtml': html, 'descriptionText': html_to_text(html)}
 
     # -- can Amazon take this UPC from us? (catalog ASIN + listing restrictions, cached per UPC) ---
 
