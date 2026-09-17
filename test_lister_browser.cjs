@@ -184,6 +184,14 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#themeBtn');
     await panel.waitForFunction(() => document.documentElement.dataset.theme === 'light');
     assert.ok((await panel.textContent('#pageCard')).includes('no store page'));
+    // No Start button (double-clicking a queue item starts it, checked at the end). The automatic switches fold into one line.
+    assert.ok(!(await panel.$('#startBtn')), 'the Start button is gone');
+    assert.ok(await panel.$eval('.toggles-body', el => el.hidden), 'the automatic switches start minimized');
+    assert.ok((await panel.textContent('#togglesBtn')).includes('Automatic: all off'));
+    await panel.click('#togglesBtn');
+    await panel.waitForFunction(() => !document.querySelector('.toggles-body').hidden);
+    await panel.click('#togglesBtn');
+    await panel.waitForFunction(() => document.querySelector('.toggles-body').hidden);
 
     // The X asks first, then tells the server which store list to leave.
     await panel.click('.item[data-upc="012345678905"] button[data-skip]');
@@ -395,6 +403,9 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#viewList');
     await panel.click('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
+    // A double-click on a queue item starts it: the store tab goes back to eBay's start page and searches that UPC.
+    await panel.dblclick('.item[data-upc="883049370897-1"]');
+    await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=883049370897/, { timeout: 20000 });
     console.log('lister browser test passed');
   } finally {
     await context.close();

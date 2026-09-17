@@ -222,7 +222,13 @@ button.act .spin { border-color: rgba(255,255,255,.4); border-top-color: #fff; }
 .photo .tag.small { background: var(--red); left: auto; right: 3px; }
 .photo .tag[hidden] { display: none; }
 /* auto-AI switches on the store card */
-.toggles { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line); }
+.toggles { margin-top: 8px; padding-top: 4px; border-top: 1px dashed var(--line); }
+.toggles-head { display: flex; align-items: center; gap: 4px; width: 100%; background: none; border: none; border-radius: 6px; padding: 3px 2px; font-size: 12px; text-align: left; color: var(--muted); }
+.toggles-head:hover { background: var(--chip); filter: none; }
+.toggles-head .caret { width: 10px; }
+.toggles-head .on { color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toggles-body { display: flex; flex-wrap: wrap; gap: 4px 14px; padding: 4px 0 2px 14px; }
+.toggles-body[hidden] { display: none; }
 .toggles label.check { margin: 0; font-size: 12px; }
 label.check.small { font-size: 12px; margin: 0; }
 /* locked on a listing page: the item view takes over */

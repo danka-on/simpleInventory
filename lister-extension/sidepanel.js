@@ -2,7 +2,7 @@
 // Cloudflare sign-in and to the store page through the injected page script.
 //
 // Flow: the Listing Agent queue (from /items-to-list) is shown per store (eBay / Amazon). The
-// oldest item is picked automatically. "Start on eBay/Amazon" opens the store's search page and
+// oldest item is picked automatically. Double-clicking an item opens the store's search page and
 // types the UPC; the listing form is filled from the prepared proposal plus prep notes; fields
 // that still need a value are highlighted; when the store confirms the listing it is recorded
 // (with Undo) and the panel moves to the next item.
@@ -14,7 +14,7 @@
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, theme: 'light' };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, togglesOpen: false, theme: 'light' };
   const CONDITIONS = ['NEW', 'NEW_OTHER', 'NEW_WITH_DEFECTS', 'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE', 'FOR_PARTS_OR_NOT_WORKING'];
   const VALUE_LABELS = {
     title: 'Title', price: 'Price', quantity: 'Quantity', sku: 'SKU / custom label', upc: 'UPC', asin: 'ASIN',
@@ -466,11 +466,12 @@
     const item = current();
     const page = state.page;
     if (!item || !page?.store || page.kind !== 'listing-start') return;
-    // Only on purpose: the user clicked an item or pressed Start. Opening the panel on the search page does nothing by itself.
+    // Only on purpose: the user clicked or double-clicked an item. Opening the panel on the search page does nothing by itself.
     const wanted = force || state.pendingSearch?.upc === item.upc;
     if (!wanted) return;
     const key = tabKey('search|' + item.upc);
-    if (!force && state.searched.has(key)) return;
+    // A click / double-click (pendingSearch) always searches, even a UPC this tab searched before.
+    if (!force && !state.pendingSearch && state.searched.has(key)) return;
     const result = await searchUpc({ auto: true });
     if (result?.ok) state.searched.add(key);  // otherwise the next page update tries again
   }
@@ -871,13 +872,22 @@
     const el = $('pageCard');
     const item = current();
     const info = detail();
-    const toggles = `<div class="toggles">
+    // The automatic switches fold into one line ("Automatic: AI title · …"); open or closed is remembered.
+    const autoOn = [['autoAiTitle', 'AI title'], ['autoAiDescription', 'AI description'], ['autoAiPhotos', 'AI photos'], ['autoSendPhotos', 'send photos']]
+      .filter(([key]) => state.settings[key]).map(([, label]) => label);
+    const togglesOpen = Boolean(state.settings.togglesOpen);
+    const toggles = `<div class="toggles${togglesOpen ? ' open' : ''}">
+        <button id="togglesBtn" class="toggles-head" type="button" aria-expanded="${togglesOpen}" title="${togglesOpen ? 'Hide the automatic switches' : 'Show the automatic switches'}"><span class="caret">${togglesOpen ? '▾' : '▸'}</span> Automatic: <span class="${autoOn.length ? 'on' : 'muted'}">${esc(autoOn.length ? autoOn.join(' · ') : 'all off')}</span></button>
+        <div class="toggles-body"${togglesOpen ? '' : ' hidden'}>
         <label class="check"><input id="autoAiTitle" type="checkbox" ${state.settings.autoAiTitle ? 'checked' : ''}> AI title as the page loads</label>
         <label class="check"><input id="autoAiDescription" type="checkbox" ${state.settings.autoAiDescription ? 'checked' : ''}> AI description as the page loads</label>
         <label class="check"><input id="autoAiPhotosTop" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> AI photoshop on every photo</label>
         <label class="check"><input id="autoSendPhotos" type="checkbox" ${state.settings.autoSendPhotos ? 'checked' : ''}> send photos to the page as it loads</label>
+        </div>
       </div>`;
     const wireToggles = () => {
+      const head = $('togglesBtn');
+      if (head) head.onclick = async () => { await saveSettings({ ...state.settings, togglesOpen: !state.settings.togglesOpen }); renderPage(); };
       for (const key of ['autoAiTitle', 'autoAiDescription']) {
         const box = $(key);
         if (box) box.onchange = async () => { await saveSettings({ ...state.settings, [key]: box.checked }); toast(box.checked ? 'Will write the ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' automatically on every listing' : 'Automatic ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' off'); if (box.checked) void maybeAutoText(); };
@@ -888,9 +898,8 @@
       if (photosBox) photosBox.onchange = async () => { await saveSettings({ ...state.settings, autoAiPhotos: photosBox.checked }); toast(photosBox.checked ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off'); renderDetail(); if (photosBox.checked && detail()) void maybeAutoPhotos(detail()); };
     };
     if (!page.store) {
-      el.innerHTML = `<div class="store"><span class="badge none">no store page</span><span class="grow muted small">Pick an item, then start the listing. The panel searches the UPC, fills the form and records the listing.</span></div>
-        ${item ? `<div class="actions"><button id="startBtn" class="primary" type="button">Start on ${storeName(state.platform)}</button></div>` : ''}${toggles}`;
-      if ($('startBtn')) $('startBtn').onclick = () => startOn(state.platform);
+      el.innerHTML = `<div class="store"><span class="badge none">no store page</span><span class="grow muted small">Double-click an item to start it on ${esc(storeName(state.platform))}. The panel searches the UPC, fills the form and records the listing.</span></div>
+        ${toggles}`;
       wireToggles();
       return;
     }
@@ -911,7 +920,6 @@
     const g = state.guide;
     const actions = item ? [
       page.kind === 'listing-start' ? `<button id="searchBtn" class="primary" type="button" title="Type the UPC into the store's product search">Search UPC</button>` : '',
-      !onForm && page.kind !== 'listing-start' && !ASSIST_KINDS.has(page.kind) ? `<button id="startBtn" type="button">Start on ${storeName(state.platform)}</button>` : '',
       onForm && !g?.active ? `<button id="guideBtn" class="primary" type="button" title="Show the checklist overlay on the page (fill, AI text, pick a field live there)">Show checklist</button>` : '',
     ].filter(Boolean).join('') : '';
     el.innerHTML = `
@@ -924,7 +932,6 @@
       ${toggles}
       ${page.error ? `<div class="flag warn">Page script: ${esc(page.error)}</div>` : ''}`;
     $('pageRefresh').onclick = () => refreshTab();
-    if ($('startBtn')) $('startBtn').onclick = () => startOn(state.platform);
     if ($('searchBtn')) $('searchBtn').onclick = () => { state.pendingSearch = { upc: item.upc, platform: state.platform }; void searchUpc(); };
     if ($('guideBtn')) $('guideBtn').onclick = () => guide('start');
     wireToggles();
@@ -988,7 +995,7 @@
       else if (ac?.status === 'listable') chips.push(`<span class="chip ok" title="ASIN ${esc(ac.asin)}${ac.brand ? ' · ' + esc(ac.brand) : ''}">Amazon ✓</span>`);
       else if (ac && ac.status !== 'listable') chips.push(`<span class="chip" title="${esc(ac.error || 'check failed')}">Amazon ?</span>`);
       const upcHtml = it.suffixed ? `${esc(it.baseUpc)}-<b class="suffix" title="Specific unit: the SKU keeps the -suffix">${esc(it.upc.split('-')[1])}</b>` : esc(it.upc);
-      return `<div class="item ${it.upc === state.currentUpc ? 'current' : ''} ${first ? 'first' : ''} ${it.status === 'listed' ? 'listed' : ''} ${ac?.status === 'restricted' ? 'restricted' : ''}" data-upc="${esc(it.upc)}" title="${esc(it.title)}">
+      return `<div class="item ${it.upc === state.currentUpc ? 'current' : ''} ${first ? 'first' : ''} ${it.status === 'listed' ? 'listed' : ''} ${ac?.status === 'restricted' ? 'restricted' : ''}" data-upc="${esc(it.upc)}" title="${esc(it.title)} (double-click to start on ${esc(storeName(state.platform))})">
         ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
         <div><div class="title">${esc(it.title || '(no title)')}</div>
           <div class="meta"><span>${upcHtml}</span>${chips.join('')}</div></div>
@@ -1000,6 +1007,12 @@
     for (const el of list.querySelectorAll('.item')) {
       el.onclick = event => {
         if (event.target.closest('a, button')) return;
+        // Double-click = start this item on the store (the row is re-rendered by the first click, so a
+        // native dblclick would land on a replaced node; compare with the previous click instead).
+        const now = Date.now();
+        const again = state.lastItemClick && state.lastItemClick.upc === el.dataset.upc && now - state.lastItemClick.at < 450;
+        state.lastItemClick = again ? null : { upc: el.dataset.upc, at: now };
+        if (again) { void startOn(state.platform); return; }
         state.currentUpc = el.dataset.upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); remember();
         renderItems(); renderDetail(); renderConfirm();
         void loadDetail(state.currentUpc).then(() => maybeAssist());
@@ -1099,7 +1112,7 @@
       ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to add photos of this unit, then press ↻.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
       ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo (QR) to add some from the phone.</div>'}
       <div class="row tight">
-        <button id="sendPhotos" class="act send" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? '<span class="spin"></span> Sending…' : '⬆ Send to page'}</button>
+        <button id="sendPhotos" class="act send" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? '<span class="spin"></span> Sending…' : '⬅ Send to page'}</button>
         <button id="aiPhotos" class="act ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '✨ AI photoshop'}</button>
         <label class="check small"><input id="autoAiPhotos" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> auto AI on every photo</label>
         <label class="check small"><input id="autoSendPhotosDetail" type="checkbox" ${state.settings.autoSendPhotos ? 'checked' : ''}> auto send to page</label>
