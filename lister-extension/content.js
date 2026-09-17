@@ -524,10 +524,11 @@
     const photos = photoState();
     if (photos) rows.unshift({ index: -1, target: 'photos', required: true, done: photos.count > 0, label: 'Photos', suggestion: 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
     const payment = store === 'amazon' ? null : policyState();
-    if (payment) rows.push({ index: -1, target: 'paymentPolicy', required: true, done: payment.done, label: 'Payment policy', suggestion: 'Pick a payment policy', tag: 'policy', kind: 'policy', el: payment.el, value: payment.value });
+    // Only worth a row while it is still empty: once a policy is picked there is nothing to do.
+    if (payment && !payment.done) rows.push({ index: -1, target: 'paymentPolicy', required: true, done: false, label: 'Payment policy', suggestion: 'Pick a payment policy', tag: 'policy', kind: 'policy', el: payment.el, value: payment.value });
     // Required first, then our fields, keeping page order inside each group; price and then
-    // quantity go last because that is where eBay's form ends.
-    const tail = r => (r.target === 'price' ? 1 : r.target === 'quantity' ? 2 : 0);
+    // quantity go last because that is where eBay's form ends, and the payment policy after them.
+    const tail = r => (r.target === 'price' ? 1 : r.target === 'quantity' ? 2 : r.target === 'paymentPolicy' ? 3 : 0);
     rows.sort((a, b) => (tail(a) - tail(b)) || (Number(b.required) - Number(a.required)));
     return { elements, rows };
   }

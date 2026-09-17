@@ -14,6 +14,7 @@
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
+  const TITLE_PROMPT_KEY = 'ssListerTitlePrompt';
   const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
   // The automatic switches, shown in the folding menu on the store card (all of them) and by the photos (the photo ones).
   const AUTO_TOGGLES = [
@@ -41,7 +42,7 @@
     platform: 'ebay', view: 'list', filter: '', items: [], counts: {}, currentUpc: null, details: {}, edits: {},
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
-    guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
+    guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', titlePrompt: '', savedTitlePrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
     voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
@@ -96,12 +97,16 @@
   // -- storage ------------------------------------------------------------------------
 
   async function loadStorage() {
-    const stored = await chrome.storage.local.get([SETTINGS_KEY, LEARNED_KEY, CURRENT_KEY, PLATFORM_KEY, PROMPT_KEY]);
+    const stored = await chrome.storage.local.get([SETTINGS_KEY, LEARNED_KEY, CURRENT_KEY, PLATFORM_KEY, PROMPT_KEY, TITLE_PROMPT_KEY]);
     state.settings = { ...DEFAULTS, ...(stored[SETTINGS_KEY] || {}) };
     state.learned = stored[LEARNED_KEY] || {};
     state.currentUpc = stored[CURRENT_KEY] || null;
     state.platform = stored[PLATFORM_KEY] === 'amazon' ? 'amazon' : 'ebay';
     state.aiPrompt = stored[PROMPT_KEY] || '';
+    // The saved title prompt is the starting point of every session; editing it only changes this
+    // session until "Save for all sessions" writes it back.
+    state.savedTitlePrompt = stored[TITLE_PROMPT_KEY] || '';
+    state.titlePrompt = state.savedTitlePrompt;
     try { state.tabItems = (await chrome.storage.session?.get('ssListerTabs'))?.ssListerTabs || {}; } catch { state.tabItems = {}; }
   }
 
@@ -657,7 +662,7 @@
       const data = await api('/api/lister/queue/' + encodeURIComponent(info.upc) + '/generate', { method: 'POST', body: { kind, values: {
         title: v.title, systemTitle: info.title, brand: v.brand, categoryPath: v.categoryPath, condition: v.condition,
         conditionDescription: v.conditionDescription, notes, aspects: info.fields.aspects || {},
-      } } });
+      }, instructions: kind === 'title' ? state.titlePrompt : '' } });
       const edits = state.edits[info.upc] = { ...(state.edits[info.upc] || {}) };
       // Done for this item on this page: switching the auto toggle on later must not run it again.
       if (state.page?.store) state.autoText.add((state.tab?.id || 0) + '|' + state.page.store + '|' + info.upc + '|' + kind);
@@ -1507,6 +1512,10 @@
       </div>
       ${autoMenu('photos')}
       <details ${state.aiPrompt ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(state.aiPrompt || info.aiPhotoPrompt || '')}</textarea><button id="aiPromptReset" class="mini" type="button">Reset to default</button></details>
+      <details ${state.titlePrompt ? 'open' : ''}><summary>AI title prompt${state.titlePrompt ? (state.titlePrompt === state.savedTitlePrompt ? ' <span class="muted">(saved)</span>' : ' <span class="muted">(this session)</span>') : ''}</summary>
+        <textarea id="titlePrompt" rows="3" placeholder="Extra instructions for the AI title, e.g. always put the size at the end">${esc(state.titlePrompt)}</textarea>
+        <div class="row tight"><button id="titlePromptSave" class="mini" type="button" title="Keep this prompt for every session, on every item">Save for all sessions</button><button id="titlePromptReset" class="mini" type="button" title="Back to the built-in title prompt">Reset to default</button></div>
+        <div class="muted small">Typing here changes the prompt for this session only.</div></details>
       ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
       `;
 
@@ -1558,6 +1567,19 @@
     $('aiPhotos').onclick = () => aiPhotoshop();
     wireAutoMenu('photos');
     $('aiPromptReset').onclick = () => { $('aiPrompt').value = info.aiPhotoPrompt || ''; state.aiPrompt = ''; remember(); };
+    $('titlePrompt').oninput = () => { state.titlePrompt = $('titlePrompt').value; };
+    $('titlePromptSave').onclick = async () => {
+      state.titlePrompt = $('titlePrompt').value.trim();
+      state.savedTitlePrompt = state.titlePrompt;
+      await chrome.storage.local.set({ [TITLE_PROMPT_KEY]: state.savedTitlePrompt });
+      toast(state.savedTitlePrompt ? 'Title prompt saved for every session' : 'Back to the built-in title prompt');
+      renderDetail();
+    };
+    $('titlePromptReset').onclick = async () => {
+      state.titlePrompt = ''; state.savedTitlePrompt = '';
+      await chrome.storage.local.set({ [TITLE_PROMPT_KEY]: '' });
+      renderDetail();
+    };
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
   }

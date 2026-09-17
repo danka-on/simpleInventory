@@ -1824,7 +1824,7 @@ class Lister:
 
     # -- title / description from the notes (Claude Haiku, same key the Listing Agent uses) -------
 
-    def generate(self, upc, *, kind, values, base_url='http://localhost/', auto=False):
+    def generate(self, upc, *, kind, values, base_url='http://localhost/', auto=False, instructions=''):
         """A listing title (<= 80 chars) or an HTML description built from the item's values and prep notes."""
         upc = self.format_upc12(upc)
         if kind not in ('title', 'description'):
@@ -1876,6 +1876,10 @@ class Lister:
                       'from the notes stated honestly; mention packaging only if the notes or condition say something about it, e.g. "New and unused. A few of the colorful leaf tips have very small chips/nicks. '
                       'The imperfections are minor and are shown in the close-up photos."\n'
                       'Do not include a price, shipping, returns, the shop name, or the word eBay. English only.\n\n' + facts_text)
+        # Extra house rules typed into the panel's prompt box, last so they win over the defaults.
+        extra = _text(instructions, 1000)
+        if extra:
+            prompt += ('\n\nExtra instructions from the seller (follow these over the rules above where they conflict):\n' + extra)
         import requests
         try:
             response = requests.post(
@@ -2603,7 +2607,8 @@ def register(app, deps):
         try:
             guard_mutation()
             data = request.get_json(silent=True) or {}
-            result = lister.generate(upc, kind=_text(data.get('kind')).lower(), values=data.get('values') or {}, base_url=base_url(), auto=bool(data.get('auto')))
+            result = lister.generate(upc, kind=_text(data.get('kind')).lower(), values=data.get('values') or {}, base_url=base_url(), auto=bool(data.get('auto')),
+                                      instructions=data.get('instructions') or '')
             return jsonify({'success': True, **result})
         except Exception as e:
             return failure(e, 'lister:generate')
