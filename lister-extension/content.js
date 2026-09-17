@@ -576,13 +576,11 @@
       <div data-ss="foot" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid #334155;background:#111827">
         <button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:600">Use suggestion (Ctrl+Enter)</button>
         <button data-ss="next" style="background:#334155;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
-        <button data-ss="fill" title="Fill the form from the item's values" style="background:#1d4ed8;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Fill page</button>
         <button data-ss="ready" title="Everything has a value: jump to the page's List it button" style="display:none;flex:1 1 100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 14px system-ui,sans-serif;box-shadow:0 4px 14px rgba(22,163,74,.45)">✓ All set — go to List it</button>
 
       </div>`;
     panel.querySelector('[data-ss="use"]').onclick = () => guideUse();
     panel.querySelector('[data-ss="next"]').onclick = () => guideNext();
-    panel.querySelector('[data-ss="fill"]').onclick = () => panelAction('fill');
     panel.querySelector('[data-ss="ready"]').onclick = () => goToSubmit();
 
     panel.querySelector('[data-ss="done"]').onclick = () => { guideStop(); notifyGuide(); };

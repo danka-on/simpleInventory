@@ -109,6 +109,8 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       if (url.pathname === `/api/lister/queue/${UPC}-1`) { calls.detail += 1; return json({ success: true, item: linked ? { ...detail, links: [{ platform: 'ebay', listing_id: '335566778899', url: 'https://www.ebay.com/itm/335566778899' }] } : detail }); }
       if (url.pathname === '/api/lister/queue/012345678905') return json({ success: true, item: { ...detail, upc: '012345678905', baseUpc: '012345678905', suffixed: false, proposal: {}, fields: { ...detail.fields, source: 'inventory', sku: '012345678905', upc: '012345678905' } } });
       if (url.pathname === '/api/lister/photos/fetch') return json({ success: true, name: 'own.jpg', mime: 'image/jpeg', base64: '/9j/4AAQ' });
+      if (url.pathname.includes('/tiny-')) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90"><rect width="120" height="90"/></svg>' });
+      if (url.pathname.includes('/big-')) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><rect width="800" height="800"/></svg>' });
       if (url.pathname.startsWith('/static/')) return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
       if (url.pathname === '/api/lister/qr') return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>' });
       assert.equal(request.headers()['x-sweet-shelves-lister'], '1', 'mutations carry the extension header: ' + url.pathname);
@@ -187,9 +189,16 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // No Start button (double-clicking a queue item starts it, checked at the end). The automatic switches fold into one line.
     assert.ok(!(await panel.$('#startBtn')), 'the Start button is gone');
     assert.ok(await panel.$eval('.toggles-body', el => el.hidden), 'the automatic switches start minimized');
-    assert.ok((await panel.textContent('#togglesBtn')).includes('Automatic: all off'));
+    const togglesHead = await panel.textContent('#togglesBtn');
+    assert.ok(togglesHead.includes('Automatic') && togglesHead.includes('all off'), togglesHead);
     await panel.click('#togglesBtn');
     await panel.waitForFunction(() => !document.querySelector('.toggles-body').hidden);
+    assert.deepEqual(await panel.$$eval('.toggles.auto-top .tg-title', els => els.map(e => e.textContent)), ['Listing text', 'Photos'], 'the menu is grouped');
+    assert.ok(await panel.$eval('#autoSendAiOnly', el => el.checked), '"by default only send AI generated" starts on');
+    await panel.click('label.sw:has(#autoSendPhotos)');
+    await panel.waitForFunction(() => document.getElementById('togglesBtn').textContent.includes('send photos (AI only)'));
+    await panel.click('label.sw:has(#autoSendPhotos)');
+    await panel.waitForFunction(() => document.getElementById('togglesBtn').textContent.includes('all off'));
     await panel.click('#togglesBtn');
     await panel.waitForFunction(() => document.querySelector('.toggles-body').hidden);
 
@@ -223,7 +232,17 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     const writtenRow = await panel.$$eval('.note2', rows => rows.map(row => ({ lt: row.querySelector('.lt').textContent, en: row.querySelector('.en').textContent })).pop());
     assert.deepEqual(writtenRow, { lt: 'nuotrauka', en: 'Small chip on the rim' }, 'a "LT: … | EN: …" note is split into its halves');
     assert.equal(await panel.$eval('.photo .tag.prep', t => t.textContent), 'prep', 'prep photos carry a small bubble');
-    assert.ok(await panel.$('#autoAiPhotos'), 'the automatic AI photoshop switch sits with the photos');
+    assert.ok(await panel.$('#photo_autoAiPhotos') && await panel.$('#photo_autoSendPhotos') && await panel.$('#photo_autoSendAiOnly'), 'the photo switches sit with the photos');
+    assert.ok(!(await panel.$('#photo_autoAiTitle')), 'the photo menu carries only the photo switches');
+    assert.ok(await panel.$eval('.toggles.auto-photos .toggles-body', el => el.hidden), 'the photo switches start minimized');
+    await panel.click('#photoTogglesBtn');
+    await panel.waitForFunction(() => !document.querySelector('.toggles.auto-photos .toggles-body').hidden);
+    await panel.click('label.sw:has(#photo_autoSendAiOnly)');
+    await panel.waitForFunction(() => document.getElementById('autoSendAiOnly') && !document.getElementById('autoSendAiOnly').checked && !document.getElementById('photo_autoSendAiOnly').checked);
+    await panel.click('label.sw:has(#photo_autoSendAiOnly)');
+    await panel.waitForFunction(() => document.getElementById('autoSendAiOnly').checked);
+    await panel.click('#photoTogglesBtn');
+    await panel.waitForFunction(() => document.querySelector('.toggles.auto-photos .toggles-body').hidden);
     assert.ok(await panel.$('#autoAiTitle') && await panel.$('#autoAiDescription'), 'the automatic AI text switches sit on the store card');
     const tiles = await panel.$$eval('.tiles .tile', els => els.map(t => ({ k: t.querySelector('.k').textContent, v: t.querySelector('.v').textContent, cls: t.className })));
     assert.deepEqual(tiles.map(t => t.k), ['Warehouse stock', 'eBay', 'Amazon']);
@@ -277,6 +296,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // The listing form is filled from the prepared values, then the guide points at what is left.
     await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 20000 });
     await store.waitForFunction(() => document.getElementById('title').value.length > 0, null, { timeout: 20000 });
+    await store.waitForFunction(() => document.getElementById('color').style.outline.includes('rgb(220, 38, 38)'), null, { timeout: 10000 }).catch(() => {});  // the guide starts right after the fill
     const filled = await store.evaluate(() => ({
       title: document.getElementById('title').value, subtitle: document.getElementById('subtitle').value,
       upc: document.getElementById('upc').value, sku: document.getElementById('cl').value,
@@ -317,7 +337,8 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // The actions live on the overlay now, not on the store card.
     assert.ok(!(await panel.$('#fillBtn')) && !(await panel.$('#pickBtn')), 'no Fill / Pick buttons on the store card');
     const footButtons = await store.$$eval('#ss-lister-guide [data-ss="foot"] button', els => els.map(b => b.textContent.trim()));
-    for (const label of ['Fill page', 'Next (Tab)']) assert.ok(footButtons.includes(label), 'overlay footer has ' + label + ': ' + footButtons);
+    assert.ok(footButtons.includes('Next (Tab)'), 'overlay footer has Next (Tab): ' + footButtons);
+    assert.ok(!footButtons.includes('Fill page'), 'the overlay has no Fill page button: ' + footButtons);
     assert.ok(!footButtons.includes('Pick a field…') && !footButtons.includes('Hide'), 'no Pick a field / Hide on the overlay footer');
     // The AI button beside the Title row writes the title through the panel and puts it on the page.
     await store.click(`#ss-lister-guide [data-ss-row="${rows.findIndex(r => r.text.startsWith('Title'))}"] [data-ss-ai="title"]`);
@@ -375,6 +396,25 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       document.querySelector('.uploader-dropzone').dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
     });
     await store.waitForFunction(() => window.photoNames && window.photoNames.length === 1 && window.photoNames[0] === 'own.jpg', null, { timeout: 15000 });
+
+    // Nothing ticked: by default only AI generated photos go, and never a too-small one.
+    await panel.click('#photoSelectAll');  // clears the tick
+    await panel.waitForFunction(() => !document.querySelector('.photo.selected'));
+    await panel.click('#sendPhotos');
+    await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('No AI photos yet'), null, { timeout: 10000 });
+    detail.photos.unshift({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/big-ai.png', source: 'ai', id: 2, name: 'big-ai.png', from: 'own.jpg' },
+      { url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/tiny-ai.png', source: 'ai', id: 3, name: 'tiny-ai.png', from: 'p1.jpg' });
+    await panel.click('#photoRefresh');
+    await panel.waitForSelector('.photo.ai');
+    await panel.waitForFunction(() => { const t = document.querySelector('.photo[data-url$="tiny-ai.png"]'); return t && !t.querySelector('.tag.small').hidden && t.classList.contains('too-small'); }, null, { timeout: 10000 });
+    assert.ok(await panel.$eval('.photo[data-url$="big-ai.png"] .tag.small', el => el.hidden), 'a big photo is not flagged');
+    await store.evaluate(() => { window.photoNames = null; });
+    await panel.click('#sendPhotos');
+    await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 15000 });
+    assert.equal(await store.evaluate(() => window.photoNames.length), 1, 'only the big AI photo went to the page');
+    detail.photos.splice(0, 2);
+    await panel.click('#photoRefresh');
+    await panel.waitForFunction(() => !document.querySelector('.photo.ai'));
 
     // Fill the last open row by hand and pretend the counter moved: the ready button shows and jumps to List it.
     await store.evaluate(() => { const c = document.getElementById('color'); c.value = 'White'; c.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('h2 + p').textContent = '1/25'; });

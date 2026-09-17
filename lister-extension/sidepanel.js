@@ -14,7 +14,16 @@
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, togglesOpen: false, theme: 'light' };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
+  // The automatic switches, shown in the folding menu on the store card (all of them) and by the photos (the photo ones).
+  const AUTO_TOGGLES = [
+    { key: 'autoAiTitle', group: 'Listing text', icon: '✍️', label: 'AI title', short: 'AI title', hint: 'Written into the form as the page loads' },
+    { key: 'autoAiDescription', group: 'Listing text', icon: '📄', label: 'AI description', short: 'AI description', hint: 'Shop template, written as the page loads' },
+    { key: 'autoAiPhotos', group: 'Photos', icon: '✨', label: 'AI photoshop every photo', short: 'AI photos', hint: 'Each of our photos gets a cleaned-up AI version' },
+    { key: 'autoSendPhotos', group: 'Photos', icon: '⬅', label: 'Send photos to the page', short: 'send photos', hint: 'As the listing form loads · too-small photos are never sent' },
+    { key: 'autoSendAiOnly', group: 'Photos', icon: '🎯', label: 'By default only send AI generated', short: 'AI only', hint: 'Only photos run through AI photoshop (auto send and Send to page with nothing ticked)', sub: true },
+  ];
+  const MIN_PHOTO_SIDE = 500;
   const CONDITIONS = ['NEW', 'NEW_OTHER', 'NEW_WITH_DEFECTS', 'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE', 'FOR_PARTS_OR_NOT_WORKING'];
   const VALUE_LABELS = {
     title: 'Title', price: 'Price', quantity: 'Quantity', sku: 'SKU / custom label', upc: 'UPC', asin: 'ASIN',
@@ -32,7 +41,7 @@
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
     voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
-    busyTasks: new Map(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), statusFilter: 'all', aiGenerated: {},
+    busyTasks: new Map(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
   };
 
   const $ = id => document.getElementById(id);
@@ -731,18 +740,40 @@
     return state.photoFiles[url];
   }
 
-  function selectedPhotoUrls(info) {
-    const all = (info.photos || []).map(p => p.url);
-    const chosen = all.filter(u => state.selectedPhotos.has(u));
-    return chosen.length ? chosen : all.filter(u => (info.photos.find(p => p.url === u) || {}).source !== 'catalog').slice(0, 12);
-  }
-
   async function sendPhotos() {
     const info = detail();
     if (!info || !state.page?.store) { toast('Open the store listing form first', true); return; }
-    const urls = selectedPhotoUrls(info);
-    if (!urls.length) { toast('No photos to send', true); return; }
+    const ticked = (info.photos || []).map(p => p.url).filter(u => state.selectedPhotos.has(u));
+    const urls = ticked.length ? ticked : await defaultSendUrls(info);
+    if (!urls.length) { toast(state.settings.autoSendAiOnly ? 'No AI photos yet — run AI photoshop or tick the photos to send' : 'No photos to send', true); return; }
     await sendPhotoUrls(info, urls);
+  }
+
+  // Width/height of a photo: remembered from the tiles, otherwise loaded once. Unknown (failed load) counts as big enough.
+  function photoSize(url) {
+    if (state.photoSizes[url]) return Promise.resolve(state.photoSizes[url]);
+    return new Promise(resolve => {
+      const img = new Image();
+      const finish = size => { clearTimeout(timer); if (size) state.photoSizes[url] = size; resolve(size); };
+      const timer = setTimeout(() => finish(null), 8000);
+      img.onload = () => finish({ w: img.naturalWidth, h: img.naturalHeight });
+      img.onerror = () => finish(null);
+      img.src = url;
+    });
+  }
+
+  function isTooSmall(size) {
+    return Boolean(size && size.w && (size.w < MIN_PHOTO_SIDE || size.h < MIN_PHOTO_SIDE));
+  }
+
+  // What goes to the page when nothing is ticked: AI versions only (setting) or ours with AI preferred; never a too-small photo.
+  async function defaultSendUrls(info, { catalogFallback = false } = {}) {
+    const photos = info.photos || [];
+    let urls = state.settings.autoSendAiOnly ? photos.filter(p => p.source === 'ai').map(p => p.url) : bestPhotoUrls(info);
+    if (!urls.length && catalogFallback && !state.settings.autoSendAiOnly) urls = photos.filter(p => p.source === 'catalog').map(p => p.url);
+    const keep = [];
+    for (const url of urls) if (!isTooSmall(await photoSize(url))) keep.push(url);
+    return keep.slice(0, 24);
   }
 
   // Our photos, AI version preferred over its original when one exists.
@@ -771,10 +802,16 @@
     if (state.aiBusy) return;  // an AI run is in progress: maybeAutoPhotos sends when it finishes
     const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc;
     if (state.autoSent.has(key)) return;
-    let urls = bestPhotoUrls(info);
-    if (!urls.length) urls = (info.photos || []).filter(p => p.source === 'catalog').map(p => p.url).slice(0, 12);  // nothing of ours: the catalog picture
-    if (!urls.length) { toast('Auto send: this item has no photos yet', true); return; }
-    state.autoSent.add(key);
+    state.autoSent.add(key);  // claimed before the size checks so a second trigger does not send twice
+    const urls = await defaultSendUrls(info, { catalogFallback: true });
+    if (!urls.length) {
+      state.autoSent.delete(key);  // try again once AI photos (or new photos) exist
+      if (!state.autoSendNoted?.has(key)) {
+        (state.autoSendNoted ||= new Set()).add(key);
+        toast(state.settings.autoSendAiOnly ? 'Auto send: waiting for AI photos (only AI generated is on)' : 'Auto send: no photos big enough to send yet', true);
+      }
+      return;
+    }
     toast(`Auto send: ${urls.length} photo${urls.length === 1 ? '' : 's'} to the page…`);
     await sendPhotoUrls(info, urls);
   }
@@ -870,38 +907,67 @@
     if (state.locked) $('lockTitle').textContent = `Listing: ${locked?.title || state.locked}`;
   }
 
+  // Folding "Automatic" menu. scope 'top' = store card (every switch), 'photos' = by the photos (photo switches only).
+  // Both menus edit the same settings; ids: top = the setting key, photos = photo_<key>.
+  function autoMenu(scope) {
+    const top = scope === 'top';
+    const items = AUTO_TOGGLES.filter(t => top || t.group === 'Photos');
+    const openKey = top ? 'togglesOpen' : 'photoTogglesOpen';
+    const open = Boolean(state.settings[openKey]);
+    const s = state.settings;
+    const on = items.filter(t => s[t.key] && !t.sub).map(t => t.short + (t.key === 'autoSendPhotos' && s.autoSendAiOnly ? ' (AI only)' : ''));
+    const id = t => (top ? '' : 'photo_') + t.key;
+    const groups = [...new Set(items.map(t => t.group))];
+    const row = t => {
+      const dim = t.sub && !s.autoSendPhotos;
+      return `<label class="sw${t.sub ? ' sub' : ''}${dim ? ' dim' : ''}" title="${esc(t.hint)}">
+          <input id="${id(t)}" data-auto="${t.key}" type="checkbox" role="switch" ${s[t.key] ? 'checked' : ''}><span class="track" aria-hidden="true"></span>
+          <span class="ico" aria-hidden="true">${t.icon}</span><span class="txt"><b>${esc(t.label)}</b><small>${esc(t.hint)}</small></span></label>`;
+    };
+    return `<div class="toggles auto-${scope}${open ? ' open' : ''}">
+        <button id="${top ? 'togglesBtn' : 'photoTogglesBtn'}" class="toggles-head" type="button" aria-expanded="${open}" title="${open ? 'Hide' : 'Show'} the automatic switches">
+          <span class="caret">${open ? '▾' : '▸'}</span><span class="lbl">${top ? 'Automatic' : 'Automatic photos'}</span>
+          <span class="sum ${on.length ? 'on' : 'muted'}">${on.length ? on.map(x => `<span class="pill">${esc(x)}</span>`).join('') : 'all off'}</span></button>
+        <div class="toggles-body"${open ? '' : ' hidden'}>
+          ${groups.map(g => `<div class="tgroup">${top ? `<div class="tg-title">${esc(g)}</div>` : ''}${items.filter(t => t.group === g).map(row).join('')}</div>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  function wireAutoMenu(scope) {
+    const top = scope === 'top';
+    const head = $(top ? 'togglesBtn' : 'photoTogglesBtn');
+    const openKey = top ? 'togglesOpen' : 'photoTogglesOpen';
+    if (head) head.onclick = async () => { await saveSettings({ ...state.settings, [openKey]: !state.settings[openKey] }); if (top) renderPage(); else renderDetail(); };
+    const root = head?.closest('.toggles');
+    for (const box of root ? root.querySelectorAll('input[data-auto]') : []) box.onchange = async () => {
+      const key = box.dataset.auto;
+      const on = box.checked;
+      await saveSettings({ ...state.settings, [key]: on });
+      toast({
+        autoAiTitle: on ? 'Will write the title automatically on every listing' : 'Automatic title off',
+        autoAiDescription: on ? 'Will write the description automatically on every listing' : 'Automatic description off',
+        autoAiPhotos: on ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off',
+        autoSendPhotos: on ? 'Photos will go to the page on every listing (never the too-small ones)' : 'Automatic photo send off',
+        autoSendAiOnly: on ? 'Only AI generated photos are sent by default' : 'All of our photos are sent by default (AI version preferred)',
+      }[key]);
+      renderPage(); renderDetail();
+      if (!on) return;
+      if (key === 'autoAiTitle' || key === 'autoAiDescription') void maybeAutoText();
+      else if (key === 'autoAiPhotos') { if (detail()) void maybeAutoPhotos(detail()); }
+      else void maybeAutoSend();
+    };
+  }
+
   function renderPage() {
     const page = state.page || {};
     const el = $('pageCard');
     const item = current();
     const info = detail();
-    // The automatic switches fold into one line ("Automatic: AI title · …"); open or closed is remembered.
-    const autoOn = [['autoAiTitle', 'AI title'], ['autoAiDescription', 'AI description'], ['autoAiPhotos', 'AI photos'], ['autoSendPhotos', 'send photos']]
-      .filter(([key]) => state.settings[key]).map(([, label]) => label);
-    const togglesOpen = Boolean(state.settings.togglesOpen);
-    const toggles = `<div class="toggles${togglesOpen ? ' open' : ''}">
-        <button id="togglesBtn" class="toggles-head" type="button" aria-expanded="${togglesOpen}" title="${togglesOpen ? 'Hide the automatic switches' : 'Show the automatic switches'}"><span class="caret">${togglesOpen ? '▾' : '▸'}</span> Automatic: <span class="${autoOn.length ? 'on' : 'muted'}">${esc(autoOn.length ? autoOn.join(' · ') : 'all off')}</span></button>
-        <div class="toggles-body"${togglesOpen ? '' : ' hidden'}>
-        <label class="check"><input id="autoAiTitle" type="checkbox" ${state.settings.autoAiTitle ? 'checked' : ''}> AI title as the page loads</label>
-        <label class="check"><input id="autoAiDescription" type="checkbox" ${state.settings.autoAiDescription ? 'checked' : ''}> AI description as the page loads</label>
-        <label class="check"><input id="autoAiPhotosTop" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> AI photoshop on every photo</label>
-        <label class="check"><input id="autoSendPhotos" type="checkbox" ${state.settings.autoSendPhotos ? 'checked' : ''}> send photos to the page as it loads</label>
-        </div>
-      </div>`;
-    const wireToggles = () => {
-      const head = $('togglesBtn');
-      if (head) head.onclick = async () => { await saveSettings({ ...state.settings, togglesOpen: !state.settings.togglesOpen }); renderPage(); };
-      for (const key of ['autoAiTitle', 'autoAiDescription']) {
-        const box = $(key);
-        if (box) box.onchange = async () => { await saveSettings({ ...state.settings, [key]: box.checked }); toast(box.checked ? 'Will write the ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' automatically on every listing' : 'Automatic ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' off'); if (box.checked) void maybeAutoText(); };
-      }
-      const sendBox = $('autoSendPhotos');
-      if (sendBox) sendBox.onchange = async () => { await saveSettings({ ...state.settings, autoSendPhotos: sendBox.checked }); toast(sendBox.checked ? 'Photos will go to the page on every listing' : 'Automatic photo send off'); if (sendBox.checked) void maybeAutoSend(); };
-      const photosBox = $('autoAiPhotosTop');
-      if (photosBox) photosBox.onchange = async () => { await saveSettings({ ...state.settings, autoAiPhotos: photosBox.checked }); toast(photosBox.checked ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off'); renderDetail(); if (photosBox.checked && detail()) void maybeAutoPhotos(detail()); };
-    };
+    const toggles = autoMenu('top');
+    const wireToggles = () => wireAutoMenu('top');
     if (!page.store) {
-      el.innerHTML = `<div class="store"><span class="badge none">no store page</span><span class="grow muted small">Double-click an item to start it on ${esc(storeName(state.platform))}. The panel searches the UPC, fills the form and records the listing.</span></div>
+      el.innerHTML = `<div class="store"><span class="badge none">no store page</span></div>
         ${toggles}`;
       wireToggles();
       return;
@@ -1081,7 +1147,7 @@
     const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : p.source === 'catalog' ? 'catalog' : '');
     const tile = p => `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)} · drag onto the store page">
         <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}>
-        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden>too small</span></div>`;
+        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px — never sent automatically">too small</span></div>`;
     const noteRow = (icon, lt, en, extra = '') => `<div class="note2"><span class="ico" title="${icon === '🎤' ? 'Voice note' : 'Written note'}">${icon}</span>
         <div class="lt">${lt ? esc(lt) : '<span class="muted">—</span>'}</div><div class="en">${en ? esc(en) : '<span class="muted">—</span>'}</div>${extra}</div>`;
     el.innerHTML = `
@@ -1115,11 +1181,10 @@
       ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to add photos of this unit, then press ↻.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
       ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo (QR) to add some from the phone.</div>'}
       <div class="row tight">
-        <button id="sendPhotos" class="act send" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? '<span class="spin"></span> Sending…' : '⬅ Send to page'}</button>
+        <button id="sendPhotos" class="act send" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending…' : '⬅ Send to page'}</button>
         <button id="aiPhotos" class="act ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '✨ AI photoshop'}</button>
-        <label class="check small"><input id="autoAiPhotos" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> auto AI on every photo</label>
-        <label class="check small"><input id="autoSendPhotosDetail" type="checkbox" ${state.settings.autoSendPhotos ? 'checked' : ''}> auto send to page</label>
       </div>
+      ${autoMenu('photos')}
       <details ${state.aiPrompt ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(state.aiPrompt || info.aiPhotoPrompt || '')}</textarea><button id="aiPromptReset" class="mini" type="button">Reset to default</button></details>
       ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
       `;
@@ -1148,7 +1213,7 @@
     for (const box of el.querySelectorAll('input[data-select]')) box.onchange = () => { if (box.checked) state.selectedPhotos.add(box.dataset.select); else state.selectedPhotos.delete(box.dataset.select); box.closest('.photo').classList.toggle('selected', box.checked); };
     for (const tileEl of el.querySelectorAll('.photo')) {
       const img = tileEl.querySelector('img');
-      const flagSize = () => { if (img.naturalWidth && (img.naturalWidth < 500 || img.naturalHeight < 500)) tileEl.querySelector('.tag.small').hidden = false; };
+      const flagSize = () => { if (!img.naturalWidth) return; const size = { w: img.naturalWidth, h: img.naturalHeight }; state.photoSizes[tileEl.dataset.url] = size; if (isTooSmall(size)) { tileEl.querySelector('.tag.small').hidden = false; tileEl.classList.add('too-small'); } };
       if (img.complete) flagSize(); else img.onload = flagSize;
       tileEl.onclick = event => { if (event.target.matches('input')) return; const box = tileEl.querySelector('input'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); };
       tileEl.onmouseenter = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
@@ -1170,8 +1235,7 @@
     }
     $('sendPhotos').onclick = () => sendPhotos();
     $('aiPhotos').onclick = () => aiPhotoshop();
-    $('autoSendPhotosDetail').onchange = async () => { await saveSettings({ ...state.settings, autoSendPhotos: $('autoSendPhotosDetail').checked }); renderPage(); if ($('autoSendPhotosDetail').checked) void maybeAutoSend(); };
-    $('autoAiPhotos').onchange = async () => { await saveSettings({ ...state.settings, autoAiPhotos: $('autoAiPhotos').checked }); renderPage(); toast($('autoAiPhotos').checked ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off'); if ($('autoAiPhotos').checked) void maybeAutoPhotos(info); };
+    wireAutoMenu('photos');
     $('aiPromptReset').onclick = () => { $('aiPrompt').value = info.aiPhotoPrompt || ''; state.aiPrompt = ''; remember(); };
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
