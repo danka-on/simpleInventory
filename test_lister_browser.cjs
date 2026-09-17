@@ -117,7 +117,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       }
       if (url.pathname === `/api/lister/queue/${UPC}-1`) { calls.detail += 1; return json({ success: true, item: linked ? { ...detail, links: [{ platform: 'ebay', listing_id: '335566778899', url: 'https://www.ebay.com/itm/335566778899' }] } : detail }); }
       if (url.pathname === '/api/lister/queue/012345678905') return json({ success: true, item: { ...detail, upc: '012345678905', baseUpc: '012345678905', suffixed: false, proposal: {}, fields: { ...detail.fields, source: 'inventory', sku: '012345678905', upc: '012345678905' } } });
-      if (url.pathname === '/api/lister/photos/fetch') return json({ success: true, name: 'own.jpg', mime: 'image/jpeg', base64: '/9j/4AAQ' });
+      if (url.pathname === '/api/lister/photos/fetch') return json({ success: true, name: (url.searchParams.get('url') || '').split('/').pop() || 'own.jpg', mime: 'image/jpeg', base64: '/9j/4AAQ' });
       if (url.pathname.includes('/tiny-')) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90"><rect width="120" height="90"/></svg>' });
       if (url.pathname.includes('/big-')) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><rect width="800" height="800"/></svg>' });
       if (url.pathname.startsWith('/static/')) return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
@@ -127,6 +127,11 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       assert.equal(request.headers()['x-sweet-shelves-lister'], '1', 'mutations carry the extension header: ' + url.pathname);
       if (url.pathname === '/api/lister/preload') { const body = request.postDataJSON(); calls.preload.push(body); Object.assign(preload, { running: true, upcs: body.upcs, steps: body.steps, polls: 0 }); return json(preloadAll()); }
       if (url.pathname.endsWith('/preload')) { calls.preload.push(request.postDataJSON()); return json({ success: true, preload: { running: false, steps: { prepare: 'done' }, photos: null, startedAt: 'x', finishedAt: 'y' } }); }
+      if (url.pathname === '/api/lister/photos/ai') {
+        const body = request.postDataJSON(); const name = body.url.split('/').pop();
+        calls.aiPhotos = (calls.aiPhotos || []).concat(name);
+        return json({ success: true, photo: { url: `https://pi.nexuscentralhq.org/static/listingagent_uploads/big-ai-${name}.png`, source: 'ai', id: 50 + calls.aiPhotos.length, name: `big-ai-${name}.png`, from: name } });
+      }
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
       if (url.pathname.endsWith('/skip')) { calls.skip.push(request.postDataJSON()); return json({ success: true, queue: 'queued' }); }
       if (url.pathname === '/api/lister/learn') { calls.learn.push(request.postDataJSON()); return json({ success: true, agreed: false, learned: { ebay: {} } }, 201); }
@@ -450,6 +455,28 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     detail.photos.splice(0, 2);
     await panel.click('#photoRefresh');
     await panel.waitForFunction(() => !document.querySelector('.photo.ai'));
+
+    // Photos taken on the phone (QR) while the listing form is open: with auto AI photoshop + auto send on,
+    // the panel notices them by itself, cleans up only the new one and sends only its AI version.
+    await panel.click('#togglesBtn');
+    await panel.waitForFunction(() => !document.querySelector('.toggles-body').hidden);
+    await panel.click('label.sw:has(#autoSendPhotos)');
+    await panel.click('label.sw:has(#autoAiPhotos)');
+    await store.waitForFunction(() => Array.isArray(window.photoNames) && window.photoNames.some(n => n.startsWith('big-ai-')), null, { timeout: 20000 });
+    await panel.waitForFunction(() => !document.getElementById('busy') || !document.body.textContent.includes('AI photoshop 1'), null, { timeout: 10000 });
+    const aiBefore = calls.aiPhotos.length;
+    await store.evaluate(() => { window.photoNames = null; });
+    detail.photos.push({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/phone.jpg', source: 'listing', id: 9, name: 'phone.jpg' });
+    await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('from the phone') || !!document.querySelector('.photo[data-url$="phone.jpg"]'), null, { timeout: 15000 });
+    await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 20000 });
+    assert.deepEqual(await store.evaluate(() => window.photoNames), ['big-ai-phone.jpg.png'], 'only the new phone photo (its AI version) went to the page');
+    assert.deepEqual(calls.aiPhotos.slice(aiBefore), ['phone.jpg'], 'only the new photo was AI photoshopped');
+    await panel.click('label.sw:has(#autoSendPhotos)');
+    await panel.click('label.sw:has(#autoAiPhotos)');
+    await panel.click('#togglesBtn');
+    detail.photos = detail.photos.filter(p => p.name !== 'phone.jpg');
+    await panel.click('#photoRefresh');
+    await panel.waitForFunction(() => !document.querySelector('.photo[data-url$="phone.jpg"]'));
 
     // Fill the last open row by hand and pretend the counter moved: the ready button shows and jumps to List it.
     await store.evaluate(() => { const c = document.getElementById('color'); c.value = 'White'; c.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('h2 + p').textContent = '1/25'; });
