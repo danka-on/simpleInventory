@@ -1541,9 +1541,13 @@ class Lister:
 
         def add_photo(url, source, photo_id=None, origin=''):
             url = _absolute(url, base_url)
-            if not url or url in seen:
+            if not url.lower().startswith(('http://', 'https://')):
+                return  # catalog rows carry placeholders like "No image"
+            # our own static file can come back from the catalog under another scheme/host: one tile per file
+            key = url.split('/static/', 1)[1].split('?', 1)[0] if '/static/' in url else url
+            if key in seen:
                 return
-            seen.add(url)
+            seen.add(key)
             photos.append({'url': url, 'source': source, 'id': photo_id, 'name': url.rsplit('/', 1)[-1].split('?')[0],
                            'from': origin})  # for AI photos: the source photo's file name
 
@@ -2068,15 +2072,20 @@ class Lister:
                         cur = conn.cursor()
                         self.init_listagent(cur)
                         proposal = (self._latest_proposals(cur, [upc]) or {}).get(upc) or {}
-                    if proposal.get('ready') or proposal.get('status') == 'blocked':
-                        mark('prepare', 'done' if proposal.get('ready') else 'blocked')
+                    if proposal.get('ready') or proposal.get('status') in ('held', 'approved'):
+                        mark('prepare', 'done')  # values exist; a held/approved proposal cannot be rebuilt anyway
+                    elif proposal.get('status') == 'blocked':
+                        mark('prepare', 'blocked')
                     elif self.build_proposal:
                         self.build_proposal(upc, actor='lister', base_url=base_url)
                         mark('prepare', 'done')
                     else:
                         mark('prepare', 'skipped')
                 except Exception as e:
-                    mark('prepare', 'error: ' + str(e)[:120])
+                    if getattr(e, 'status_code', None) == 409:
+                        mark('prepare', 'done')  # held proposal or approval under way: the values are already there
+                    else:
+                        mark('prepare', 'error: ' + str(e)[:120])
             info = values = None
             for kind in ('title', 'description'):
                 if kind not in steps:
@@ -2104,10 +2113,17 @@ class Lister:
                         own = [p for p in photos if p.get('source') == 'catalog' and p.get('name') not in have][:4]
                     with self._jobs_lock:
                         self._preloads[upc]['photos'] = {'done': 0, 'total': len(own)}
+                    errors = []
                     for p in own:
-                        self.ai_photo(upc, url=p['url'], base_url=base_url)
+                        try:
+                            self.ai_photo(upc, url=p['url'], base_url=base_url)
+                        except Exception as e:  # one bad source photo must not sink the rest
+                            errors.append(str(e))
+                            continue
                         with self._jobs_lock:
                             self._preloads[upc]['photos']['done'] += 1
+                    if errors and len(errors) == len(own):
+                        raise ListerError(errors[0])
                     mark('photos', 'done')
                 except Exception as e:
                     mark('photos', 'error: ' + str(e)[:120])

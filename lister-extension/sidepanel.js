@@ -326,6 +326,7 @@
   async function loadDetail(upc, { force = false } = {}) {
     if (!upc || (!force && state.details[upc] && Date.now() - state.details[upc].loadedAt < 30000)) { renderDetail(); renderConfirm(); return state.details[upc]; }
     const done = busy('Loading the item…');
+    const before = state.details[upc] ? ownPhotoNames(state.details[upc]) : null;
     try {
       const data = await api('/api/lister/queue/' + encodeURIComponent(upc));
       const item = data.item;
@@ -336,7 +337,8 @@
       if (upc === state.currentUpc) { renderDetail(); renderConfirm(); }
       void maybePrepare(item);
       void maybeTranscribe(item);
-      void maybeAutoPhotos(item);
+      const added = before ? (item.photos || []).filter(p => isOwnPhoto(p) && !before.has(p.name)) : [];
+      if (added.length) void autoNewPhotos(item, added); else void maybeAutoPhotos(item);
       return item;
     } catch (error) {
       toast(error.message, true);
@@ -1070,6 +1072,72 @@
     await maybeAutoSend();
   }
 
+  // -- live phone photos (QR) ----------------------------------------------------------------
+  function isOwnPhoto(p) { return p.source === 'listing' || p.source === 'prep'; }
+  function ownPhotoNames(info) { return new Set((info.photos || []).filter(isOwnPhoto).map(p => p.name)); }
+
+  // While an item is open, look for photos taken on the phone every few seconds (quietly: no busy bar,
+  // no re-render unless something new arrived).
+  const PHONE_PHOTO_POLL_MS = 5000;
+  let phoneWatchBusy = false;
+  function watchPhonePhotos() {
+    setInterval(async () => {
+      const upc = state.currentUpc;
+      const info = detail();
+      if (phoneWatchBusy || !upc || !info || document.hidden || state.connected === false) return;
+      if (state.aiBusy || state.busy === 'photos' || preloadRunning(upc)) return;
+      phoneWatchBusy = true;
+      try {
+        const data = await api('/api/lister/queue/' + encodeURIComponent(upc));
+        const item = data?.item;
+        if (!item || upc !== state.currentUpc || state.details[upc] !== info) return;
+        const before = ownPhotoNames(info);
+        const added = (item.photos || []).filter(p => isOwnPhoto(p) && !before.has(p.name));
+        if (!added.length) return;
+        item.loadedAt = Date.now();
+        state.details[upc] = item;
+        renderDetail();
+        toast(`📷 ${added.length} new photo${added.length === 1 ? '' : 's'} from the phone`);
+        await autoNewPhotos(item, added);
+      } catch (error) {
+        console.warn('phone photo watch', error);
+      } finally {
+        phoneWatchBusy = false;
+      }
+    }, PHONE_PHOTO_POLL_MS);
+  }
+
+  // New photos of an item already open: AI photoshop just those (auto switch), then send just those
+  // (their AI versions) to the listing form (auto send switch) — the earlier ones are on the page already.
+  async function autoNewPhotos(info, added) {
+    const page = state.page;
+    const onForm = !!(page?.store && (page.kind === 'listing-form' || page.kind === 'offer-form'));
+    const sentKey = (state.tab?.id || 0) + '|' + (page?.store || '') + '|' + info.upc;
+    // Nothing sent for this item yet: the normal auto flow covers every photo, the new ones included.
+    if (!onForm || !state.settings.autoSendPhotos || !state.autoSent.has(sentKey)) { await maybeAutoPhotos(info); return; }
+    if (state.settings.autoAiPhotos) {
+      while (state.aiBusy) await new Promise(r => setTimeout(r, 1000));
+      const aiDone = new Set((info.photos || []).filter(p => p.source === 'ai').map(p => p.from).filter(Boolean));
+      const todo = added.filter(p => !aiDone.has(p.name) && !state.autoPhotos.has(p.url)).map(p => p.url);
+      if (todo.length) { toast(`Auto AI photoshop: ${todo.length} new photo${todo.length === 1 ? '' : 's'}…`); await aiPhotoshopUrls(info, todo); }
+    }
+    const aiFor = new Map((info.photos || []).filter(p => p.source === 'ai' && p.from).map(p => [p.from, p.url]));
+    const urls = [];
+    for (const p of added) {
+      const url = aiFor.get(p.name) || (state.settings.autoSendAiOnly ? '' : p.url);
+      if (!url || (state.phoneSent ||= new Set()).has(sentKey + '|' + url)) continue;
+      if (isTooSmall(await photoSize(url))) continue;
+      urls.push(url);
+    }
+    if (!urls.length) {
+      if (state.settings.autoSendAiOnly && !state.settings.autoAiPhotos) toast('Auto send: new photos not sent (only AI generated is on, AI photoshop is off)', true);
+      return;
+    }
+    for (const url of urls) state.phoneSent.add(sentKey + '|' + url);
+    toast(`Auto send: ${urls.length} new photo${urls.length === 1 ? '' : 's'} to the page…`);
+    await sendPhotoUrls(info, urls);
+  }
+
   async function aiPhotoshopUrls(info, urls) {
     const prompt = ($('aiPrompt')?.value || state.aiPrompt || '').trim();
     state.aiPrompt = prompt && prompt !== info.aiPhotoPrompt ? prompt : '';
@@ -1281,12 +1349,13 @@
       if (it.defect && (it.defect || '').toLowerCase() !== (ps.reason || '').toLowerCase()) chips.push(`<span class="chip defect" title="Defect noted on the BOL">${esc(it.defect)}</span>`);
       if (it.preparing) chips.push('<span class="chip"><span class="spin"></span> preparing</span>');
       const pl = preloadOf(it.upc);
+      const preloadChips = [];  // shown in their own column on the right, apart from the item's facts
       if (pl) {
         const s = preloadSummary(pl);
-        if (pl.queued) chips.push('<span class="chip preload" title="Waiting for its turn in Preload all">⚡ queued</span>');
-        else if (pl.running) chips.push(`<span class="chip preload"><span class="spin"></span> ${s.running ? esc(PRELOAD_LABEL[s.running[0]] || s.running[0]) + (s.running[0] === 'photos' ? esc(s.photos) : '') : 'preloading'}…</span>`);
-        else if (s.failed.length) chips.push(`<span class="chip warn" title="${esc(s.failed.map(([k, v]) => s.problem(k, v)).join(' · '))}">⚡ ${esc(s.failed.map(([k]) => PRELOAD_LABEL[k]).join(', '))} failed</span>`);
-        else chips.push(`<span class="chip preload done" title="${esc(s.steps.map(([k, v]) => PRELOAD_LABEL[k] + ' ' + (v === 'done' ? '✓' : v)).join(' · '))}">⚡ preloaded ✓</span>`);
+        if (pl.queued) preloadChips.push('<span class="chip preload" title="Waiting for its turn in Preload all">⚡ queued</span>');
+        else if (pl.running) preloadChips.push(`<span class="chip preload"><span class="spin"></span> ${s.running ? esc(PRELOAD_LABEL[s.running[0]] || s.running[0]) + (s.running[0] === 'photos' ? esc(s.photos) : '') : 'preloading'}…</span>`);
+        else if (s.failed.length) preloadChips.push(`<span class="chip warn" title="${esc(s.failed.map(([k, v]) => s.problem(k, v)).join(' · '))}">⚡ ${esc(s.failed.map(([k]) => PRELOAD_LABEL[k]).join(', '))} failed</span>`);
+        else preloadChips.push(`<span class="chip preload done" title="${esc(s.steps.map(([k, v]) => PRELOAD_LABEL[k] + ' ' + (v === 'done' ? '✓' : v)).join(' · '))}">⚡ preloaded ✓</span>`);
       }
       const ac = state.platform === 'amazon' ? it.amazonCheck : null;
       if (state.platform === 'amazon' && state.checkingAmazon.has(it.baseUpc)) chips.push('<span class="chip checking"><span class="spin"></span> Amazon check</span>');
@@ -1299,6 +1368,7 @@
         ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
         <div><div class="title">${esc(it.title || '(no title)')}</div>
           <div class="meta"><span>${upcHtml}</span>${chips.join('')}</div></div>
+        <div class="preload-col">${preloadChips.join('')}</div>
         ${it.status === 'queued' ? `<button class="remove" data-skip="${esc(it.upc)}" type="button" title="Remove from the ${storeName(state.platform)} list" aria-label="Remove">×</button>` : '<span></span>'}
       </div>`;
     };
@@ -1673,6 +1743,7 @@
     // The queue first, so a panel opened on the store's search page already has an item to search.
     await loadQueue();
     await refreshTab();
+    watchPhonePhotos();
   }
 
   void main();

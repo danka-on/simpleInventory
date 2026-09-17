@@ -45,8 +45,12 @@ class ListerTestCase(unittest.TestCase):
             payload['base_url'] = flask_request.url_root
             return jsonify({'success': True, 'item': payload})
 
+        self.build_error = None
+
         def fake_build(upc, *, actor='agent', base_url=None):
             self.built.append((upc, actor, base_url))
+            if self.build_error:
+                raise self.build_error
             with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
                 conn.execute('''INSERT INTO listing_proposals (upc, status, proposal_json, created_at, updated_at)
                                 VALUES (?, 'proposed', ?, '2026-09-16T10:00:00', '2026-09-16T10:00:00')''',
@@ -800,6 +804,32 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual((overall['total'], overall['done'], overall['percent']), (2, 2, 100))
         self.assertEqual(overall['items'][UPC]['steps'], {'title': 'done'})
         self.assertEqual(self.client.post('/api/lister/preload', json={'upcs': []}).status_code, 400)
+
+    def test_preload_tolerates_held_proposals_and_junk_catalog_photos(self):
+        import time as _time
+        (self.root / 'static' / 'listingagent_uploads').mkdir()
+        (self.root / 'static' / 'listingagent_uploads' / 'own.jpg').write_bytes(b'jpeg')
+        with self.app.app_context():
+            listing_queue._listagent_add_photo(UPC + '-1', image_path='listingagent_uploads/own.jpg')
+        # Live Pi rows: a "No image" placeholder and our own file echoed back under another host.
+        self.detail_payload = {'title': 'Lenox plate', 'inventory': {'total_quantity': 1, 'positions': [], 'rows': []},
+                               'images': ['No image', 'http://127.0.0.1:5000/static/listingagent_uploads/own.jpg', 'https://cdn.example/c.jpg'],
+                               'bol': {}, 'ebay_store': {'listings': []}, 'amazon_store': {'listings': []},
+                               'prep': {'notes': [], 'images': [], 'voice_notes': [], 'videos': []}}
+        item = self.client.get(f'/api/lister/queue/{UPC}-1', base_url='https://pi.example').get_json()['item']
+        self.assertEqual([(p['source'], p['name']) for p in item['photos']], [('listing', 'own.jpg'), ('catalog', 'c.jpg')])
+
+        class HeldError(Exception):
+            status_code = 409
+        self.build_error = HeldError('Release the held proposal or resolve the in-progress approval before rebuilding')
+        res = self.client.post(f'/api/lister/queue/{UPC}-1/preload', json={'steps': ['prepare']}, base_url='https://pi.example')
+        self.assertEqual(res.status_code, 200, res.get_json())
+        for _ in range(100):
+            status = self.client.get(f'/api/lister/queue/{UPC}-1/preload').get_json()['preload']
+            if not status['running']:
+                break
+            _time.sleep(0.05)
+        self.assertEqual(status['steps'], {'prepare': 'done'}, 'a held proposal already has its values: not a failure')
 
     def test_qr_endpoint_renders_or_explains(self):
         res = self.client.get('/api/lister/qr?text=https://pi.example/items-to-list/mobile-photos?upc=1')
