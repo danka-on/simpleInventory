@@ -252,6 +252,9 @@
       else if (/\/abis\/(listing|Display|syh|display)/i.test(path) || /\/abis\//i.test(path)) {
         // "List Your Products" (abis/listing/syh with no product yet) is the search step; with an ASIN it is the offer form.
         out.kind = /product-search|search/i.test(path) || (!out.asin && !out.sku && /\/abis\/listing\/syh/i.test(path)) ? 'listing-start' : 'offer-form';
+      } else if (/\/interactive\/listing\/workflow/i.test(path)) {
+        // The new listing workflow (also where a resumed draft lands): offer/price step.
+        out.kind = 'offer-form';
       } else if (/\/inventory/i.test(path) || /\/myinventory/i.test(path)) out.kind = 'inventory';
       if (out.asin) out.listingId = out.asin;
       return out;

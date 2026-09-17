@@ -83,11 +83,11 @@ const ebayForm = `<!doctype html><title>Create your listing | eBay</title>
 <script>window.events = []; for (const el of document.querySelectorAll('input,textarea,select,[contenteditable]')) el.addEventListener('input', e => window.events.push(e.target.id));
 document.getElementById('photos').addEventListener('change', e => { window.photoNames = Array.from(e.target.files).map(f => f.name); });</script>`;
 
-// Seller Central "List Your Products": option tiles (a "Search" tile BEFORE the box), then the box and its Search button.
-const amazonStart = `<!doctype html><title>List Your Products</title><h1>List Your Products</h1>
+// Seller Central /product-search: option tiles (a "Search" tile BEFORE the box), then the box and its Next button.
+const amazonStart = `<!doctype html><title>Search products</title><h1>Search products</h1>
 <div role="tablist"><button type="button">Search</button><button type="button">Product image</button><button type="button">Product IDs</button></div>
 <section><p>Search your catalog or Amazon's catalog for a listing (or a variation) to sell or copy.</p>
-<input id="kw" placeholder="Enter product title, description, or keywords"><button id="go" type="button" disabled>Search</button></section>
+<input id="kw" placeholder="Product name, UPC, EAN, ISBN or ASIN"><button id="go" type="button" disabled>Next</button></section>
 <script>const kw = document.getElementById('kw'), go = document.getElementById('go');
 kw.addEventListener('input', () => { go.disabled = !kw.value; });
 go.addEventListener('click', () => { location.href = 'https://sellercentral.amazon.com/listing/results?q=' + encodeURIComponent(kw.value); });</script>`;
@@ -169,8 +169,9 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const url = new URL(route.request().url());
       const html = body => route.fulfill({ status: 200, contentType: 'text/html', body });
       calls.amazonPages = (calls.amazonPages || []).concat(url.pathname + url.search);
-      if (url.pathname === '/abis/listing/syh' && !url.search) return html('<title>Add price and inventory</title><h1>We encountered an unexpected error</h1>');
-      if (url.pathname === '/abis/listing/syh') return html(amazonStart);
+      if (url.pathname === '/product-search') return html(amazonStart);
+      // /abis/listing/syh resumes the last draft: it redirects to the offer step and errors.
+      if (url.pathname.startsWith('/abis/listing/syh')) return html('<title>Add price and inventory</title><h1>We encountered an unexpected error</h1>');
       return html('<title>Seller Central</title><h1>Inventory</h1>');
     });
     await context.route('https://www.ebay.com/**', route => {
@@ -548,18 +549,18 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
     await panel.dblclick('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
-    // Amazon works the same: a double-click opens "List Your Products" the way the Add Products menu does
-    // (the bare /abis/listing/syh resumes a draft and errors), types the UPC and presses Search.
+    // Amazon works the same: a double-click opens Seller Central's product search (/abis/listing/syh
+    // resumes a draft and errors on /interactive/listing/workflow/offer), types the UPC and presses Next.
     await store.goto('https://sellercentral.amazon.com/inventory');
     await panel.click('#storeAmazon');
     await panel.waitForSelector('#itemList .item[data-upc="012345678905"]', { timeout: 15000 });
     await panel.waitForTimeout(600);
     await panel.dblclick('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/listing\/results\?q=012345678905/, { timeout: 20000 });
-    assert.ok(calls.amazonPages.includes('/abis/listing/syh?ref_=xx_addprod_dnav_xx'), 'opened with the menu ref: ' + calls.amazonPages);
-    assert.ok(!calls.amazonPages.includes('/abis/listing/syh'), 'never the bare draft URL');
+    assert.ok(calls.amazonPages.includes('/product-search'), 'opened the product search: ' + calls.amazonPages);
+    assert.ok(!calls.amazonPages.some(p => p.startsWith('/abis/listing/syh')), 'never the draft URL');
     // Already on that page: the double-click searches right there, no reload.
-    await store.goto('https://sellercentral.amazon.com/abis/listing/syh?ref_=xx_addprod_dnav_xx');
+    await store.goto('https://sellercentral.amazon.com/product-search');
     const opened = calls.amazonPages.length;
     await panel.waitForTimeout(1500);
     await panel.dblclick('.item[data-upc="883049370897-1"]');

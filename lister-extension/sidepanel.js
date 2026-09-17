@@ -31,9 +31,9 @@
   };
   const START_URLS = {
     ebay: () => 'https://www.ebay.com/sl/prelist/suggest?sr=wn',
-    // "List Your Products" as the Catalog > Add Products menu opens it; the bare /abis/listing/syh resumes the
-    // last draft ("Add price and inventory" -> "We encountered an unexpected error").
-    amazon: () => 'https://sellercentral.amazon.com/abis/listing/syh?ref_=xx_addprod_dnav_xx',
+    // Seller Central's product search is the first step: it takes the UPC and its Next button opens
+    // the catalog result. /abis/listing/syh resumes the last draft (/interactive/listing/workflow/offer).
+    amazon: () => 'https://sellercentral.amazon.com/product-search',
   };
 
   const state = {
