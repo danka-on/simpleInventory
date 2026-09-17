@@ -870,7 +870,10 @@
         if (!info) return;
         const v = values(info);
         const noteFields = v.conditionDescriptionSource === 'notes' && v.conditionDescription ? ['conditionDescription'] : [];
-        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, aiFields: state.aiGenerated[info.upc] || {} } });
+        // What the rack really holds, so the overlay can pin it under the store's quantity box.
+        const inv = info.inventory || {}, g = info.gate || {};
+        const stock = { rack: g.rackQty ?? inv.quantity ?? null, listable: g.listable ?? inv.quantity ?? null, positions: inv.positions || [] };
+        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, stock, aiFields: state.aiGenerated[info.upc] || {} } });
         if (!silent && !response.state.needed.length) toast('Nothing left to fill on this page');
       } else if (action === 'go') response = await pageMessage({ type: 'guide-go', index });
       else response = await pageMessage({ type: 'guide-' + action });

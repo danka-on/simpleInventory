@@ -743,6 +743,42 @@
     return tag;
   }
 
+  // -- warehouse quantity badge --------------------------------------------------------------------
+  // The store's quantity box is a promise; this pins what the rack actually holds right under it, so
+  // nobody lists three of something we own one of. The side panel supplies the numbers at guide-start.
+  function qtyBadge() {
+    if (guide.qtyTag) return guide.qtyTag;
+    const tag = document.createElement('div');
+    tag.dataset.ssQty = '1';
+    tag.style.cssText = 'position:absolute;z-index:2147483646;display:none;color:#fff;font:600 12px system-ui,sans-serif;padding:4px 10px;border-radius:999px;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none;white-space:nowrap;max-width:min(360px,90vw);overflow:hidden;text-overflow:ellipsis';
+    document.documentElement.appendChild(tag);
+    guide.qtyTag = tag;
+    return tag;
+  }
+
+  function placeQtyBadge() {
+    if (!guide) return;
+    const tag = qtyBadge();
+    const stock = guide.options.stock || {};
+    const rack = Number(stock.rack);
+    const row = guide.rows.find(r => r.kind === 'field' && r.target === 'quantity');
+    const el = row ? guide.elements[row.index] : null;
+    if (!el || !el.isConnected || !Number.isFinite(rack) || !isVisible(el)) { tag.style.display = 'none'; return; }
+    const listable = Number.isFinite(Number(stock.listable)) ? Number(stock.listable) : rack;
+    const typed = Number(String(row.value || '').replace(/[^0-9.-]/g, ''));
+    // Typing more than we can ship is the mistake worth shouting about.
+    const over = Number.isFinite(typed) && typed > listable;
+    const parts = [rack + ' on the rack'];
+    if (listable !== rack) parts.push(listable + ' listable');
+    if (Array.isArray(stock.positions) && stock.positions.length) parts.push('@ ' + stock.positions.slice(0, 3).join(', '));
+    tag.textContent = (over ? '⚠ ' : '📦 ') + 'Warehouse: ' + parts.join(' · ') + (over ? ' — you typed ' + typed : '');
+    tag.style.background = over ? '#dc2626' : (rack ? '#0a9c6c' : '#b45309');
+    const rect = el.getBoundingClientRect();
+    tag.style.display = '';
+    tag.style.left = Math.max(8, rect.left + window.scrollX) + 'px';
+    tag.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  }
+
   // scroll=true only for an explicit jump (click, Next, Tab); refreshes never move the page.
   function guideRender(scroll = false) {
     if (!guide) return;
@@ -793,6 +829,7 @@
     } else {
       pointer.style.display = 'none';
     }
+    placeQtyBadge();
   }
 
   function escapeHtml(value) {
@@ -813,7 +850,7 @@
     // Already up on this page (the URL changed, the fill ran again): refresh in place, never jump back to the first row.
     if (guide) { guide.options = options || guide.options; guideRefresh(); guideRender(false); notifyGuide(); return guideState(); }
     const { elements, rows } = guideNeeded(options || {});
-    guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, collapsed: false };
+    guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, qtyTag: null, collapsed: false };
     const handlers = {
       key(event) {
         if (!guide) return;
@@ -827,11 +864,15 @@
           event.preventDefault(); guideUse();
         }
       },
+      // The badge is glued to the quantity box, so it has to follow the page, not the 2 s refresh.
+      reposition() { placeQtyBadge(); },
       change() { clearTimeout(guide?.timer); if (guide) guide.timer = setTimeout(() => { if (guide) { guideRefresh(); guideRender(); notifyGuide(); } }, 250); },
     };
     document.addEventListener('keydown', handlers.key, true);
     document.addEventListener('input', handlers.change, true);
     document.addEventListener('change', handlers.change, true);
+    window.addEventListener('scroll', handlers.reposition, true);
+    window.addEventListener('resize', handlers.reposition);
     guide.handlers = handlers;
     guide.ticker = setInterval(() => { if (guide) { guideRefresh(); guideRender(); } }, 2000);
     guide.index = rows.findIndex(r => !r.done);
@@ -906,10 +947,13 @@
       document.removeEventListener('keydown', guide.handlers.key, true);
       document.removeEventListener('input', guide.handlers.change, true);
       document.removeEventListener('change', guide.handlers.change, true);
+      window.removeEventListener('scroll', guide.handlers.reposition, true);
+      window.removeEventListener('resize', guide.handlers.reposition);
     }
     clearInterval(guide.ticker); clearTimeout(guide.timer);
     if (guide.panel) guide.panel.remove();
     if (guide.pointer) guide.pointer.remove();
+    if (guide.qtyTag) guide.qtyTag.remove();
     guide = null;
     return true;
   }

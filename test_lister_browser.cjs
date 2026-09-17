@@ -396,6 +396,15 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(rowFor('Title').dot.includes('22, 163, 74'), 'the filled title is green');
     assert.ok(rowFor('Quantity').text.includes('· 1'), 'the quantity row shows the entered quantity: ' + rowFor('Quantity').text);
     assert.ok(!rowFor('UPC'), 'the UPC is not on the checklist');
+    // The warehouse count sits under the store's own quantity box while the listing is being set up.
+    const qtyTag = await store.$eval('[data-ss-qty]', el => ({ text: el.textContent, bg: el.style.background, shown: el.style.display }));
+    assert.ok(qtyTag.text.includes('1 on the rack') && qtyTag.text.includes('B-1'), 'the quantity badge shows the rack count and position: ' + qtyTag.text);
+    assert.ok(qtyTag.shown !== 'none' && qtyTag.bg.includes('10, 156, 108'), 'the badge is visible and green while the quantity fits the rack');
+    await store.fill('#qty', '4');
+    await store.waitForFunction(() => document.querySelector('[data-ss-qty]')?.textContent.includes('you typed 4'), null, { timeout: 15000 });
+    assert.ok((await store.$eval('[data-ss-qty]', el => el.style.background)).includes('220, 38, 38'), 'typing more than the rack holds turns the badge red');
+    await store.fill('#qty', '1');
+    await store.waitForFunction(() => !document.querySelector('[data-ss-qty]')?.textContent.includes('you typed'), null, { timeout: 15000 });
     assert.ok(rows.at(-1).text.startsWith('Quantity') && rows.at(-2).text.startsWith('Price'), 'price then quantity close the checklist: ' + rows.map(r => r.text.split(' ')[0]).join(','));
     assert.ok(rowFor('Condition description').dot.includes('37, 99, 235') && rowFor('Condition description').text.includes('prep notes'), 'the note-sourced condition description is blue with a disclaimer');
     assert.ok((await panel.textContent('#pageCard')).includes('of'), 'the store card shows the checklist progress');
