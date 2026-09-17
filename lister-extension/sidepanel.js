@@ -176,6 +176,7 @@
       // The other store's count, cheaply, so the toggle shows both.
       void api('/api/lister/queue?platform=' + (state.platform === 'ebay' ? 'amazon' : 'ebay')).then(d => {
         state.counts[state.platform === 'ebay' ? 'amazon' : 'ebay'] = d.counts || {};
+        rememberThumbs(d.items);
         renderStoreBar();
       }).catch(() => {});
     } catch (error) {
@@ -186,6 +187,97 @@
     renderAll();
     if (state.currentUpc) void loadDetail(state.currentUpc);
     void runAmazonChecks();
+    void loadListed();
+  }
+
+  // -- "✓ Listed" side bar ------------------------------------------------------------------
+  // Every listing the Lister recorded (listing_links), newest first, filtered by day range and store.
+
+  function rememberThumbs(items) {
+    state.thumbs ||= {};
+    for (const it of items || []) if (it.thumb) state.thumbs[it.upc] = it.thumb;
+  }
+
+  function localDay(date) {
+    const d = date instanceof Date ? date : new Date(date);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function daysAgo(n) {
+    const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - n);
+    return localDay(d);
+  }
+
+  function listedInRange(link, range) {
+    const day = String(link.created_at || '').slice(0, 10);  // the server stamps local time
+    if (range === 'today') return day === daysAgo(0);
+    if (range === 'yesterday') return day === daysAgo(1);
+    if (range === '7' || range === '30') return day >= daysAgo(Number(range) - 1);
+    return true;
+  }
+
+  async function loadListed() {
+    if (state.connected === false || state.listedLoading) return;
+    state.listedLoading = true;
+    try {
+      const data = await api('/api/lister/links?limit=500');
+      state.listed = data.links || [];
+    } catch (error) {
+      if ($('listedDrawer') && !$('listedDrawer').hidden) toast(error.message, true);
+    } finally {
+      state.listedLoading = false;
+    }
+    renderListed();
+  }
+
+  function renderListed() {
+    const all = state.listed || [];
+    const today = all.filter(l => listedInRange(l, 'today')).length;
+    if ($('countListedToday')) $('countListedToday').textContent = today ? String(today) : '';
+    const drawer = $('listedDrawer');
+    if (!drawer || drawer.hidden) return;
+    const range = state.listedRange || 'today';
+    const store = state.listedStore || 'all';
+    for (const b of drawer.querySelectorAll('[data-range]')) b.classList.toggle('active', b.dataset.range === range);
+    for (const b of drawer.querySelectorAll('[data-store]')) b.classList.toggle('active', b.dataset.store === store);
+    const inRange = all.filter(l => listedInRange(l, range));
+    const rows = inRange.filter(l => store === 'all' || l.platform === store);
+    const byStore = p => inRange.filter(l => l.platform === p).length;
+    const people = {};
+    for (const l of rows) { const who = l.created_by ? String(l.created_by).split('@')[0] : '—'; people[who] = (people[who] || 0) + 1; }
+    $('listedSummary').innerHTML = `<b>${rows.length}</b> listed · <span class="chip store ebay">eBay ${byStore('ebay')}</span><span class="chip store amazon">Amazon ${byStore('amazon')}</span>`
+      + (Object.keys(people).length ? ' · ' + Object.entries(people).sort((a, b) => b[1] - a[1]).map(([who, n]) => `${esc(who)} ${n}`).join(' · ') : '');
+    const list = $('listedList');
+    if (!rows.length) {
+      list.innerHTML = `<div class="empty">${state.listedLoading && !state.listed ? 'Loading…' : 'Nothing listed through the Lister ' + ({ today: 'today', yesterday: 'yesterday', 7: 'in the last 7 days', 30: 'in the last 30 days' }[range] || 'yet') + '.'}</div>`;
+      return;
+    }
+    const time = stamp => String(stamp || '').slice(11, 16);
+    let lastDay = '';
+    list.innerHTML = rows.map(l => {
+      const day = String(l.created_at || '').slice(0, 10);
+      const head = range !== 'today' && range !== 'yesterday' && day !== lastDay ? `<div class="day">${esc(day === daysAgo(0) ? 'Today' : day === daysAgo(1) ? 'Yesterday' : day)}</div>` : '';
+      lastDay = day;
+      const thumb = (state.thumbs || {})[l.upc];
+      const id = l.platform === 'ebay' ? (l.listing_id ? 'item ' + l.listing_id : '') : [l.asin, l.sku].filter(Boolean).join(' · ');
+      const suffixed = String(l.upc || '').includes('-');
+      const upcHtml = suffixed ? `${esc(l.upc.split('-')[0])}-<b class="suffix">${esc(l.upc.split('-').slice(1).join('-'))}</b>` : esc(l.upc);
+      return `${head}<div class="litem" data-link="${esc(l.id)}" title="${esc(l.title || '')}">
+          ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
+          <div><div class="title">${esc(l.title || '(no title)')}</div>
+            <div class="meta"><span class="chip store ${esc(l.platform)}">${esc(storeName(l.platform))}</span><span>${upcHtml}</span>
+              ${id ? `<span>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener" title="Open the live listing">${esc(id)} ↗</a>` : esc(id)}</span>` : ''}
+              ${l.price != null ? `<span>$${esc(Number(l.price).toFixed(2))}</span>` : ''}
+              <span title="${esc(l.created_at)}">${esc(time(l.created_at))}</span>${l.created_by ? `<span>· ${esc(String(l.created_by).split('@')[0])}</span>` : ''}</div></div>
+        </div>`;
+    }).join('');
+  }
+
+  function openListed(open) {
+    const drawer = $('listedDrawer');
+    drawer.hidden = !open;
+    $('listedBtn').classList.toggle('active', open);
+    if (open) { renderListed(); void loadListed(); }
   }
 
   // Can Amazon take each queued UPC from us? One check at a time; the row shows the result.
@@ -1034,18 +1126,21 @@
     const byStatus = it => {
       const f = state.statusFilter;
       if (f === 'good' || f === 'bad') return (it.prepStatus?.status || '') === f;
-      if (f === 'listed') return it.status === 'listed' || it.alreadyOnStore || it.otherStatus === 'listed';
+      if (f === 'listed') return it.alreadyOnStore || it.otherStatus === 'listed';
       return true;
     };
+    // Listed on this store through the Lister: gone from this store's list (the other store still has it until
+    // it is listed there too). Those items live in the "✓ Listed" side bar.
+    rememberThumbs(state.items);
     for (const [id, value] of [['statusAll', 'all'], ['statusGood', 'good'], ['statusBad', 'bad'], ['statusListed', 'listed']]) $(id).classList.toggle('active', state.statusFilter === value);
-    const rows = state.items.filter(it => byStatus(it) && (!filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter)));
+    const rows = state.items.filter(it => it.status === 'queued' && byStatus(it) && (!filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter)));
     const list = $('itemList');
     if (!rows.length) {
-      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : `Nothing queued for ${storeName(state.platform)}. Add items to the Listing Agent queue on <b>Items to List</b>.`)}</div>`;
+      const listedHere = state.items.filter(it => it.status === 'listed').length;
+      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : (listedHere ? `Everything queued for ${storeName(state.platform)} is listed. See <b>✓ Listed</b>.` : `Nothing queued for ${storeName(state.platform)}. Add items to the Listing Agent queue on <b>Items to List</b>.`))}</div>`;
       return;
     }
-    const active = rows.filter(it => it.status === 'queued');
-    const done = rows.filter(it => it.status !== 'queued');
+    const active = rows;
     const row = (it, first) => {
       const chips = [];
       const other = state.platform === 'ebay' ? 'amazon' : 'ebay';
@@ -1071,8 +1166,7 @@
         ${it.status === 'queued' ? `<button class="remove" data-skip="${esc(it.upc)}" type="button" title="Remove from the ${storeName(state.platform)} list" aria-label="Remove">×</button>` : '<span></span>'}
       </div>`;
     };
-    list.innerHTML = active.map((it, i) => row(it, i === 0)).join('') +
-      (done.length ? `<div class="sep">Listed on ${storeName(state.platform)} (${done.length})</div>` + done.map(it => row(it, false)).join('') : '');
+    list.innerHTML = active.map((it, i) => row(it, i === 0)).join('');
     for (const el of list.querySelectorAll('.item')) {
       el.onclick = event => {
         if (event.target.closest('a, button')) return;
@@ -1408,6 +1502,12 @@
     $('unlock').onclick = () => { state.locked = null; setView('list'); renderStoreBar(); };
     $('viewList').onclick = () => setView('list');
     $('viewItem').onclick = () => setView('item');
+    $('listedBtn').onclick = () => openListed($('listedDrawer').hidden);
+    $('listedClose').onclick = () => openListed(false);
+    $('listedReload').onclick = () => void loadListed();
+    for (const b of document.querySelectorAll('#listedDrawer [data-range]')) b.onclick = () => { state.listedRange = b.dataset.range; renderListed(); };
+    for (const b of document.querySelectorAll('#listedDrawer [data-store]')) b.onclick = () => { state.listedStore = b.dataset.store; renderListed(); };
+    document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('listedDrawer').hidden) openListed(false); });
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
     for (const [id, value] of [['statusAll', 'all'], ['statusGood', 'good'], ['statusBad', 'bad'], ['statusListed', 'listed']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
     $('reload').onclick = () => { state.details = {}; void connect().then(() => loadQueue()); void refreshTab(); };

@@ -103,7 +103,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       if (url.pathname === '/api/lister/ping') return json({ success: true, version: '0.2.0', user: 'dan@example.com' });
       if (url.pathname === '/api/lister/queue') {
         const platform = url.searchParams.get('platform');
-        const items = (queue[platform] || []).map(it => linked && it.upc === UPC + '-1' ? { ...it, status: 'listed', listedAt: '2026-09-16T10:00:00', links: [{ platform: 'ebay', listing_id: '335566778899' }] } : it);
+        const items = (queue[platform] || []).map(it => linked && it.upc === UPC + '-1' ? platform !== 'ebay' ? { ...it, otherStatus: 'listed' } : { ...it, status: 'listed', listedAt: '2026-09-16T10:00:00', links: [{ platform: 'ebay', listing_id: '335566778899' }] } : it);
         return json({ success: true, items, counts: { queued: items.filter(i => i.status === 'queued').length, listed: items.filter(i => i.status !== 'queued').length, hidden: 0 } });
       }
       if (url.pathname === `/api/lister/queue/${UPC}-1`) { calls.detail += 1; return json({ success: true, item: linked ? { ...detail, links: [{ platform: 'ebay', listing_id: '335566778899', url: 'https://www.ebay.com/itm/335566778899' }] } : detail }); }
@@ -123,6 +123,14 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       }
       if (url.pathname.endsWith('/generate')) { const body = request.postDataJSON(); calls.generate.push(body); return json(body.kind === 'title' ? { success: true, kind: 'title', title: 'AI Lenox Butterfly Meadow Plate' } : { success: true, kind: 'description', descriptionHtml: '<p>AI description</p>', descriptionText: 'AI description' }); }
       if (url.pathname === '/api/lister/events') { calls.events.push(request.postDataJSON()); return json({ success: true }); }
+      if (url.pathname === '/api/lister/links' && request.method() === 'GET') {
+        const today = new Date(); const pad = n => String(n).padStart(2, '0');
+        const stamp = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}T10:15:00`;
+        return json({ success: true, links: [
+          ...(linked ? [{ id: 1, upc: UPC + '-1', platform: 'ebay', listing_id: '335566778899', url: 'https://www.ebay.com/itm/335566778899', title: 'Lenox Butterfly Meadow Dinner Plate', price: 24.5, created_by: 'dan@example.com', created_at: stamp }] : []),
+          { id: 0, upc: '099999999999', platform: 'amazon', sku: 'OLD-1', asin: 'B0OLD', title: 'Old Amazon listing', price: 10, created_by: 'ona@example.com', created_at: '2026-01-02T09:00:00' },
+        ] });
+      }
       if (url.pathname === '/api/lister/links') {
         calls.links.push(request.postDataJSON());
         linked = true;
@@ -432,11 +440,29 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.equal(calls.links[0].proposal_id, 7);
     assert.ok(calls.links[0].note.includes('auto-detected'));
     assert.equal(await panel.$eval('#toastAction', el => el.textContent), 'Undo');
-    await panel.waitForFunction(() => document.querySelector('.item[data-upc="883049370897-1"]').classList.contains('listed'), null, { timeout: 15000 });
+    // Listed on eBay: the item leaves the eBay list, stays on the Amazon list, and shows in the Listed side bar.
+    await panel.waitForFunction(() => !document.querySelector('#itemList .item[data-upc="883049370897-1"]'), null, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('countListedToday').textContent === '1', null, { timeout: 15000 });
+    await panel.click('#listedBtn');
+    await panel.waitForSelector('#listedDrawer:not([hidden]) .litem');
+    assert.deepEqual(await panel.$$eval('#listedList .litem', els => els.map(e => e.dataset.link)), ['1'], 'Today shows only today\'s listing');
+    assert.ok((await panel.textContent('#listedList')).includes('item 335566778899'));
+    await panel.click('#listedDrawer [data-range="all"]');
+    assert.deepEqual(await panel.$$eval('#listedList .litem', els => els.map(e => e.dataset.link)), ['1', '0'], 'All shows every listing');
+    await panel.click('#listedDrawer [data-store="amazon"]');
+    assert.deepEqual(await panel.$$eval('#listedList .litem', els => els.map(e => e.dataset.link)), ['0'], 'the store filter keeps Amazon only');
+    await panel.click('#listedDrawer [data-store="all"]');
+    await panel.click('#listedDrawer [data-range="today"]');
+    await panel.click('#listedClose');
+    assert.ok(await panel.$eval('#listedDrawer', el => el.hidden));
     assert.ok(!(await panel.$eval('#lock', el => el.classList.contains('on'))), 'the lock is released after the listing is recorded');
 
     // Back on the search page nothing is searched until an item is clicked in the queue.
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
+    await panel.click('#storeAmazon');
+    await panel.waitForSelector('#itemList .item[data-upc="883049370897-1"]', { timeout: 15000 });
+    await panel.click('#storeEbay');
+    await panel.waitForFunction(() => document.querySelector('#itemList .item') && !document.querySelector('#itemList .item[data-upc="883049370897-1"]'), null, { timeout: 15000 });
     await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('search for the product'), null, { timeout: 15000 });
     await store.waitForTimeout(1500);
     assert.ok(store.url().includes('/sl/prelist/suggest'), 'the next queued item is not searched by itself');
@@ -444,8 +470,9 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
     // A double-click on a queue item starts it: the store tab goes back to eBay's start page and searches that UPC.
-    await panel.dblclick('.item[data-upc="883049370897-1"]');
-    await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=883049370897/, { timeout: 20000 });
+    await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
+    await panel.dblclick('.item[data-upc="012345678905"]');
+    await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
     console.log('lister browser test passed');
   } finally {
     await context.close();

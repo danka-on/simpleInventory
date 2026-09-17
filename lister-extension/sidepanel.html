@@ -48,8 +48,33 @@
   <div class="viewtabs">
     <button id="viewList" class="tab active" type="button">Queue</button>
     <button id="viewItem" class="tab" type="button">Item</button>
+    <button id="listedBtn" class="tab listed" type="button" title="Items listed through the Lister">✓ Listed <span id="countListedToday" class="count"></span></button>
   </div>
 </nav>
+
+<aside id="listedDrawer" class="drawer" hidden aria-label="Listed through the Lister">
+  <div class="drawer-head">
+    <strong class="grow">✓ Listed through the Lister</strong>
+    <button id="listedReload" class="icon" type="button" title="Reload" aria-label="Reload">↻</button>
+    <button id="listedClose" class="icon" type="button" title="Close" aria-label="Close">×</button>
+  </div>
+  <div class="drawer-filters">
+    <div class="seg small" role="tablist" title="When">
+      <button class="seg-btn active" data-range="today" type="button">Today</button>
+      <button class="seg-btn" data-range="yesterday" type="button">Yesterday</button>
+      <button class="seg-btn" data-range="7" type="button">7 days</button>
+      <button class="seg-btn" data-range="30" type="button">30 days</button>
+      <button class="seg-btn" data-range="all" type="button">All</button>
+    </div>
+    <div class="seg small" role="tablist" title="Store">
+      <button class="seg-btn active" data-store="all" type="button">Both</button>
+      <button class="seg-btn" data-store="ebay" type="button">eBay</button>
+      <button class="seg-btn" data-store="amazon" type="button">Amazon</button>
+    </div>
+  </div>
+  <div id="listedSummary" class="drawer-summary"></div>
+  <div id="listedList" class="list"></div>
+</aside>
 
 <div id="lock" class="lock"><span>🔒</span><span id="lockTitle" class="grow"></span><button id="unlock" class="mini" type="button" title="Show the queue again">Queue</button></div>
 
@@ -63,7 +88,7 @@
       <button id="statusAll" class="seg-btn active" type="button">All</button>
       <button id="statusGood" class="seg-btn good" type="button">Good</button>
       <button id="statusBad" class="seg-btn bad" type="button">Bad</button>
-      <button id="statusListed" class="seg-btn" type="button" title="Already listed or on a store">Listed</button>
+      <button id="statusListed" class="seg-btn" type="button" title="Already on a store (not listed through the Lister) or listed on the other store">On store</button>
     </div>
     <input id="filter" type="search" placeholder="Filter by title or UPC">
     <button id="reload" class="icon" type="button" title="Reload" aria-label="Reload">↻</button>
