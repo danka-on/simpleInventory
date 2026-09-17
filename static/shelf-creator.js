@@ -1688,7 +1688,7 @@ function redrawCanvas(hideHandles = false) {
         
         // Draw rectangle
         state.ctx.strokeStyle = '#00ff00';
-        state.ctx.lineWidth = 6;
+        state.ctx.lineWidth = 12;
         state.ctx.strokeRect(rx, ry, rw, rh);
         
         // Draw corner handles (only when not actively drawing)

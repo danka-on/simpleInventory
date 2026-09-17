@@ -505,6 +505,8 @@ def _preview_base_path_candidates(code):
     for lookup_code in _preview_base_lookup_codes(code):
         _add_unique_path(candidates, _preview_base_path_for_code(lookup_code))
         _add_unique_path(candidates, _legacy_preview_base_path_for_code(lookup_code))
+        # Marked photo (green box) beats the clean original, so bin codes like or2s1b3 keep their box in previews.
+        _add_unique_path(candidates, _resolve_exact_shelf_display_path(lookup_code, existing_only=True))
         for original_candidate in _shelf_original_path_candidates(lookup_code):
             _add_unique_path(candidates, original_candidate)
     return candidates
