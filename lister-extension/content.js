@@ -471,6 +471,30 @@
     return { count, zone, el: zone || input };
   }
 
+  // eBay's Preferences section: "Payment policy" is a dropdown/button, not a named input, so the
+  // field matcher never sees it. Find the label, then the control next to it, and read what it shows.
+  const POLICY_EMPTY = /^(|select|choose|select (a|one|payment policy)|choose (a|one)|--.*|none|add( a)? (payment )?policy|create( a)? (payment )?policy)$/i;
+  function policyState() {
+    if (!document.body) return null;
+    const labels = Array.from(document.querySelectorAll('label, span, div, h3, h4, legend, p, dt'))
+      .filter(el => el.offsetParent !== null && /^payment polic(y|ies)\s*\*?$/i.test((el.textContent || '').trim()));
+    for (const label of labels) {
+      let box = label.parentElement;
+      for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
+        const control = box.querySelector('select, button[aria-haspopup], [role="combobox"], [role="listbox"], button, input:not([type=hidden])');
+        if (!control || control === label || label.contains(control)) continue;
+        let value = control.tagName === 'SELECT'
+          ? (control.selectedIndex >= 0 ? control.options[control.selectedIndex].text : '')
+          : control.tagName === 'INPUT' ? control.value : (control.textContent || '');
+        if (control.contains(label)) value = value.replace(label.textContent || '', '');
+        value = value.replace(/\s+/g, ' ').trim();
+        const missing = POLICY_EMPTY.test(value) || /select a payment policy|payment policy is required/i.test(box.textContent || '');
+        return { done: !missing, value: missing ? '' : value, el: control };
+      }
+    }
+    return null;
+  }
+
   function guideNeeded({ values = {}, store = '', aspects = {}, noteFields = [] } = {}) {
     const elements = collect();
     const descriptors = elements.map(describe);
@@ -499,6 +523,8 @@
     });
     const photos = photoState();
     if (photos) rows.unshift({ index: -1, target: 'photos', required: true, done: photos.count > 0, label: 'Photos', suggestion: 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
+    const payment = store === 'amazon' ? null : policyState();
+    if (payment) rows.push({ index: -1, target: 'paymentPolicy', required: true, done: payment.done, label: 'Payment policy', suggestion: 'Pick a payment policy', tag: 'policy', kind: 'policy', el: payment.el, value: payment.value });
     // Required first, then our fields, keeping page order inside each group; price and then
     // quantity go last because that is where eBay's form ends.
     const tail = r => (r.target === 'price' ? 1 : r.target === 'quantity' ? 2 : 0);
@@ -507,7 +533,7 @@
   }
 
   function guideElement(row) {
-    return row.kind === 'photos' ? row.el : guide.elements[row.index];
+    return row.kind === 'photos' || row.kind === 'policy' ? row.el : guide.elements[row.index];
   }
 
   function guideStyle(row, state) {
@@ -734,6 +760,7 @@
     }
     for (const row of guide.rows) {
       if (row.kind === 'photos') { const photos = photoState(); row.done = Boolean(photos && photos.count > 0); if (photos) row.el = photos.el; }
+      else if (row.kind === 'policy') { const policy = policyState(); row.done = Boolean(policy && policy.done); row.value = policy ? policy.value : ''; if (policy) row.el = policy.el; }
       else {
         const d = describe(guide.elements[row.index]);
         row.done = !M.isEmptyValue(d);
