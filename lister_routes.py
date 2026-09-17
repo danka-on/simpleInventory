@@ -685,6 +685,13 @@ class Lister:
                 checked_at TEXT NOT NULL
             )
         ''')
+        cur.execute('PRAGMA table_info(lister_amazon_checks)')
+        have = {r[1] for r in cur.fetchall()}
+        if 'detail' not in have:
+            cur.execute('ALTER TABLE lister_amazon_checks ADD COLUMN detail TEXT')
+            # Rows written before the per-condition parse counted collectible_* / refurbished
+            # gating as a block, so their verdicts cannot be trusted: re-check on next sight.
+            cur.execute("DELETE FROM lister_amazon_checks WHERE status IN ('listable', 'restricted')")
         # AI title / description written for a unit (preload or a click), reused by the fill instead of regenerating.
         cur.execute('''
             CREATE TABLE IF NOT EXISTS lister_generated (
@@ -1943,13 +1950,21 @@ class Lister:
         out = {}
         for r in cur.fetchall():
             r = _row(r)
+            detail = _loads(r.get('detail'), {}) or {}
             out[r['base_upc']] = {'status': r['status'], 'asin': r.get('asin') or '', 'title': r.get('title') or '', 'brand': r.get('brand') or '',
                                   'reasons': _loads(r.get('reasons'), []), 'error': r.get('error') or '', 'conditionType': r.get('condition_type') or '',
+                                  'blockedConditions': detail.get('blockedConditions') or [], 'openConditions': detail.get('openConditions') or [],
+                                  'approvalOnly': bool(detail.get('approvalOnly')), 'links': detail.get('links') or [],
                                   'checkedAt': r.get('checked_at') or ''}
         return out
 
     def amazon_check(self, upc, *, force=False, condition_type=''):
-        """status: listable | restricted | no_asin | unavailable | error. Cached for a week per catalog UPC."""
+        """status: listable | partial | approval | restricted | no_asin | unavailable | error.
+
+        Only the conditions Sweet Shelves sells in count: Amazon answers a condition-less check with a
+        row per condition it knows (collectible_*, refurbished, club), and those used to read as gating.
+        Cached for a week per catalog UPC.
+        """
         upc = self.format_upc12(upc)
         base = _base_upc(upc)
         if not base:
@@ -1957,14 +1972,15 @@ class Lister:
         with self.db('listagent.db') as conn:
             cur = conn.cursor()
             cached = self._amazon_checks(cur, [base]).get(base)
-        if cached and not force and cached['status'] in ('listable', 'restricted', 'no_asin'):
+        if cached and not force and cached['status'] in ('listable', 'partial', 'approval', 'restricted', 'no_asin'):
             stamp = _order_key(cached['checkedAt'])
             fresh = _order_key((datetime.datetime.now() - datetime.timedelta(days=self.AMAZON_CHECK_TTL_DAYS)).isoformat(timespec='seconds'))
             if stamp >= fresh and (not condition_type or cached['conditionType'] == condition_type):
                 return {**cached, 'cached': True}
         if not self.amazon_catalog_view or not self.amazon_restriction_view:
             raise ListerError('The Amazon catalog check is not available on this server.', 501)
-        result = {'asin': '', 'title': '', 'brand': '', 'status': 'error', 'reasons': [], 'error': '', 'conditionType': condition_type}
+        result = {'asin': '', 'title': '', 'brand': '', 'status': 'error', 'reasons': [], 'error': '', 'conditionType': condition_type,
+                  'blockedConditions': [], 'openConditions': [], 'approvalOnly': False, 'links': []}
         search = self._call_view(self.amazon_catalog_view, '/api/listingagent/amazon/catalog_search', {'upc': base, 'mode': 'upc', 'limit': 3})
         if not search.get('success'):
             error = _text(search.get('error'), 300)
@@ -1987,22 +2003,36 @@ class Lister:
                     restriction = check.get('restriction') or {}
                     reasons = [_text(r if isinstance(r, str) else (r.get('message') or r.get('reasonCode') or json.dumps(r)), 300) for r in (restriction.get('reasons') or [])]
                     result['reasons'] = [r for r in reasons if r]
+                    blocked = [_text(c, 40) for c in (restriction.get('blockedConditions') or []) if _text(c)]
+                    open_conditions = [_text(c, 40) for c in (restriction.get('openConditions') or []) if _text(c)]
+                    result['blockedConditions'] = blocked
+                    result['openConditions'] = open_conditions
+                    result['approvalOnly'] = bool(restriction.get('approvalOnly'))
+                    result['links'] = [_text(u, 300) for u in (restriction.get('links') or [])][:3]
                     if not restriction.get('checked'):
                         result['status'] = 'error'
                         result['error'] = _text(check.get('warning'), 300) or 'restriction check did not complete'
+                    elif restriction.get('restricted'):
+                        # Blocked in every condition we sell in. Approval-only is a door we can knock on.
+                        result['status'] = 'approval' if result['approvalOnly'] else 'restricted'
+                    elif blocked:
+                        # Some conditions are gated but others are open: listable, with a caveat.
+                        result['status'] = 'partial'
                     else:
-                        result['status'] = 'restricted' if restriction.get('restricted') else 'listable'
+                        result['status'] = 'listable'
         result['checkedAt'] = _now()
         with self.db('listagent.db') as conn:
             cur = conn.cursor()
             self.init_tables(cur)
-            cur.execute('''INSERT INTO lister_amazon_checks (base_upc, asin, title, brand, status, reasons, error, condition_type, checked_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            detail = json.dumps({'blockedConditions': result['blockedConditions'], 'openConditions': result['openConditions'],
+                                 'approvalOnly': result['approvalOnly'], 'links': result['links']})
+            cur.execute('''INSERT INTO lister_amazon_checks (base_upc, asin, title, brand, status, reasons, error, condition_type, detail, checked_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                            ON CONFLICT(base_upc) DO UPDATE SET asin = excluded.asin, title = excluded.title, brand = excluded.brand,
                                status = excluded.status, reasons = excluded.reasons, error = excluded.error,
-                               condition_type = excluded.condition_type, checked_at = excluded.checked_at''',
+                               condition_type = excluded.condition_type, detail = excluded.detail, checked_at = excluded.checked_at''',
                         (base, result['asin'] or None, result['title'] or None, result['brand'] or None, result['status'],
-                         json.dumps(result['reasons']), result['error'] or None, condition_type or None, result['checkedAt']))
+                         json.dumps(result['reasons']), result['error'] or None, condition_type or None, detail, result['checkedAt']))
             conn.commit()
         return {**result, 'cached': False}
 

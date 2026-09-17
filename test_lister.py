@@ -712,6 +712,66 @@ class ListerTestCase(unittest.TestCase):
         self.amazon['search'] = {'success': False, 'error': 'Amazon SP-API not available'}
         self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/amazon-check', json={'force': True}).get_json()['check']['status'], 'unavailable')
 
+    def test_amazon_restrictions_are_judged_only_against_the_conditions_we_sell_in(self):
+        """A condition-less check answers for every condition Amazon knows, including ones we never use."""
+        from sweetshelves.amazon_listing import _amazon_summarize_restrictions as summarize
+        cannot = [{'reasonCode': 'NOT_ELIGIBLE', 'message': 'You cannot list the product in this condition.'}]
+        gated = [{'reasonCode': 'APPROVAL_REQUIRED', 'message': 'You need approval to list in this brand.',
+                  'links': [{'resource': 'https://sellercentral.amazon.com/apply'}]}]
+
+        # Real B0DGMVJJLJ payload: only collectible_* / refurbished are blocked, so nothing is.
+        out = summarize({'restrictions': [{'conditionType': c, 'reasons': cannot} for c in
+                                          ('collectible_like_new', 'collectible_very_good', 'collectible_acceptable',
+                                           'collectible_good', 'refurbished_refurbished')]})
+        self.assertEqual((out['restricted'], out['blockedConditions'], out['reasons']), (False, [], []))
+        self.assertEqual(len(out['openConditions']), 5)
+        self.assertEqual(out['ignoredConditions'][0], 'collectible_acceptable')
+
+        # Every condition we sell in is gated, but only for approval: a door we can knock on.
+        out = summarize({'restrictions': [{'conditionType': c, 'reasons': gated} for c in
+                                          ('new_new', 'used_like_new', 'used_very_good',
+                                           'used_good', 'used_acceptable')]})
+        self.assertEqual((out['restricted'], out['approvalOnly'], out['openConditions']), (True, True, []))
+        self.assertEqual(out['reasons'], ['APPROVAL_REQUIRED: You need approval to list in this brand.'],
+                         'the same reason repeated per condition collapses to one')
+        self.assertEqual(out['links'], ['https://sellercentral.amazon.com/apply'])
+
+        # Used is closed and new is not mentioned: silence is not permission, so nothing reads as open.
+        out = summarize({'restrictions': [{'conditionType': c, 'reasons': cannot} for c in
+                                          ('used_good', 'used_acceptable')]})
+        self.assertEqual((out['restricted'], out['blockedConditions'], out['openConditions']),
+                         (True, ['used_good', 'used_acceptable'], []))
+
+        # Used is closed and new is explicitly clear: listable as new, with the caveat carried.
+        out = summarize({'restrictions': [{'conditionType': 'new_new', 'reasons': []},
+                                          {'conditionType': 'used_good', 'reasons': cannot},
+                                          {'conditionType': 'used_acceptable', 'reasons': cannot}]})
+        self.assertEqual((out['restricted'], out['blockedConditions'], out['openConditions']),
+                         (False, ['used_good', 'used_acceptable'], ['new_new']))
+
+        # A named condition is the whole answer: Amazon already filtered.
+        out = summarize({'restrictions': [{'conditionType': 'used_good', 'reasons': cannot}]}, condition_type='used_good')
+        self.assertEqual((out['restricted'], out['approvalOnly'], list(out['conditions'])), (True, False, ['used_good']))
+
+    def test_amazon_check_status_separates_approval_from_a_hard_no(self):
+        def verdict(restriction, upc=UPC):
+            self.amazon['restriction'] = {'success': True, 'restriction': restriction}
+            return self.client.post(f'/api/lister/queue/{upc}/amazon-check', json={'force': True}).get_json()['check']
+
+        check = verdict({'checked': True, 'restricted': True, 'approvalOnly': True,
+                         'reasons': [{'message': 'You need approval to list in this brand.'}],
+                         'blockedConditions': ['used_good'], 'openConditions': []})
+        self.assertEqual(check['status'], 'approval')
+
+        check = verdict({'checked': True, 'restricted': False, 'blockedConditions': ['used_acceptable'],
+                         'openConditions': ['new_new', 'used_good']})
+        self.assertEqual((check['status'], check['blockedConditions']), ('partial', ['used_acceptable']))
+        row = self.client.get('/api/lister/queue?platform=amazon').get_json()['items'][0]
+        self.assertEqual(row['amazonCheck']['openConditions'], ['new_new', 'used_good'], 'the caveat survives the cache')
+
+        self.assertEqual(verdict({'checked': True, 'restricted': False, 'openConditions': ['new_new']})['status'], 'listable')
+        self.assertEqual(verdict({'checked': False, 'restricted': False})['status'], 'error')
+
     def test_queue_rows_carry_the_prep_status(self):
         with closing(sqlite3.connect(self.root / 'bol.db')) as conn:
             conn.execute('CREATE TABLE items_prep_status (id INTEGER PRIMARY KEY, upc TEXT, lot_number TEXT, status TEXT, reason TEXT, note TEXT, updated_at TEXT, quantity INTEGER)')

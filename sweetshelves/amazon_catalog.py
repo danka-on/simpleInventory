@@ -605,7 +605,12 @@ def api_listingagent_amazon_restriction_check():
             'restriction': {
                 'checked': bool(info.get('checked')),
                 'restricted': bool(info.get('restricted')),
-                'reasons': (info.get('reasons') or [])[:12]
+                'approvalOnly': bool(info.get('approvalOnly')),
+                'reasons': (info.get('reasons') or [])[:12],
+                'links': (info.get('links') or [])[:6],
+                'blockedConditions': info.get('blockedConditions') or [],
+                'openConditions': info.get('openConditions') or [],
+                'conditions': info.get('conditions') or {}
             },
             'cached': bool(info.get('_cached')),
             'warning': warning

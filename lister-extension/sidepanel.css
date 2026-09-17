@@ -65,6 +65,7 @@ h3 .grow { flex: 1; }
 .chip.bad { background: var(--red-bg); color: var(--red); }
 .chip.info { background: var(--blue-bg); color: var(--blue); }
 .chip.warn { background: var(--amber-bg); color: var(--amber); }
+.chip .dim { opacity: .7; font-weight: 400; }
 .chip a { color: inherit; }
 .chips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
 .chips code { background: var(--chip); padding: 2px 6px; border-radius: 6px; font-size: 11px; }

@@ -294,6 +294,28 @@
     if (open) { renderListed(); void loadListed(); }
   }
 
+  // Amazon answers a condition-less restriction check with a row per condition it knows, including
+  // collectible_* / refurbished, which we never sell. The server now judges only our own conditions;
+  // these turn its verdict into something readable on the row.
+  const CONDITION_LABEL = {
+    new_new: 'new', new_open_box: 'open box', used_like_new: 'like new',
+    used_very_good: 'very good', used_good: 'good', used_acceptable: 'acceptable',
+  };
+  const conditionLabel = (c) => CONDITION_LABEL[c] || String(c || '').replace(/_/g, ' ');
+
+  function amazonCheckWhy(ac) {
+    if (!ac) return '';
+    const parts = [];
+    if (ac.asin) parts.push('ASIN ' + ac.asin);
+    const blocked = (ac.blockedConditions || []).map(conditionLabel);
+    const open = (ac.openConditions || []).map(conditionLabel);
+    if (blocked.length) parts.push('blocked in: ' + blocked.join(', '));
+    if (open.length && blocked.length) parts.push('open in: ' + open.join(', '));
+    const reasons = (ac.reasons || []).filter(Boolean);
+    if (reasons.length) parts.push([...new Set(reasons)].join(' · '));
+    return parts.join(' — ');
+  }
+
   // Can Amazon take each queued UPC from us? One check at a time; the row shows the result.
   async function runAmazonChecks() {
     if (state.amazonRunning) return;
@@ -1389,10 +1411,12 @@
       }
       const ac = state.platform === 'amazon' ? it.amazonCheck : null;
       if (state.platform === 'amazon' && state.checkingAmazon.has(it.baseUpc)) chips.push('<span class="chip checking"><span class="spin"></span> Amazon check</span>');
-      else if (ac?.status === 'restricted') chips.push(`<span class="chip bad" title="${esc((ac.reasons || []).join(' · ') || 'Amazon restricts this listing for us')}">Amazon ✕ restricted</span>`);
+      else if (ac?.status === 'restricted') chips.push(`<span class="chip bad" title="${esc(amazonCheckWhy(ac) || 'Amazon restricts this listing for us')}">Amazon ✕ restricted</span>`);
+      else if (ac?.status === 'approval') chips.push(`<span class="chip warn" title="${esc(amazonCheckWhy(ac) || 'Amazon needs to approve us for this')}">Amazon ⚠ needs approval</span>`);
+      else if (ac?.status === 'partial') chips.push(`<span class="chip ok" title="${esc(amazonCheckWhy(ac))}">Amazon ✓ <span class="dim">(${esc((ac.openConditions || []).map(conditionLabel).join(', '))})</span></span>`);
       else if (ac?.status === 'no_asin') chips.push('<span class="chip warn" title="No ASIN for this UPC: Amazon has no product page to list against">not in Amazon catalog</span>');
       else if (ac?.status === 'listable') chips.push(`<span class="chip ok" title="ASIN ${esc(ac.asin)}${ac.brand ? ' · ' + esc(ac.brand) : ''}">Amazon ✓</span>`);
-      else if (ac && ac.status !== 'listable') chips.push(`<span class="chip" title="${esc(ac.error || 'check failed')}">Amazon ?</span>`);
+      else if (ac) chips.push(`<span class="chip" title="${esc(ac.error || 'check failed')}">Amazon ?</span>`);
       const upcHtml = it.suffixed ? `${esc(it.baseUpc)}-<b class="suffix" title="Specific unit: the SKU keeps the -suffix">${esc(it.upc.split('-')[1])}</b>` : esc(it.upc);
       return `<div class="item ${it.upc === state.currentUpc ? 'current' : ''} ${first ? 'first' : ''} ${it.status === 'listed' ? 'listed' : ''} ${ac?.status === 'restricted' ? 'restricted' : ''}" data-upc="${esc(it.upc)}" title="${esc(it.title)} (double-click to start on ${esc(storeName(state.platform))})">
         ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}

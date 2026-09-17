@@ -317,6 +317,104 @@ def _amazon_restriction_error_hints(restriction_info, marketplace_id):
     return hints
 
 
+# Conditions Sweet Shelves ever lists in. Asking Amazon without a conditionType returns a
+# restriction row for EVERY condition it knows, including collectible_* / refurbished /
+# club, which we never sell - counting those made plainly listable items read "restricted".
+# getListingsRestrictions only ever enumerates these five of ours: it has no new_open_box row
+# (an explicit query for it comes back empty, which is silence, not permission).
+AMAZON_SELLABLE_CONDITIONS = (
+    'new_new',
+    'used_like_new',
+    'used_very_good',
+    'used_good',
+    'used_acceptable',
+)
+
+# APPROVAL_REQUIRED is a door we can knock on; the rest are closed for this ASIN.
+_AMAZON_APPROVAL_CODES = ('APPROVAL_REQUIRED',)
+
+
+def _amazon_summarize_restrictions(payload, condition_type=''):
+    """Turn a getListingsRestrictions payload into a per-condition verdict.
+
+    Only the conditions we actually sell in count towards `restricted`. When the caller named
+    a conditionType, Amazon already filtered and that single condition is the whole answer.
+    """
+    wanted = [(condition_type or '').strip().lower()] if (condition_type or '').strip() else list(AMAZON_SELLABLE_CONDITIONS)
+    conditions = {}
+    for c in wanted:
+        conditions[c] = {'restricted': False, 'approvalOnly': False, 'reasons': [], 'codes': []}
+    other = {}
+
+    for r in ((payload or {}).get('restrictions') or []):
+        if not isinstance(r, dict):
+            continue
+        cond = (r.get('conditionType') or r.get('condition_type') or '').strip().lower()
+        rr = [x for x in (r.get('reasons') or []) if isinstance(x, dict)]
+        if not rr:
+            continue
+        codes, texts, links = [], [], []
+        for reason in rr:
+            code = (reason.get('reasonCode') or reason.get('reason_code') or '').strip().upper()
+            msg = (reason.get('message') or '').strip()
+            if code:
+                codes.append(code)
+            txt = f"{code}: {msg}".strip(': ').strip()
+            if txt:
+                texts.append(txt)
+            for link in (reason.get('links') or []):
+                if isinstance(link, dict) and link.get('resource'):
+                    links.append(link['resource'])
+        entry = {
+            'restricted': True,
+            'approvalOnly': bool(codes) and all(c in _AMAZON_APPROVAL_CODES for c in codes),
+            'reasons': texts,
+            'codes': codes,
+            'links': links,
+        }
+        # An entry with no conditionType applies to everything we asked about.
+        targets = list(conditions.keys()) if not cond else ([cond] if cond in conditions else [])
+        if targets:
+            for t in targets:
+                conditions[t] = entry if cond else dict(entry)
+        else:
+            other[cond] = entry
+
+    # A condition Amazon left out of a per-condition answer is unknown, not allowed: only call it
+    # open when Amazon is silent about our conditions altogether (nothing of ours is gated).
+    enumerated = {(r.get('conditionType') or r.get('condition_type') or '').strip().lower()
+                  for r in ((payload or {}).get('restrictions') or []) if isinstance(r, dict)}
+    known = [c for c in conditions if c in enumerated] if (enumerated & set(conditions)) else list(conditions)
+    blocked = [c for c in known if conditions[c]['restricted']]
+    open_conditions = [c for c in known if not conditions[c]['restricted']]
+    restricted = bool(known) and not open_conditions
+    approval_only = bool(blocked) and all(conditions[c]['approvalOnly'] for c in blocked)
+
+    reasons, seen = [], set()
+    for c in blocked:
+        for txt in conditions[c]['reasons']:
+            if txt not in seen:
+                seen.add(txt)
+                reasons.append(txt)
+    links, seen_links = [], set()
+    for c in blocked:
+        for url in conditions[c].get('links') or []:
+            if url not in seen_links:
+                seen_links.add(url)
+                links.append(url)
+
+    return {
+        'restricted': restricted,
+        'approvalOnly': approval_only,
+        'reasons': reasons[:12],
+        'links': links[:6],
+        'conditions': conditions,
+        'blockedConditions': blocked,
+        'openConditions': open_conditions,
+        'ignoredConditions': sorted(other.keys()),
+    }
+
+
 def _amazon_check_listing_restrictions(credentials, marketplace, seller_id, marketplace_id, asin, condition_type=''):
     """
     Best-effort check for Amazon gated/restricted listings.
@@ -440,34 +538,16 @@ def _amazon_check_listing_restrictions(credentials, marketplace, seller_id, mark
             out['raw'] = raw_out
             return out
 
-        out['checked'] = True
         if getattr(resp, 'errors', None):
-            # If API returns errors, keep checked=True but don't force restricted.
+            # The API answered with errors, so we learned nothing: leave checked False
+            # rather than letting a failed call read as "not restricted".
             out['raw'] = {'errors': resp.errors, 'call_attempts': debug_attempts[-12:]}
             return out
 
+        out['checked'] = True
         payload = getattr(resp, 'payload', None) or {}
         out['raw'] = {'payload': payload, 'call_attempts': debug_attempts[-12:]}
-        restrictions = payload.get('restrictions') or []
-        reasons = []
-        restricted = False
-        if isinstance(restrictions, list):
-            for r in restrictions:
-                if not isinstance(r, dict):
-                    continue
-                rr = r.get('reasons') or []
-                if isinstance(rr, list) and rr:
-                    restricted = True
-                    for reason in rr:
-                        if not isinstance(reason, dict):
-                            continue
-                        code = (reason.get('reasonCode') or reason.get('reason_code') or '').strip()
-                        msg = (reason.get('message') or '').strip()
-                        txt = f"{code}: {msg}".strip(': ').strip()
-                        if txt:
-                            reasons.append(txt)
-        out['restricted'] = bool(restricted)
-        out['reasons'] = reasons[:12]
+        out.update(_amazon_summarize_restrictions(payload, condition_type=cond))
         return out
     except Exception as e:
         out['raw'] = {'error': str(e)}
