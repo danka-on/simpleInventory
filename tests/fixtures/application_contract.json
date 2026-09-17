@@ -6068,6 +6068,30 @@
       "defaults": null,
       "strict_slashes": true,
       "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/stats",
+      "endpoint": "api_lister_stats",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/lister-stats",
+      "endpoint": "lister_stats_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
     }
   ],
   "hooks": {

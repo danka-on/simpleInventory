@@ -2179,4 +2179,6 @@ def register(app, deps):
     app.add_url_rule('/api/lister/links/<int:link_id>', 'api_lister_link_delete', api_lister_link_delete, methods=['DELETE'])
     app.add_url_rule('/api/lister/resolve', 'api_lister_resolve', api_lister_resolve)
     app.add_url_rule('/api/lister/events', 'api_lister_events', api_lister_events, methods=['POST'])
+    import lister_stats
+    lister_stats.register(app, lister)
     return lister
