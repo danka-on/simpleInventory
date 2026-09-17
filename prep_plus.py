@@ -140,7 +140,7 @@ class PrepPlus:
         variants = [value for value in (self.upc_variants(upc) or []) if value] or [upc.lower()]
         tried = []
         for source, label, database, queries in IDENTITY_SOURCES:
-            result = 'no match'
+            answered = False
             for query in queries:
                 try:
                     with self.db(database) as conn:
@@ -155,11 +155,15 @@ class PrepPlus:
                             return jsonify(success=True, found=True, source=source, label=label,
                                            title=title, image_url=str(row['image'] or '').strip(),
                                            tried=tried)
+                    answered = True
                 except Exception:
-                    # A table or database this install does not have is not an answer.
-                    result = 'unavailable'
+                    # A table or database this install does not have is not an answer. Only
+                    # when none of a source's tables could be read has the source failed:
+                    # an install without the legacy table still got a real answer from the
+                    # current one, and saying "unavailable" there would be a lie.
                     continue
-            tried.append({'source': source, 'label': label, 'result': result})
+            tried.append({'source': source, 'label': label,
+                          'result': 'no match' if answered else 'unavailable'})
         return jsonify(success=True, found=False, tried=tried)
 
     # ---- storage ---------------------------------------------------------

@@ -242,6 +242,12 @@ class PrepPlusTests(unittest.TestCase):
         self.assertEqual([row for row in found['tried'] if row['source'] == 'ebay_store'][0]['result'],
                          'unavailable')
 
+    def test_a_missing_legacy_table_does_not_mask_a_real_no_match(self):
+        # The Pi has amazonStore ITEMS but no INVENTORY; that is a clean miss, not a failure.
+        self.stock(macy='MENS SHIRT BLU LG')
+        amazon = [row for row in self.identify()['tried'] if row['source'] == 'amazon_store'][0]
+        self.assertEqual(amazon['result'], 'no match')
+
     def test_identify_needs_a_barcode(self):
         response = self.client.get('/api/prep-plus/identify?upc=')
         self.assertEqual(response.status_code, 400)
