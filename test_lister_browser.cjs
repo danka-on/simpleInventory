@@ -459,6 +459,17 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     });
     await store.waitForFunction(() => window.photoNames && window.photoNames.length === 1 && window.photoNames[0] === 'own.jpg', null, { timeout: 15000 });
 
+    // The AI photoshop prompt: typing in it stays on this item, "Save for all" makes it the default.
+    await panel.click('details:has(#aiPrompt) summary');
+    await panel.$eval('#aiPrompt', el => { el.value = 'Just this one.'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+    assert.equal(await panel.$eval('#aiPromptWhere', el => el.textContent), 'this item only');
+    await panel.click('#aiPromptSave');
+    await panel.waitForFunction(() => document.getElementById('aiPromptWhere').textContent === 'saved for all items', null, { timeout: 10000 });
+    assert.equal(await panel.$eval('#aiPrompt', el => el.value), 'Just this one.', 'the saved prompt stays in the box');
+    await panel.click('#aiPromptReset');
+    await panel.waitForFunction(() => document.getElementById('aiPromptWhere').textContent === 'the default prompt', null, { timeout: 10000 });
+    assert.equal(await panel.$eval('#aiPrompt', el => el.value), 'Clean up this product photo.', 'reset goes back to the default prompt');
+
     // Nothing ticked: by default only AI generated photos go, and never a too-small one.
     await panel.click('#photoSelectAll');  // clears the tick
     await panel.waitForFunction(() => !document.querySelector('.photo.selected'));

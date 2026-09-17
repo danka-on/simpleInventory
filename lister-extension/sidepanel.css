@@ -215,14 +215,12 @@ button.act:disabled { opacity: .45; box-shadow: none; }
 button.act .spin { border-color: rgba(255,255,255,.4); border-top-color: #fff; }
 /* the notes live on a yellow sticky */
 .sticky { background: #fff8c5; border: 1px solid #ecd97a; border-radius: 10px; padding: 8px 10px 10px; margin-top: 12px; box-shadow: 2px 3px 10px rgba(0,0,0,.10); position: relative; }
-.sticky::after { content: ""; position: absolute; right: 0; top: 0; border-style: solid; border-width: 0 18px 18px 0; border-color: var(--card) #e6cf5a #e6cf5a var(--card); border-radius: 0 10px 0 0; }
 .sticky h3 { margin-top: 0; color: #7a5b00; }
 .sticky h3 .muted { color: #9a7b1a; }
 .sticky .note2 { background: rgba(255,255,255,.6); color: #3b2f00; }
 .sticky .note2 .lt { color: #6b5a1f; }
 .sticky .note2 .en { color: #2a2200; }
 :root[data-theme="dark"] .sticky { background: #3a3110; border-color: #6b5a1f; }
-:root[data-theme="dark"] .sticky::after { border-color: var(--card) #7a6a2a #7a6a2a var(--card); }
 :root[data-theme="dark"] .sticky h3 { color: #f5e17a; }
 :root[data-theme="dark"] .sticky h3 .muted { color: #cdb85a; }
 :root[data-theme="dark"] .sticky .note2 { background: rgba(0,0,0,.18); color: #f8f1c8; }
@@ -275,9 +273,14 @@ label.sw .txt { display: flex; flex-direction: column; min-width: 0; line-height
 label.sw .txt b { font-size: 13px; font-weight: 600; }
 label.sw .txt small { font-size: 11px; color: var(--muted); }
 .photo.too-small img { opacity: .55; }
-/* Already put into the store page: greyed out, but still selectable and draggable again. */
-.photo.used img { opacity: .4; filter: grayscale(1); }
+/* Already put into the store page: the whole card greys out, but stays selectable and draggable again. */
+.photo.used { background: var(--chip); border-color: var(--line); }
+.photo.used img { opacity: .3; filter: grayscale(1); }
+.photo.used::after { content: ''; position: absolute; inset: 0; background: rgba(100, 116, 139, .32); pointer-events: none; }
+.photo.used .tag, .photo.used input { position: absolute; z-index: 1; }
+.photo.used .tag:not(.used) { opacity: .5; filter: grayscale(1); }
 .photo.used .tag.used { background: #475569; top: 3px; right: 3px; bottom: auto; left: auto; }
+:root[data-theme="dark"] .photo.used::after { background: rgba(15, 23, 42, .45); }
 label.check.small { font-size: 12px; margin: 0; }
 /* locked on a listing page: the item view takes over */
 .lock { display: none; align-items: center; gap: 8px; margin: 8px 8px 0; padding: 8px 12px; border-radius: 12px; background: var(--green); color: var(--green-ink); font-weight: 600; }

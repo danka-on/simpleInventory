@@ -42,7 +42,7 @@
     platform: 'ebay', view: 'list', filter: '', items: [], counts: {}, currentUpc: null, details: {}, edits: {},
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
-    guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', titlePrompt: '', savedTitlePrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
+    guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', promptDraft: null, titlePrompt: '', savedTitlePrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
     voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
@@ -1163,10 +1163,15 @@
     await sendPhotoUrls(info, urls);
   }
 
+  // The prompt box: this item's unsaved edit if there is one, else the prompt saved for all items
+  // (state.aiPrompt, persisted by "Save for all"), else the server's default.
+  function promptFor(info) {
+    const draft = state.promptDraft && state.promptDraft.upc === info.upc ? state.promptDraft.text : null;
+    return ((draft ?? state.aiPrompt) || '').trim() || info.aiPhotoPrompt || '';
+  }
+
   async function aiPhotoshopUrls(info, urls) {
-    const prompt = ($('aiPrompt')?.value || state.aiPrompt || '').trim();
-    state.aiPrompt = prompt && prompt !== info.aiPhotoPrompt ? prompt : '';
-    remember();
+    const prompt = promptFor(info).trim();
     let done = 0;
     const release = busy('AI photoshop…');
     for (const url of urls) {
@@ -1407,7 +1412,7 @@
         const again = state.lastItemClick && state.lastItemClick.upc === el.dataset.upc && now - state.lastItemClick.at < 450;
         state.lastItemClick = again ? null : { upc: el.dataset.upc, at: now };
         if (again) { void startOn(state.platform); return; }
-        state.currentUpc = el.dataset.upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); remember();
+        state.currentUpc = el.dataset.upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); state.promptDraft = null; remember();
         renderItems(); renderDetail(); renderConfirm();
         void loadDetail(state.currentUpc).then(() => maybeAssist());
         void preloadItem(state.currentUpc);
@@ -1511,7 +1516,9 @@
         <button id="aiPhotos" class="act ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '✨ AI photoshop'}</button>
       </div>
       ${autoMenu('photos')}
-      <details ${state.aiPrompt ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(state.aiPrompt || info.aiPhotoPrompt || '')}</textarea><button id="aiPromptReset" class="mini" type="button">Reset to default</button></details>
+      <details id="aiPromptBox" ${state.promptOpen || state.aiPrompt || state.promptDraft?.upc === info.upc ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(promptFor(info))}</textarea>
+        <div class="row tight"><button id="aiPromptSave" class="mini" type="button" title="Keep this prompt for every item and every session">Save for all sessions</button><button id="aiPromptReset" class="mini" type="button" title="Back to the default prompt for every item">Reset to default</button>
+        <span class="muted small" id="aiPromptWhere">${state.promptDraft?.upc === info.upc ? 'this item only' : (state.aiPrompt ? 'saved for all items' : 'the default prompt')}</span></div></details>
       <details ${state.titlePrompt ? 'open' : ''}><summary>AI title prompt${state.titlePrompt ? (state.titlePrompt === state.savedTitlePrompt ? ' <span class="muted">(saved)</span>' : ' <span class="muted">(this session)</span>') : ''}</summary>
         <textarea id="titlePrompt" rows="3" placeholder="Extra instructions for the AI title, e.g. always put the size at the end">${esc(state.titlePrompt)}</textarea>
         <div class="row tight"><button id="titlePromptSave" class="mini" type="button" title="Keep this prompt for every session, on every item">Save for all sessions</button><button id="titlePromptReset" class="mini" type="button" title="Back to the built-in title prompt">Reset to default</button></div>
@@ -1566,7 +1573,18 @@
     $('sendPhotos').onclick = () => sendPhotos();
     $('aiPhotos').onclick = () => aiPhotoshop();
     wireAutoMenu('photos');
-    $('aiPromptReset').onclick = () => { $('aiPrompt').value = info.aiPhotoPrompt || ''; state.aiPrompt = ''; remember(); };
+    $('aiPromptBox').ontoggle = () => { state.promptOpen = $('aiPromptBox').open; };  // stays open across re-renders once opened
+    $('aiPrompt').oninput = () => {
+      state.promptDraft = { upc: info.upc, text: $('aiPrompt').value };
+      $('aiPromptWhere').textContent = 'this item only';
+    };
+    $('aiPromptSave').onclick = () => {
+      const text = ($('aiPrompt').value || '').trim();
+      state.aiPrompt = text === (info.aiPhotoPrompt || '') ? '' : text;
+      state.promptDraft = null; remember(); renderDetail();
+      toast(state.aiPrompt ? 'Photoshop prompt saved for every item and session' : 'Prompt back to the default for every item');
+    };
+    $('aiPromptReset').onclick = () => { state.aiPrompt = ''; state.promptDraft = null; remember(); renderDetail(); };
     $('titlePrompt').oninput = () => { state.titlePrompt = $('titlePrompt').value; };
     $('titlePromptSave').onclick = async () => {
       state.titlePrompt = $('titlePrompt').value.trim();
