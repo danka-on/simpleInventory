@@ -40,6 +40,7 @@ from . import listing_queue as ss_listing_queue
 from . import listing_settings as ss_listing_settings
 from . import mail_center as ss_mail_center
 from . import marketplace_sales as ss_marketplace_sales
+from . import normalization as ss_normalization
 from . import pages as ss_pages
 from . import payouts as ss_payouts
 from . import pnl as ss_pnl
@@ -649,6 +650,11 @@ def register_routes():
         'api_listingagent_amazon_catalog_search': ss_amazon_catalog.api_listingagent_amazon_catalog_search,
         'api_listingagent_amazon_restriction_check': ss_amazon_catalog.api_listingagent_amazon_restriction_check,
         'update_data_version': ss_caching.update_data_version,
+        # "+ NEW": an item that is on no BOL yet, described from the phone and submitted from the panel.
+        '_listagent_add_to_queue': ss_listing_queue._listagent_add_to_queue,
+        '_add_item_screening_lookup': ss_warehouse_receiving._add_item_screening_lookup,
+        '_ensure_custom_item_registry': ss_warehouse_receiving._ensure_custom_item_registry,
+        '_normalize_upc': ss_normalization._normalize_upc,
         # "+ Photo link": Telegram the phone camera page instead of scanning the QR code.
         '_telegram_send_message': ss_telegram._telegram_send_message,
         '_telegram_collect_recipient_rows': ss_telegram._telegram_collect_recipient_rows,

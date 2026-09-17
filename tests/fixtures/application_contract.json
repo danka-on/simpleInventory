@@ -5978,6 +5978,32 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/lister/queue/<upc>/preload",
+      "endpoint": "api_lister_queue_preload",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/preload",
+      "endpoint": "api_lister_preload_all",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/lister/queue/<upc>/amazon-check",
       "endpoint": "api_lister_queue_amazon_check",
       "methods": [
@@ -6040,6 +6066,28 @@
         "GET",
         "HEAD",
         "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/photo-link",
+      "endpoint": "api_lister_photo_link",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/photo-link/opened",
+      "endpoint": "api_lister_photo_link_opened",
+      "methods": [
+        "OPTIONS",
+        "POST"
       ],
       "defaults": null,
       "strict_slashes": true,
@@ -6177,6 +6225,165 @@
     {
       "rule": "/api/lister/events",
       "endpoint": "api_lister_events",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new",
+      "endpoint": "api_lister_new_create",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new",
+      "endpoint": "api_lister_new_list",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/<int:draft_id>",
+      "endpoint": "api_lister_new_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/<int:draft_id>/link",
+      "endpoint": "api_lister_new_link",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/<int:draft_id>/barcode",
+      "endpoint": "api_lister_new_barcode",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/<int:draft_id>/fields",
+      "endpoint": "api_lister_new_fields",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/<int:draft_id>/photos/<int:photo_id>",
+      "endpoint": "api_lister_new_photo",
+      "methods": [
+        "DELETE",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/<int:draft_id>/submit",
+      "endpoint": "api_lister_new_submit",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/<int:draft_id>/cancel",
+      "endpoint": "api_lister_new_cancel",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/items-to-list/new-item/<token>",
+      "endpoint": "lister_new_item_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/t/<token>",
+      "endpoint": "api_lister_new_phone_get",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/t/<token>/step",
+      "endpoint": "api_lister_new_phone_step",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/t/<token>/photos",
+      "endpoint": "api_lister_new_phone_photos",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/new/t/<token>/opened",
+      "endpoint": "api_lister_new_phone_opened",
       "methods": [
         "OPTIONS",
         "POST"

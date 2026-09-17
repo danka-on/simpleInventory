@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>New item</title>
+<style>
+  :root {
+    --bg: #0b1220; --card: #141c2b; --line: #26324a; --ink: #eef2f8; --muted: #9fb0c9;
+    --accent: #2f81f7; --good: #22c55e; --bad: #f87171;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg); color: var(--ink); font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom));
+  }
+  .wrap { max-width: 560px; margin: 0 auto; padding-top: 18px; }
+
+  .steps { display: flex; gap: 8px; margin-bottom: 18px; }
+  .steps i {
+    flex: 1; height: 4px; border-radius: 999px; background: var(--line); font-style: normal;
+  }
+  .steps i.on { background: var(--accent); }
+  .steps i.done { background: var(--good); }
+
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+
+  textarea {
+    width: 100%; min-height: 96px; resize: vertical; background: #0d1522; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 12px; padding: 12px; font: inherit;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .mic {
+    width: 100%; margin-top: 12px; border: 0; border-radius: 14px; padding: 18px; font: 600 17px/1 inherit;
+    background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; gap: 10px;
+  }
+  .mic[data-state="listening"] { background: var(--bad); animation: pulse 1.1s ease-in-out infinite; }
+  .mic[data-state="working"] { background: #475569; }
+  .mic:disabled { opacity: .6; }
+  @keyframes pulse { 50% { transform: scale(.985); filter: brightness(1.15); } }
+
+  .row { display: flex; gap: 10px; margin-top: 14px; }
+  .row button { flex: 1; border-radius: 14px; padding: 16px; border: 1px solid var(--line); font: 600 16px/1 inherit;
+    background: #1b2537; color: var(--ink); }
+  .row button.go { background: var(--good); border-color: transparent; color: #04120a; }
+  .row button:disabled { opacity: .45; }
+
+  .status { min-height: 20px; margin-top: 10px; font-size: 14px; color: var(--muted); }
+  .status[data-tone="bad"] { color: var(--bad); }
+  .status[data-tone="ok"] { color: var(--good); }
+
+  .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; margin-top: 14px; }
+  .shots img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
+
+  /* The camera is the page on step three: on a phone the viewfinder should not be a thumbnail. */
+  .live { position: fixed; inset: 0; background: #000; display: none; z-index: 40; }
+  .live.on { display: block; }
+  .live video { width: 100%; height: 100%; object-fit: cover; }
+  .liveTop { position: absolute; top: 0; left: 0; right: 0; padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
+    display: flex; align-items: flex-start; gap: 12px; color: #fff; background: linear-gradient(#000a, #0000); }
+  .liveTop .who { flex: 1; font-size: 14px; }
+  .liveBtn { background: #ffffff22; color: #fff; border: 0; border-radius: 12px; padding: 10px 14px; font: 600 15px/1 inherit; }
+  .liveBtn:disabled { opacity: .4; }
+  .liveBar { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom));
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; background: linear-gradient(#0000, #000a); }
+  .liveShots { display: flex; gap: 6px; }
+  .liveShots img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; border: 2px solid #fff6; }
+  .shutter { width: 74px; height: 74px; border-radius: 50%; border: 5px solid #fff; background: #ffffff33; }
+  .shutter:disabled { opacity: .5; }
+  .liveNote { position: absolute; left: 0; right: 0; bottom: 130px; text-align: center; color: #fff; font-size: 14px;
+    text-shadow: 0 1px 4px #000; }
+  .liveDone { text-align: right; }
+
+  .gate { position: fixed; inset: 0; display: none; place-items: center; background: #000; color: #fff; z-index: 41; text-align: center; padding: 24px; }
+  .gate.on { display: grid; }
+  .gate .ring { width: 108px; height: 108px; border-radius: 50%; border: 4px solid #fff; display: grid; place-items: center;
+    font-size: 42px; margin: 0 auto 16px; }
+
+  .done { text-align: center; padding: 32px 8px; }
+  .done .tick { font-size: 56px; color: var(--good); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="steps" id="steps"><i data-step="title"></i><i data-step="details"></i><i data-step="photos"></i></div>
+
+  <section id="stepTitle" hidden>
+    <h1>What is it?</h1>
+    <p class="sub">Say the brand, the item, the size and the colour.</p>
+    <div class="card">
+      <textarea id="titleInput" placeholder="Tap the microphone, or type it" autocapitalize="sentences" spellcheck="true"></textarea>
+      <button id="titleMic" class="mic" type="button" data-state="idle">🎤 <span id="titleMicLabel">Tap and say the name</span></button>
+      <div class="status" id="titleStatus"></div>
+      <div class="row"><button id="titleNext" class="go" type="button" disabled>Next</button></div>
+    </div>
+  </section>
+
+  <section id="stepDetails" hidden>
+    <h1>Anything to say about it?</h1>
+    <p class="sub">Condition, what is in the box, marks and damage. Skip if there is nothing.</p>
+    <div class="card">
+      <textarea id="detailsInput" placeholder="Tap the microphone, or type it" autocapitalize="sentences" spellcheck="true"></textarea>
+      <button id="detailsMic" class="mic" type="button" data-state="idle">🎤 <span id="detailsMicLabel">Tap and say the details</span></button>
+      <div class="status" id="detailsStatus"></div>
+      <div class="row">
+        <button id="detailsBack" type="button">Back</button>
+        <button id="detailsNext" class="go" type="button">Next</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="stepPhotos" hidden>
+    <h1>Photos</h1>
+    <p class="sub" id="photosSub">Every side, the label, and anything that is wrong with it.</p>
+    <div class="card">
+      <div class="row">
+        <button id="photoOpen" class="go" type="button">📷 Open the camera</button>
+      </div>
+      <input id="photoInput" type="file" accept="image/*" capture="environment" multiple hidden>
+      <div class="status" id="photoStatus"></div>
+      <div class="shots" id="photoGrid"></div>
+      <div class="row"><button id="photoFinish" type="button" disabled>Done</button></div>
+    </div>
+  </section>
+
+  <section id="stepDone" class="done" hidden>
+    <div class="tick">✓</div>
+    <h1>Sent</h1>
+    <p class="sub" id="doneLine">It is on the Lister now.</p>
+    <div class="row"><button id="doneMore" type="button">Add more photos</button></div>
+  </section>
+</div>
+
+<div class="live" id="live">
+  <video id="liveVideo" playsinline autoplay muted></video>
+  <div class="liveTop">
+    <div class="who" id="liveWho"></div>
+    <button id="liveClose" class="liveBtn" type="button" aria-label="Close the camera">×</button>
+  </div>
+  <div class="liveNote" id="liveNote"></div>
+  <div class="liveBar">
+    <div class="liveShots" id="liveShots"></div>
+    <button id="liveShutter" class="shutter" type="button" aria-label="Take a photo"></button>
+    <div class="liveDone"><button id="liveDone" class="liveBtn" type="button" disabled>Done</button></div>
+  </div>
+</div>
+
+<div class="gate" id="gate" role="button" tabindex="0">
+  <div>
+    <div class="ring">📷</div>
+    <div>Tap to take a photo</div>
+  </div>
+</div>
+
+<script>
+  const TOKEN = {{ (token or '')|tojson }};
+  const START_STEP = {{ (step or '')|tojson }};
+  const $ = id => document.getElementById(id);
+  const api = path => '/api/lister/new/t/' + encodeURIComponent(TOKEN) + path;
+
+  let draft = null;
+  let step = 'title';
+  const pending = [];
+
+  function setStatus(id, message, tone) {
+    const el = $(id);
+    el.textContent = message || '';
+    el.dataset.tone = tone || '';
+  }
+
+  function show(next) {
+    step = next;
+    for (const [name, section] of Object.entries({ title: 'stepTitle', details: 'stepDetails', photos: 'stepPhotos', done: 'stepDone' })) {
+      $(section).hidden = name !== next;
+    }
+    const order = ['title', 'details', 'photos'];
+    const at = order.indexOf(next);
+    $('steps').hidden = next === 'done';
+    for (const bar of $('steps').children) {
+      const index = order.indexOf(bar.dataset.step);
+      bar.className = index < at ? 'done' : (index === at ? 'on' : '');
+    }
+    if (next === 'photos') openCamera();
+  }
+
+  async function send(path, options, failure) {
+    const response = await fetch(api(path), options);
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) throw new Error(result.error || failure);
+    if (result.draft) draft = result.draft;
+    return result;
+  }
+
+  const post = (path, body) => send(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  }, 'That did not save. Try again.');
+
+  // ---- Dictation -------------------------------------------------------
+  // Same route the receiving screens use: record, stop on a pause, let the server write it down.
+
+  const DICTATION = {
+    title: { field: 'titleInput', button: 'titleMic', label: 'titleMicLabel', status: 'titleStatus', kind: 'name',
+             maxMs: 15000, quietMs: 1300, idle: 'Tap and say the name', done: 'Check it, then Next.' },
+    details: { field: 'detailsInput', button: 'detailsMic', label: 'detailsMicLabel', status: 'detailsStatus', kind: 'note',
+               maxMs: 60000, quietMs: 2000, idle: 'Tap and say the details', done: 'Check it, then Next.' },
+  };
+  let recording = null;
+
+  function micState(which, state) {
+    const config = DICTATION[which];
+    const button = $(config.button);
+    button.dataset.state = state;
+    button.disabled = state === 'working';
+    $(config.label).textContent = state === 'listening' ? 'Listening — tap to stop'
+      : state === 'working' ? 'Writing it down…' : config.idle;
+  }
+
+  async function toggleMic(which) {
+    if (recording && recording.which === which) { stopMic(); return; }
+    if (recording) return;
+    const config = DICTATION[which];
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      setStatus(config.status, 'This browser cannot record. Type it instead.', 'bad');
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (error) {
+      setStatus(config.status, 'The microphone is blocked. Type it instead.', 'bad');
+      return;
+    }
+    const type = ['audio/webm', 'audio/mp4', 'audio/ogg'].find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+    const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+    const chunks = [];
+    recording = { which, recorder, stream, chunks, stopping: false };
+    recorder.ondataavailable = event => { if (event.data && event.data.size) chunks.push(event.data); };
+    recorder.onstop = () => transcribe(which, chunks, type);
+    recorder.start();
+    micState(which, 'listening');
+    setStatus(config.status, 'Say it, then tap the microphone again.');
+    recording.timer = setTimeout(stopMic, config.maxMs);
+    watchForPause(recording, config);
+  }
+
+  // Stop on a pause, so nobody has to remember to tap twice.
+  function watchForPause(session, config) {
+    let context;
+    try {
+      context = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (error) { return; }
+    const source = context.createMediaStreamSource(session.stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let spoke = false, quietSince = 0;
+    session.audio = context;
+    const tick = () => {
+      if (!recording || recording !== session || session.stopping) { try { context.close(); } catch (e) {} return; }
+      analyser.getByteTimeDomainData(data);
+      let peak = 0;
+      for (const value of data) peak = Math.max(peak, Math.abs(value - 128));
+      if (peak > 6) { spoke = true; quietSince = 0; }
+      else if (spoke) {
+        quietSince = quietSince || Date.now();
+        if (Date.now() - quietSince > config.quietMs) { stopMic(); return; }
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+
+  function stopMic() {
+    const session = recording;
+    if (!session || session.stopping) return;
+    session.stopping = true;
+    clearTimeout(session.timer);
+    micState(session.which, 'working');
+    try { session.recorder.stop(); } catch (error) {}
+  }
+
+  async function transcribe(which, chunks, type) {
+    const session = recording;
+    recording = null;
+    try { (session.stream.getTracks() || []).forEach(track => track.stop()); } catch (error) {}
+    try { session.audio && session.audio.close(); } catch (error) {}
+    const config = DICTATION[which];
+    if (!chunks.length) { micState(which, 'idle'); setStatus(config.status, 'Nothing was recorded. Try again.', 'bad'); return; }
+    const blob = new Blob(chunks, { type: type || 'audio/webm' });
+    const form = new FormData();
+    form.append('audio', blob, 'dictation.' + ((type || 'audio/webm').includes('mp4') ? 'm4a' : 'webm'));
+    form.append('kind', config.kind);
+    try {
+      const response = await fetch('/api/warehouse/name-dictation', { method: 'POST', body: form });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.success) throw new Error(result.error || 'Dictation failed. Type it instead.');
+      const field = $(config.field);
+      field.value = field.value.trim() ? (field.value.trim() + ' ' + result.text) : result.text;
+      field.dispatchEvent(new Event('input'));
+      setStatus(config.status, config.done, 'ok');
+    } catch (error) {
+      setStatus(config.status, error.message, 'bad');
+    }
+    micState(which, 'idle');
+  }
+
+  // ---- Camera ----------------------------------------------------------
+
+  let stream = null, capture = null, shooting = false;
+
+  function liveOn(on) {
+    $('live').classList.toggle('on', !!on);
+    try { document.body.style.overflow = on ? 'hidden' : ''; } catch (error) {}
+  }
+
+  function stopCamera() {
+    try { (stream ? stream.getTracks() : []).forEach(track => track.stop()); } catch (error) {}
+    stream = null; capture = null;
+    $('liveVideo').srcObject = null;
+    liveOn(false);
+  }
+
+  // No tap first: getUserMedia asks once, and after that the viewfinder is live as the page paints.
+  // A refusal is ordinary (denied, old browser) and falls through to the tap target.
+  async function openCamera() {
+    if (stream) { liveOn(true); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { armGate(); return; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 } }, audio: false,
+      });
+    } catch (error) { stream = null; armGate(); return; }
+    const video = $('liveVideo');
+    video.srcObject = stream;
+    try { await video.play(); } catch (error) {}
+    try {
+      const track = stream.getVideoTracks()[0];
+      if (window.ImageCapture && track) capture = new ImageCapture(track);
+    } catch (error) { capture = null; }
+    $('liveWho').textContent = (draft && draft.title) || 'New item';
+    renderLive();
+    liveOn(true);
+  }
+
+  function armGate() {
+    const gate = $('gate');
+    gate.classList.add('on');
+    const fire = event => {
+      if (event && event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+      if (event) event.preventDefault();
+      gate.classList.remove('on');
+      $('photoInput').click();
+    };
+    gate.onclick = fire;
+    gate.onkeydown = fire;
+    try { gate.focus({ preventScroll: true }); } catch (error) {}
+  }
+
+  function renderLive() {
+    const strip = $('liveShots');
+    strip.innerHTML = '';
+    for (const shot of pending.slice(-3)) {
+      const img = document.createElement('img');
+      img.src = shot.url;
+      strip.appendChild(img);
+    }
+    const done = $('liveDone');
+    done.disabled = !pending.length;
+    done.textContent = pending.length ? 'Done (' + pending.length + ')' : 'Done';
+    $('liveNote').textContent = pending.length ? '' : 'Point at the item and press the shutter';
+    renderGrid();
+  }
+
+  function renderGrid() {
+    const grid = $('photoGrid');
+    grid.innerHTML = '';
+    const saved = (draft && draft.photos) || [];
+    for (const photo of saved) {
+      const img = document.createElement('img');
+      img.src = photo.markedUrl || photo.url;
+      grid.appendChild(img);
+    }
+    for (const shot of pending) {
+      const img = document.createElement('img');
+      img.src = shot.url;
+      img.style.opacity = '.55';
+      grid.appendChild(img);
+    }
+    $('photoFinish').disabled = !(pending.length || saved.length);
+    $('photoFinish').textContent = pending.length ? 'Send ' + pending.length + ' photo' + (pending.length === 1 ? '' : 's') : 'Done';
+  }
+
+  // ImageCapture hands back whatever the camera produces, and a 4K PNG is a painful thing to push
+  // up a phone connection. Re-encode at full resolution rather than shrink or ship PNG.
+  async function asJpeg(blob) {
+    if ((blob.type || '').includes('jpeg')) return blob;
+    try {
+      const bitmap = await createImageBitmap(blob);
+      const canvas = document.createElement('canvas');
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext('2d').drawImage(bitmap, 0, 0);
+      try { bitmap.close(); } catch (error) {}
+      return await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92)) || blob;
+    } catch (error) { return blob; }
+  }
+
+  function addFiles(files) {
+    for (const file of Array.from(files || [])) {
+      if (!file || !String(file.type || '').startsWith('image/')) continue;
+      pending.push({ file, url: URL.createObjectURL(file) });
+    }
+    renderLive();
+  }
+
+  async function shoot() {
+    if (shooting || !stream) return;
+    shooting = true;
+    $('liveShutter').disabled = true;
+    try {
+      let blob = null;
+      if (capture) { try { blob = await capture.takePhoto(); } catch (error) { blob = null; } }
+      if (!blob) {
+        const video = $('liveVideo');
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 960;
+        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      }
+      if (!blob) throw new Error('the camera returned nothing');
+      blob = await asJpeg(blob);
+      const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14);
+      addFiles([new File([blob], 'phone-' + stamp + '.jpg', { type: 'image/jpeg' })]);
+    } catch (error) {
+      $('liveNote').textContent = 'Could not take that photo: ' + error.message;
+    } finally {
+      shooting = false;
+      $('liveShutter').disabled = false;
+    }
+  }
+
+  async function upload() {
+    if (!pending.length) return true;
+    const count = pending.length;
+    setStatus('photoStatus', 'Sending ' + count + ' photo' + (count === 1 ? '' : 's') + '…');
+    $('photoFinish').disabled = true;
+    try {
+      const form = new FormData();
+      for (const shot of pending) form.append('photos[]', shot.file, shot.file.name || 'photo.jpg');
+      await send('/photos', { method: 'POST', body: form }, 'The photos did not send. Try again.');
+      while (pending.length) { const shot = pending.pop(); try { URL.revokeObjectURL(shot.url); } catch (error) {} }
+      setStatus('photoStatus', 'Sent.', 'ok');
+      renderGrid();
+      return true;
+    } catch (error) {
+      setStatus('photoStatus', error.message, 'bad');
+      $('photoFinish').disabled = false;
+      return false;
+    }
+  }
+
+  // ---- Wiring ----------------------------------------------------------
+
+  $('titleMic').onclick = () => toggleMic('title');
+  $('detailsMic').onclick = () => toggleMic('details');
+  $('titleInput').oninput = () => { $('titleNext').disabled = !$('titleInput').value.trim(); };
+  $('titleNext').onclick = async () => {
+    $('titleNext').disabled = true;
+    try {
+      await post('/step', { title: $('titleInput').value, stage: 'details' });
+      show('details');
+    } catch (error) {
+      setStatus('titleStatus', error.message, 'bad');
+      $('titleNext').disabled = false;
+    }
+  };
+  $('detailsBack').onclick = () => show('title');
+  $('detailsNext').onclick = async () => {
+    $('detailsNext').disabled = true;
+    try {
+      await post('/step', { description: $('detailsInput').value, stage: 'photos' });
+      show('photos');
+    } catch (error) {
+      setStatus('detailsStatus', error.message, 'bad');
+    }
+    $('detailsNext').disabled = false;
+  };
+  $('photoOpen').onclick = openCamera;
+  $('photoInput').onchange = event => { addFiles(event.target.files); event.target.value = ''; };
+  $('photoFinish').onclick = async () => { if (await upload()) show('done'); };
+  $('liveShutter').onclick = shoot;
+  $('liveClose').onclick = stopCamera;
+  $('liveDone').onclick = async () => { stopCamera(); if (await upload()) show('done'); };
+  $('doneMore').onclick = () => show('photos');
+  window.addEventListener('pagehide', stopCamera);
+
+  (async () => {
+    try {
+      const result = await fetch(api('')).then(r => r.json());
+      if (!result.success) throw new Error(result.error || 'This link is no longer good.');
+      draft = result.draft;
+    } catch (error) {
+      document.querySelector('.wrap').innerHTML =
+        '<h1>This link is finished</h1><p class="sub">' + String(error.message || '') + '</p>';
+      return;
+    }
+    $('titleInput').value = draft.title || '';
+    $('detailsInput').value = draft.description || '';
+    $('titleNext').disabled = !$('titleInput').value.trim();
+    $('liveWho').textContent = draft.title || 'New item';
+    if (draft.title) $('photosSub').textContent = draft.title;
+    renderGrid();
+    // The message said which step to open on; the draft's own state overrules it, so a link opened
+    // late lands where the work actually is.
+    const wanted = ['title', 'details', 'photos'].includes(START_STEP) ? START_STEP : '';
+    show(draft.status !== 'draft' ? 'done' : (wanted || draft.stage || 'title'));
+
+    // Best effort and deliberately unawaited: a bot message left in the chat is a nuisance, not a
+    // reason to hold up the camera.
+    try {
+      fetch(api('/opened'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true })
+        .catch(() => {});
+    } catch (error) {}
+  })();
+</script>
+</body>
+</html>

@@ -1724,11 +1724,9 @@ class Lister:
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
         }
 
-    def photo_link(self, upc, *, base_url='http://localhost/'):
-        """Telegram the phone camera page for this unit — the QR code without the scanning."""
-        upc = _text(upc)
-        if not upc:
-            raise ListerError('upc is required')
+    def send_link(self, *, key, token, url, text):
+        """Telegram one link to every enabled chat and remember the messages it made, so that opening
+        the link — or replacing it with a different one — can take those messages back down again."""
         if not callable(self.telegram_send) or not callable(self.telegram_recipients):
             raise ListerError('Telegram is not wired up on this server.', 501)
         try:
@@ -1749,12 +1747,6 @@ class Lister:
             targets.append({'chatId': chat_id, 'name': _text((row or {}).get('display_name')) or chat_id})
         if not targets:
             raise ListerError('No enabled Telegram recipients. Add one on the Telegram page first.', 400)
-
-        token = secrets.token_urlsafe(9)
-        url = mobile_photos_url(upc, base_url, back=False, token=token)
-        title = self._photo_link_title(upc)
-        # Nothing but the icon, the name and the link: the message is read on a lock screen.
-        text = '\U0001F4F7 ' + (title or ('UPC ' + upc)) + '\n' + url
 
         sent, errors, delivered = [], [], []
         for target in targets:
@@ -1781,14 +1773,27 @@ class Lister:
                     cur.executemany(
                         'INSERT OR REPLACE INTO lister_photo_links (token, chat_id, message_id, upc, created_at, opened_at) '
                         'VALUES (?, ?, ?, ?, ?, NULL)',
-                        [(token, chat_id, message_id, upc, _now()) for chat_id, message_id in delivered])
+                        [(token, chat_id, message_id, _text(key), _now()) for chat_id, message_id in delivered])
                     conn.commit()
             except Exception:
                 # A link that cannot be cleaned up later still has to reach the phone.
                 pass
         if not sent:
             raise ListerError('Telegram refused the message: ' + (errors[0]['error'] if errors else 'unknown error'), 502)
-        return {'url': url, 'sent': sent, 'errors': errors}
+        return {'token': token, 'url': url, 'sent': sent, 'errors': errors}
+
+    def photo_link(self, upc, *, base_url='http://localhost/'):
+        """Telegram the phone camera page for this unit — the QR code without the scanning."""
+        upc = _text(upc)
+        if not upc:
+            raise ListerError('upc is required')
+        token = secrets.token_urlsafe(9)
+        url = mobile_photos_url(upc, base_url, back=False, token=token)
+        title = self._photo_link_title(upc)
+        # Nothing but the icon, the name and the link: the message is read on a lock screen.
+        text = '\U0001F4F7 ' + (title or ('UPC ' + upc)) + '\n' + url
+        result = self.send_link(key=upc, token=token, url=url, text=text)
+        return {'url': url, 'sent': result['sent'], 'errors': result['errors']}
 
     def _photo_link_title(self, upc):
         """What to call this unit in a chat message: the proposal title, else the BOL line."""
@@ -2921,6 +2926,8 @@ def register(app, deps):
     app.add_url_rule('/api/lister/links/<int:link_id>', 'api_lister_link_delete', api_lister_link_delete, methods=['DELETE'])
     app.add_url_rule('/api/lister/resolve', 'api_lister_resolve', api_lister_resolve)
     app.add_url_rule('/api/lister/events', 'api_lister_events', api_lister_events, methods=['POST'])
+    import lister_new_item
+    lister_new_item.register(app, lister, deps)
     import lister_stats
     lister_stats.register(app, lister)
     return lister
