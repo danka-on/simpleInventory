@@ -57,16 +57,19 @@
   function describe(el) {
     const tag = el.tagName.toLowerCase();
     const contenteditable = el.isContentEditable && tag !== 'input' && tag !== 'textarea';
+    // A Katal field's wording lives on the host element, not on the <input> inside its shadow root.
+    const host = shadowHost(el);
+    const attr = name => clip(el.getAttribute(name) || (host ? host.getAttribute(name) : '') || '');
     return {
       tag,
       type: tag === 'input' ? (el.getAttribute('type') || 'text').toLowerCase() : '',
-      name: el.getAttribute('name') || '',
-      id: el.id || '',
-      ariaLabel: clip(el.getAttribute('aria-label') || ''),
-      placeholder: clip(el.getAttribute('placeholder') || ''),
+      name: el.getAttribute('name') || (host ? host.getAttribute('name') : '') || '',
+      id: el.id || (host ? host.id : '') || '',
+      ariaLabel: attr('aria-label') || attr('label'),
+      placeholder: attr('placeholder'),
       role: el.getAttribute('role') || '',
-      labelText: labelTextFor(el),
-      nearbyText: nearbyText(el),
+      labelText: labelTextFor(el) || (host ? labelTextFor(host) : ''),
+      nearbyText: nearbyText(el) || (host ? nearbyText(host) : ''),
       maxLength: el.maxLength > 0 ? el.maxLength : 0,
       contenteditable,
       required: Boolean(el.required),
@@ -97,16 +100,61 @@
     return docs;
   }
 
+  // Seller Central is built from Katal custom elements (kat-input, kat-button) that keep the real
+  // <input>/<button> in an open shadow root, so nothing is found by querying the document alone.
+  function shadowRootsUnder(node, out, depth) {
+    if (depth > 8) return out;
+    let nodes;
+    try { nodes = node.querySelectorAll('*'); } catch { return out; }
+    for (const el of nodes) {
+      const shadow = el.shadowRoot;
+      if (!shadow) continue;
+      out.push(shadow);
+      shadowRootsUnder(shadow, out, depth + 1);
+    }
+    return out;
+  }
+
+  // Walking every element is not free, so the list is reused for a moment (the guide re-reads often).
+  let rootsCache = { at: 0, roots: null };
+  function roots() {
+    if (rootsCache.roots && Date.now() - rootsCache.at < 750) return rootsCache.roots;
+    const out = [];
+    for (const doc of documents()) {
+      out.push(doc);
+      shadowRootsUnder(doc, out, 0);
+    }
+    rootsCache = { at: Date.now(), roots: out };
+    return out;
+  }
+
+  function deepQuery(selector, scope) {
+    const out = [];
+    const bases = scope ? [scope, ...shadowRootsUnder(scope, [], 0)] : roots();
+    for (const base of bases) {
+      try { for (const el of base.querySelectorAll(selector)) out.push(el); } catch { /* detached */ }
+    }
+    return out;
+  }
+
+  // The custom element a shadow-DOM field belongs to: it carries the label, placeholder and id.
+  function shadowHost(el) {
+    try {
+      const node = el.getRootNode();
+      return node && node.host ? node.host : null;
+    } catch {
+      return null;
+    }
+  }
+
   function collect() {
     const elements = [];
-    for (const doc of documents()) {
-      for (const el of doc.querySelectorAll(FIELD_SELECTOR)) {
-        if (el.disabled || el.readOnly) continue;
-        const type = (el.getAttribute('type') || '').toLowerCase();
-        if (['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image'].includes(type)) continue;
-        if (!isVisible(el)) continue;
-        elements.push(el);
-      }
+    for (const el of deepQuery(FIELD_SELECTOR)) {
+      if (el.disabled || el.readOnly) continue;
+      const type = (el.getAttribute('type') || '').toLowerCase();
+      if (['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image'].includes(type)) continue;
+      if (!isVisible(el)) continue;
+      elements.push(el);
     }
     return elements;
   }
@@ -117,9 +165,10 @@
     try { el.focus({ preventScroll: true }); } catch { el.focus(); }
     if (descriptor && descriptor.set) descriptor.set.call(el, value);
     else el.value = value;
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+    // composed: true so a Katal host outside the shadow root hears its own input.
+    el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, composed: true }));
   }
 
   function setContentEditable(el, html, text) {
@@ -279,24 +328,44 @@
 
   // The search button next to the box, when it is usable. Seller Central keeps its "Next" button
   // disabled until React has processed our typing, so this is re-run until one answers.
+  function buttonDisabled(b) {
+    if (b.disabled || b.getAttribute('aria-disabled') === 'true' || b.hasAttribute('disabled')) return true;
+    const host = shadowHost(b);
+    return Boolean(host && (host.hasAttribute('disabled') || host.getAttribute('aria-disabled') === 'true'));
+  }
+
   function searchButton(el) {
-    const form = el.form || el.closest('form');
-    const doc = ownDocument(el);
-    const scope = form || el.closest('[class*="search" i], [class*="prelist" i], section, main') || doc.body;
+    // An anchor in the page's own tree: `closest` and document order stop at a shadow boundary.
+    const anchor = shadowHost(el) || el;
+    const form = el.form || anchor.closest('form');
+    const doc = ownDocument(anchor);
+    const scope = form || anchor.closest('[class*="search" i], [class*="prelist" i], section, main') || doc.body;
     // The submit button comes AFTER the box in the page: Seller Central also has a "Search" tab tile before it.
-    const candidates = Array.from(scope.querySelectorAll('button, input[type=submit], [role=button]')).filter(b => {
-      if (!isVisible(b) || b.disabled || b.getAttribute('aria-disabled') === 'true') return false;
-      const text = M.normalize((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.value || ''));
-      return /^(search|get started|continue|find|go|next|submit|search now)$/.test(text) || /search|get started/.test(text);
+    const candidates = deepQuery('button, input[type=submit], [role=button], kat-button', scope).filter(b => {
+      if (!isVisible(b) || buttonDisabled(b)) return false;
+      const host = shadowHost(b);
+      // Each wording on its own: a Katal button repeats its label on the host, and "next next"
+      // would not match the exact list.
+      const texts = [b.textContent, b.getAttribute('aria-label'), b.getAttribute('label'), b.value,
+        host && host.getAttribute('label'), host && host.getAttribute('aria-label')]
+        .map(text => M.normalize(text || '')).filter(Boolean);
+      return texts.some(text => /^(search|get started|continue|find|go|next|submit|search now)$/.test(text) || /search|get started/.test(text));
     });
-    return candidates.find(b => el.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) || candidates[0] || null;
+    // When a custom element and the real <button> inside it both match, click the real one:
+    // the host has no default action of its own (Katal listens on the inner button).
+    const inner = candidates.filter(b => !candidates.some(other => other !== b && shadowHost(other) === b));
+    const after = inner.filter(b => {
+      const target = shadowHost(b) || b;
+      return anchor.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING;
+    });
+    return after[0] || inner[0] || null;
   }
 
   // Enter first (some pages submit on it), then the button as soon as the page enables it.
   function submitSearch(el, done) {
     const form = el.form || el.closest('form');
     for (const type of ['keydown', 'keypress', 'keyup']) {
-      el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true, composed: true }));
     }
     const started = Date.now();
     const attempt = () => {
@@ -349,8 +418,8 @@
 
   function fileInputs() {
     const out = [];
-    for (const doc of documents()) {
-      for (const el of doc.querySelectorAll('input[type=file]')) {
+    {
+      for (const el of deepQuery('input[type=file]')) {
         if (el.disabled) continue;
         const accept = (el.getAttribute('accept') || '').toLowerCase();
         if (accept && !/image|jpg|jpeg|png|\*/.test(accept)) continue;

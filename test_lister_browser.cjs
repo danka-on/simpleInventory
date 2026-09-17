@@ -87,10 +87,37 @@ document.getElementById('photos').addEventListener('change', e => { window.photo
 const amazonStart = `<!doctype html><title>Search products</title><h1>Search products</h1>
 <div role="tablist"><button type="button">Search</button><button type="button">Product image</button><button type="button">Product IDs</button></div>
 <section><p>Search your catalog or Amazon's catalog for a listing (or a variation) to sell or copy.</p>
-<input id="kw" placeholder="Product name, UPC, EAN, ISBN or ASIN"><button id="go" type="button" disabled>Next</button></section>
-<script>const kw = document.getElementById('kw'), go = document.getElementById('go');
-kw.addEventListener('input', () => { setTimeout(() => { go.disabled = !kw.value; }, 700); });
-go.addEventListener('click', () => { location.href = 'https://sellercentral.amazon.com/listing/results?q=' + encodeURIComponent(kw.value); });</script>`;
+<kat-input id="kw" placeholder="Product name, UPC, EAN, ISBN or ASIN"></kat-input><kat-button id="go" label="Next" disabled></kat-button></section>
+<script>
+// Katal keeps the real input/button inside an open shadow root, and only the host carries the
+// placeholder / label / disabled state - the same shape Seller Central serves.
+class KatInput extends HTMLElement {
+  connectedCallback() {
+    if (this.shadowRoot) return;
+    const shadow = this.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<input part="input">';
+    this.input = shadow.querySelector('input');
+    this.input.addEventListener('input', () => {
+      const go = document.getElementById('go');
+      setTimeout(() => { if (this.input.value) go.removeAttribute('disabled'); else go.setAttribute('disabled', ''); }, 700);
+    });
+  }
+  get value() { return this.input ? this.input.value : ''; }
+}
+class KatButton extends HTMLElement {
+  connectedCallback() {
+    if (this.shadowRoot) return;
+    const shadow = this.attachShadow({ mode: 'open' });
+    shadow.innerHTML = '<button type="button">' + (this.getAttribute('label') || '') + '</button>';
+    shadow.querySelector('button').addEventListener('click', () => {
+      if (this.hasAttribute('disabled')) return;  // the host gates the click, as Katal does
+      location.href = 'https://sellercentral.amazon.com/listing/results?q=' + encodeURIComponent(document.getElementById('kw').value);
+    });
+  }
+}
+customElements.define('kat-input', KatInput);
+customElements.define('kat-button', KatButton);
+</script>`;
 
 const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1>Congratulations! Your item is listed.</h1>
 <p>Item number: 335566778899</p><a href="https://www.ebay.com/itm/335566778899">View listing</a>`;
