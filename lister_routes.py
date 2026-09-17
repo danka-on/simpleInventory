@@ -23,9 +23,11 @@ import threading
 import time
 from pathlib import Path
 
+from urllib.parse import quote
+
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.21'
+VERSION = '0.2.34'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -127,6 +129,13 @@ def _absolute(url, base_url):
     if value.startswith('/'):
         return base_url.rstrip('/') + value
     return value
+
+
+def mobile_photos_url(upc, base_url, *, camera=True):
+    """The phone camera page for one unit. camera=1 makes it open the camera on the first tap
+    instead of showing a file picker the user has to find (the QR and the Telegram link share it)."""
+    url = (base_url or '').rstrip('/') + '/items-to-list/mobile-photos?upc=' + quote(_text(upc), safe='') + '&return=%2Fitems-to-list'
+    return url + '&camera=1' if camera else url
 
 
 def _base_upc(upc):
@@ -608,6 +617,9 @@ class Lister:
         self.amazon_catalog_view = deps.get('api_listingagent_amazon_catalog_search')
         self.amazon_restriction_view = deps.get('api_listingagent_amazon_restriction_check')
         self.bump_data_version = deps.get('update_data_version')
+        # Telegram (optional): "+ Photo link" sends the phone camera page to the configured chats.
+        self.telegram_send = deps.get('_telegram_send_message')
+        self.telegram_recipients = deps.get('_telegram_collect_recipient_rows')
         self.base_dir = deps.get('BASE_DIR')
         self.static_folder = Path(static_folder)
         self.feed_dir = self.static_folder / 'lister'
@@ -1676,9 +1688,66 @@ class Lister:
             'gate': gate,
             'preload': self.preload_status(upc),
             'preparing': self._job_state(upc),
-            'mobilePhotosUrl': base_url.rstrip('/') + '/items-to-list/mobile-photos?upc=' + upc + '&return=%2Fitems-to-list',
+            'mobilePhotosUrl': mobile_photos_url(upc, base_url),
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
         }
+
+    def photo_link(self, upc, *, base_url='http://localhost/'):
+        """Telegram the phone camera page for this unit — the QR code without the scanning."""
+        upc = _text(upc)
+        if not upc:
+            raise ListerError('upc is required')
+        if not callable(self.telegram_send) or not callable(self.telegram_recipients):
+            raise ListerError('Telegram is not wired up on this server.', 501)
+        try:
+            rows = self.telegram_recipients() or []
+        except Exception as e:
+            raise ListerError('Could not read the Telegram recipients: ' + str(e), 500)
+
+        targets, seen = [], set()
+        for row in rows:
+            try:
+                chat_id = _text((row or {}).get('chat_id'))
+                enabled = int((row or {}).get('enabled') or 0) == 1
+            except Exception:
+                continue
+            if not chat_id or not enabled or chat_id in seen:
+                continue
+            seen.add(chat_id)
+            targets.append({'chatId': chat_id, 'name': _text((row or {}).get('display_name')) or chat_id})
+        if not targets:
+            raise ListerError('No enabled Telegram recipients. Add one on the Telegram page first.', 400)
+
+        url = mobile_photos_url(upc, base_url)
+        title = ''
+        try:
+            with self.db('bol.db') as conn:
+                row = conn.execute('SELECT item_description FROM bol_items WHERE upc = ? COLLATE NOCASE '
+                                   'ORDER BY import_date DESC, id DESC LIMIT 1', (_base_upc(upc),)).fetchone()
+            title = _text((_row(row) or {}).get('item_description'), 120)
+        except Exception:
+            title = ''
+        text = '\n'.join(filter(None, [
+            '\U0001F4F7 Photos for ' + (title or ('UPC ' + upc)),
+            ('UPC ' + upc) if title else '',
+            url,
+            'Opens straight into the camera. Shoot, then press Complete.',
+        ]))
+
+        sent, errors = [], []
+        for target in targets:
+            try:
+                # disable_notification=False: the phone should buzz, that is the point of the button.
+                ok, result = self.telegram_send(target['chatId'], text, disable_notification=False)
+            except Exception as e:
+                ok, result = False, str(e)
+            if ok:
+                sent.append(target['name'])
+            else:
+                errors.append({'chatId': target['chatId'], 'error': _text(result, 200)})
+        if not sent:
+            raise ListerError('Telegram refused the message: ' + (errors[0]['error'] if errors else 'unknown error'), 502)
+        return {'url': url, 'sent': sent, 'errors': errors}
 
     def prepare(self, upc, *, base_url='http://localhost/', force=False, actor='lister'):
         """Build the Listing Agent proposal (title, price, category, specifics, description) in the background."""
@@ -2677,6 +2746,15 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:photo-fetch')
 
+    def api_lister_photo_link():
+        try:
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            result = lister.photo_link(_text(data.get('upc')), base_url=base_url())
+            return jsonify({'success': True, **result})
+        except Exception as e:
+            return failure(e, 'lister:photo-link')
+
     def api_lister_qr():
         text = _text(request.args.get('text'), 1000)
         if not text:
@@ -2711,6 +2789,7 @@ def register(app, deps):
     app.add_url_rule('/api/lister/photos/ai', 'api_lister_photo_ai', api_lister_photo_ai, methods=['POST'])
     app.add_url_rule('/api/lister/photos/fetch', 'api_lister_photo_fetch', api_lister_photo_fetch)
     app.add_url_rule('/api/lister/qr', 'api_lister_qr', api_lister_qr)
+    app.add_url_rule('/api/lister/photo-link', 'api_lister_photo_link', api_lister_photo_link, methods=['POST'])
     app.add_url_rule('/api/lister/ledger', 'api_lister_ledger', api_lister_ledger)
     app.add_url_rule('/lister-ledger', 'lister_ledger_page', lister_ledger_page)
 

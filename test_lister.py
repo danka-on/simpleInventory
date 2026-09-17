@@ -71,7 +71,20 @@ class ListerTestCase(unittest.TestCase):
             self.amazon_calls.append(('restriction', dict(flask_request.args)))
             return jsonify(self.amazon['restriction'])
 
+        # Telegram stand-in for "+ Photo link": one enabled chat, one switched off.
+        self.telegram_rows = [{'chat_id': '111', 'display_name': 'Danka', 'enabled': 1},
+                              {'chat_id': '111', 'display_name': 'Danka (backups)', 'enabled': 1},
+                              {'chat_id': '222', 'display_name': 'Off', 'enabled': 0}]
+        self.telegram_sent = []
+        self.telegram_result = (True, {'message_id': 7})
+
+        def fake_telegram_send(chat_id, text, disable_notification=True):
+            self.telegram_sent.append((chat_id, text, disable_notification))
+            return self.telegram_result
+
         self.lister = lister_routes.register(self.app, {
+            '_telegram_send_message': fake_telegram_send,
+            '_telegram_collect_recipient_rows': lambda: self.telegram_rows,
             'api_listingagent_amazon_catalog_search': fake_amazon_search,
             'api_listingagent_amazon_restriction_check': fake_amazon_restriction,
             'db_connection': database.db_connection,
@@ -487,6 +500,7 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(item['inventory']['positions'], ['A-3', 'B-1'])
         self.assertEqual(item['cost'], 4.5)
         self.assertIn('/items-to-list/mobile-photos?upc=' + UPC + '-1', item['mobilePhotosUrl'])
+        self.assertIn('camera=1', item['mobilePhotosUrl'], 'the QR code has to land in the camera')
         self.assertEqual(item['aiPhotoPrompt'], lister_routes.DEFAULT_AI_PHOTO_PROMPT)
 
         # With a ready proposal the fields come from it; prep notes still fill an empty condition note.
@@ -890,6 +904,46 @@ class ListerTestCase(unittest.TestCase):
                 break
             _time.sleep(0.05)
         self.assertEqual(status['steps'], {'prepare': 'done'}, 'a held proposal already has its values: not a failure')
+
+    def test_photo_link_telegrams_the_same_page_the_qr_code_points_at(self):
+        detail = self.client.get(f'/api/lister/queue/{UPC}-1', base_url='https://pi.example').get_json()['item']
+        res = self.client.post('/api/lister/photo-link', json={'upc': UPC + '-1'}, base_url='https://pi.example')
+        body = res.get_json()
+        self.assertEqual(res.status_code, 200, body)
+        self.assertEqual(body['url'], detail['mobilePhotosUrl'], 'the button and the QR code must agree')
+        self.assertEqual(body['sent'], ['Danka'], 'one message per chat, not per recipient row')
+        self.assertEqual([chat for chat, _text, _quiet in self.telegram_sent], ['111'])
+        chat, text, quiet = self.telegram_sent[0]
+        self.assertIn(detail['mobilePhotosUrl'], text)
+        self.assertIn('camera=1', text)
+        self.assertFalse(quiet, 'the phone should buzz: that is the whole point of the button')
+
+    def test_photo_link_says_what_is_missing(self):
+        self.assertEqual(self.client.post('/api/lister/photo-link', json={}).status_code, 400)
+
+        self.telegram_rows = [{'chat_id': '222', 'display_name': 'Off', 'enabled': 0}]
+        res = self.client.post('/api/lister/photo-link', json={'upc': UPC + '-1'})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('Telegram', res.get_json()['error'])
+        self.assertEqual(self.telegram_sent, [])
+
+        self.telegram_rows = [{'chat_id': '111', 'display_name': 'Danka', 'enabled': 1}]
+        self.telegram_result = (False, 'chat not found')
+        res = self.client.post('/api/lister/photo-link', json={'upc': UPC + '-1'})
+        self.assertEqual(res.status_code, 502)
+        self.assertIn('chat not found', res.get_json()['error'])
+
+    def test_photo_link_without_telegram_wired_up(self):
+        app = Flask('lister-no-telegram', static_folder=str(self.root / 'static'))
+        lister = lister_routes.register(app, {
+            'db_connection': database.db_connection, '_safe_error': errors._safe_error,
+            '_listagent_mark_listed': listing_queue._listagent_mark_listed,
+            '_listagent_upc_variants': listing_queue._listagent_upc_variants,
+            '_listagent_format_upc12': listing_queue._listagent_format_upc12,
+            '_listagent_init_tables': listing_checks._listagent_init_tables,
+        })
+        res = app.test_client().post('/api/lister/photo-link', json={'upc': UPC})
+        self.assertEqual(res.status_code, 501)
 
     def test_qr_endpoint_renders_or_explains(self):
         res = self.client.get('/api/lister/qr?text=https://pi.example/items-to-list/mobile-photos?upc=1')

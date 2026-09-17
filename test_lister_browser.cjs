@@ -101,7 +101,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     channel: 'msedge', headless: false,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { events: [], links: [], skip: [], prepare: [], learn: [], generate: [], detail: 0, preload: [] };
+  const calls = { events: [], links: [], skip: [], prepare: [], learn: [], generate: [], detail: 0, preload: [], photoLink: [] };
   // Preload all: the fake job finishes one item per status poll.
   const preload = { running: false, upcs: [], polls: 0, steps: [] };
   const preloadItems = () => Object.fromEntries(preload.upcs.map((u, i) => {
@@ -149,6 +149,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
         return json({ success: true, check: restricted ? { status: 'restricted', asin: 'B0OTHER', brand: 'Nike', reasons: ['Approval required for Nike'], error: '', cached: false } : { status: 'listable', asin: 'B0LENOX', brand: 'Lenox', reasons: [], error: '', cached: false } });
       }
       if (url.pathname.endsWith('/generate')) { const body = request.postDataJSON(); calls.generate.push(body); return json(body.kind === 'title' ? { success: true, kind: 'title', title: 'AI Lenox Butterfly Meadow Plate' } : { success: true, kind: 'description', descriptionHtml: '<p>AI description</p>', descriptionText: 'AI description' }); }
+      if (url.pathname === '/api/lister/photo-link') { calls.photoLink.push(request.postDataJSON()); return json({ success: true, url: detail.mobilePhotosUrl + '&camera=1', sent: ['Danka'], errors: [] }); }
       if (url.pathname === '/api/lister/events') { calls.events.push(request.postDataJSON()); return json({ success: true }); }
       if (url.pathname === '/api/lister/links' && request.method() === 'GET') {
         const today = new Date(); const pad = n => String(n).padStart(2, '0');
@@ -312,6 +313,12 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#addPhoto');
     await panel.waitForSelector('.qr img');
     await panel.click('#addPhoto');
+
+    // "+ Photo link" sends the same camera page through the Telegram bot instead of showing a QR code.
+    await panel.click('#photoLink');
+    await panel.waitForFunction(() => document.getElementById('toast')?.textContent.includes('Camera link sent'));
+    assert.deepEqual(calls.photoLink, [{ upc: UPC + '-1' }]);
+    assert.ok((await panel.$eval('#toast', el => el.textContent)).includes('Danka'), 'the toast names who got it');
 
     // On eBay's prelist page the panel types the UPC and submits the search by itself.
     // (Opened from Playwright rather than the Start button: a tab the extension opens starts

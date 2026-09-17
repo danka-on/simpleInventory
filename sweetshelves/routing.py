@@ -631,5 +631,8 @@ def register_routes():
         'api_listingagent_amazon_catalog_search': ss_amazon_catalog.api_listingagent_amazon_catalog_search,
         'api_listingagent_amazon_restriction_check': ss_amazon_catalog.api_listingagent_amazon_restriction_check,
         'update_data_version': ss_caching.update_data_version,
+        # "+ Photo link": Telegram the phone camera page instead of scanning the QR code.
+        '_telegram_send_message': ss_telegram._telegram_send_message,
+        '_telegram_collect_recipient_rows': ss_telegram._telegram_collect_recipient_rows,
         'BASE_DIR': BASE_DIR,
     })

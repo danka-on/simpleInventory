@@ -300,6 +300,37 @@
       opacity:0.35;
       cursor:not-allowed;
     }
+    /* Camera mode (?camera=1): the whole screen is the shutter, because the first touch on a
+       freshly opened page is the only gesture the browser will let us turn into a camera. */
+    .cameraGate{
+      position:fixed;
+      inset:0;
+      z-index:60;
+      display:grid;
+      place-items:center;
+      padding:24px;
+      text-align:center;
+      background:linear-gradient(160deg,#0b1220 0%,#111c33 100%);
+      color:#e8eefc;
+      cursor:pointer;
+      -webkit-tap-highlight-color:transparent;
+      user-select:none;
+    }
+    .cameraGate .icon{ font-size:76px; line-height:1; }
+    .cameraGate .big{ margin-top:18px; font-size:26px; font-weight:900; letter-spacing:.01em; }
+    .cameraGate .sub{ margin-top:10px; font-size:15px; opacity:.72; max-width:32ch; }
+    .cameraGate .upc{ margin-top:16px; font-size:13px; opacity:.55; letter-spacing:.06em; }
+    body.cameraMode .top,
+    body.cameraMode .head,
+    body.cameraMode #btnShowUploaded{ display:none; }
+    body.cameraMode .btnComplete{
+      position:sticky;
+      bottom:12px;
+      width:100%;
+      font-size:20px;
+      padding:18px 20px;
+    }
+    body.cameraMode .row{ flex-direction:column; }
   </style>
 </head>
 <body>
@@ -344,6 +375,15 @@
     </div>
   </div>
 
+  <div id="cameraGate" class="cameraGate" role="button" tabindex="0" aria-label="Open the camera" style="display:none;">
+    <div>
+      <div class="icon">&#128247;</div>
+      <div class="big">Tap to open the camera</div>
+      <div class="sub" id="cameraGateTitle">Photos land straight on this unit.</div>
+      <div class="upc" id="cameraGateUpc"></div>
+    </div>
+  </div>
+
   <div id="imgModal" class="imgModal" role="dialog" aria-modal="true" aria-label="Image preview">
     <div class="imgModalInner" id="imgModalInner">
       <button class="imgModalClose" id="imgModalClose" type="button" aria-label="Close">&times;</button>
@@ -359,6 +399,8 @@
     const ROW_STATUS = {{ (row_status or '')|tojson }};
     const TITLE = {{ (title or '')|tojson }};
     const RETURN_PATH = {{ (return_path or '')|tojson }};
+    // Both ways in (QR code, Telegram "+ Photo link") carry camera=1.
+    const CAMERA_MODE = new URLSearchParams(window.location.search).get('camera') === '1';
     const $ = (id) => document.getElementById(id);
 
     function esc(s){
@@ -556,7 +598,40 @@
 
     function takePhoto(){
       if(isUploading) return;
+      hideCameraGate();
       openFilePicker();
+    }
+
+    function showCameraGate(){
+      if(!CAMERA_MODE) return;
+      const gate = $('cameraGate');
+      if(gate) gate.style.display = 'grid';
+    }
+
+    function hideCameraGate(){
+      const gate = $('cameraGate');
+      if(gate) gate.style.display = 'none';
+    }
+
+    function armCameraGate(){
+      if(!CAMERA_MODE) return;
+      document.body.classList.add('cameraMode');
+      const gate = $('cameraGate');
+      if(!gate) return;
+      if($('cameraGateUpc')) $('cameraGateUpc').textContent = UPC ? `UPC ${UPC}` : '';
+      if(TITLE && $('cameraGateTitle')) $('cameraGateTitle').textContent = TITLE;
+      showCameraGate();
+      const fire = (e) => {
+        if(e && e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+        if(e) e.preventDefault();
+        takePhoto();
+      };
+      gate.addEventListener('click', fire);
+      gate.addEventListener('keydown', fire);
+      // Some browsers do let a fresh page open the picker on its own; when they do the gate
+      // is already hidden and this tap target never gets in the way.
+      try{ openFilePicker(); }catch(e){}
+      gate.focus({preventScroll:true});
     }
 
     async function completeUpload(){
@@ -614,18 +689,26 @@
       if(wrap) wrap.style.display = open ? 'none' : 'block';
       if(!open) await loadPhotos();
     });
-    $('photoInput').addEventListener('change', (e) => addPendingFiles(e.target.files));
+    $('photoInput').addEventListener('change', (e) => {
+      const files = e.target.files;
+      addPendingFiles(files);
+      if(CAMERA_MODE && (!files || !files.length) && pending.length === 0) showCameraGate();
+    });
 
     if(TITLE){
       $('titleBox').textContent = TITLE;
     }
     renderPending();
 
-    setTimeout(() => {
-      if(pending.length === 0){
-        try{ openFilePicker(); }catch(e){}
-      }
-    }, 450);
+    if(CAMERA_MODE){
+      armCameraGate();
+    } else {
+      setTimeout(() => {
+        if(pending.length === 0){
+          try{ openFilePicker(); }catch(e){}
+        }
+      }, 450);
+    }
   </script>
 </body>
 </html>
