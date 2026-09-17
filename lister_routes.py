@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.15'
+VERSION = '0.2.21'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -613,6 +613,8 @@ class Lister:
         self.feed_dir = self.static_folder / 'lister'
         self._jobs = {}
         self._jobs_lock = threading.Lock()
+        self._preloads = {}
+        self._preload_all = {'running': False, 'upcs': [], 'done': 0, 'startedAt': '', 'finishedAt': ''}
 
     # -- storage -----------------------------------------------------------------------------
 
@@ -681,6 +683,18 @@ class Lister:
                 error TEXT,
                 condition_type TEXT,
                 checked_at TEXT NOT NULL
+            )
+        ''')
+        # AI title / description written for a unit (preload or a click), reused by the fill instead of regenerating.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS lister_generated (
+                upc TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                text TEXT NOT NULL,
+                html TEXT,
+                auto INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (upc, kind)
             )
         ''')
         # Per-store "X" on the side panel: the item leaves that store's list but stays queued for the other.
@@ -1363,6 +1377,7 @@ class Lister:
                 'amazonCheck': amazon_checks.get(_base_upc(upc)),
                 'prepStatus': prep_statuses.get(upc),
                 'notes': note_counts.get(upc),
+                'preload': self.preload_status(upc),
                 'defect': defects.get(upc, ''),
             }
             (done if listed_at else active).append(item)
@@ -1557,6 +1572,13 @@ class Lister:
             fields['source'] = 'inventory'
         if is_suffixed(upc):
             fields['quantity'] = 1
+        generated = self.generated(upc)
+        fields['generated'] = {k: ('auto' if v.get('auto') else 'manual') for k, v in generated.items()}
+        if generated.get('title', {}).get('text'):
+            fields['title'] = generated['title']['text'][:80]
+        if generated.get('description', {}).get('html'):
+            fields['descriptionHtml'] = generated['description']['html']
+            fields['descriptionText'] = generated['description']['text']
         if not fields.get('condition') or (condition['condition'] == 'USED_GOOD' and not condition['assumed']):
             fields['condition'] = condition['condition']
         fields['amazonCondition'] = AMAZON_CONDITIONS.get(fields['condition'], '')
@@ -1641,6 +1663,7 @@ class Lister:
             'learned': learned,
             'prepStatus': prep_status,
             'gate': gate,
+            'preload': self.preload_status(upc),
             'preparing': self._job_state(upc),
             'mobilePhotosUrl': base_url.rstrip('/') + '/items-to-list/mobile-photos?upc=' + upc + '&return=%2Fitems-to-list',
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
@@ -1659,6 +1682,10 @@ class Lister:
             proposal = (self._latest_proposals(cur, [upc]) or {}).get(upc) or {}
         if proposal.get('ready') and not force:
             return {'status': 'ready', 'proposalId': proposal['id']}
+        if proposal and proposal.get('status') == 'blocked' and not force:
+            # The gate refused to build values (no rack stock, no category...): tell the panel instead of spinning.
+            reasons = [_text(f.get('message'), 200) for f in (proposal.get('flags') or []) if f.get('level') == 'block']
+            return {'status': 'blocked', 'proposalId': proposal['id'], 'reasons': reasons}
         with self._jobs_lock:
             job = self._jobs.get(upc)
             if job and job.get('running') and time.time() - job.get('started', 0) <= PREPARE_STALE_SECONDS:
@@ -1793,7 +1820,7 @@ class Lister:
 
     # -- title / description from the notes (Claude Haiku, same key the Listing Agent uses) -------
 
-    def generate(self, upc, *, kind, values, base_url='http://localhost/'):
+    def generate(self, upc, *, kind, values, base_url='http://localhost/', auto=False):
         """A listing title (<= 80 chars) or an HTML description built from the item's values and prep notes."""
         upc = self.format_upc12(upc)
         if kind not in ('title', 'description'):
@@ -1873,13 +1900,16 @@ class Lister:
         except Exception:
             pass
         if kind == 'title':
-            return {'kind': kind, 'title': text.strip('"\'').splitlines()[0][:80]}
+            out = {'kind': kind, 'title': text.strip('"\'').splitlines()[0][:80]}
+            self.store_generated(upc, 'title', out['title'], '', auto=auto)
+            return out
         data = parse_description_json(text)
         condition = _text(values.get('condition'), 40)
         html = render_description(title, data, upc=upc, condition=condition)
         # Plain-text stores get the item part only, not the shop's eBay boilerplate.
-        return {'kind': kind, 'descriptionHtml': html,
-                'descriptionText': html_to_text(render_description_item(title, data, upc=upc, condition=condition))}
+        text_only = html_to_text(render_description_item(title, data, upc=upc, condition=condition))
+        self.store_generated(upc, 'description', text_only, html, auto=auto)
+        return {'kind': kind, 'descriptionHtml': html, 'descriptionText': text_only}
 
     # -- can Amazon take this UPC from us? (catalog ASIN + listing restrictions, cached per UPC) ---
 
@@ -1967,6 +1997,188 @@ class Lister:
                          json.dumps(result['reasons']), result['error'] or None, condition_type or None, result['checkedAt']))
             conn.commit()
         return {**result, 'cached': False}
+
+    # -- AI text kept per unit ---------------------------------------------------------------------
+
+    def store_generated(self, upc, kind, text, html, *, auto=False):
+        upc = self.format_upc12(upc)
+        if not upc or not _text(text):
+            return
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('''INSERT INTO lister_generated (upc, kind, text, html, auto, created_at) VALUES (?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(upc, kind) DO UPDATE SET text = excluded.text, html = excluded.html, auto = excluded.auto,
+                               created_at = excluded.created_at''', (upc, kind, _text(text, 20000), html or None, 1 if auto else 0, _now()))
+            conn.commit()
+
+    def generated(self, upc):
+        upc = self.format_upc12(upc)
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('SELECT kind, text, html, auto, created_at FROM lister_generated WHERE upc = ?', (upc,))
+            return {r['kind']: {'text': r['text'], 'html': r['html'] or '', 'auto': bool(r['auto']), 'createdAt': r['created_at']} for r in cur.fetchall()}
+
+    # -- preload: everything the automatic switches would do, in the background, per item or for the list ---
+
+    PRELOAD_STEPS = ('prepare', 'title', 'description', 'photos')
+
+    def preload_status(self, upc):
+        upc = self.format_upc12(upc)
+        with self._jobs_lock:
+            job = self._preloads.get(upc)
+        return dict(job) if job else None
+
+    def preload_all_status(self):
+        with self._jobs_lock:
+            overall = dict(self._preload_all)
+            items = {u: dict(self._preloads[u]) for u in overall.get('upcs', []) if u in self._preloads}
+        total = len(overall.get('upcs', []))
+        done = sum(1 for u in overall.get('upcs', []) if (items.get(u) or {}).get('finishedAt'))
+        overall['total'] = total
+        overall['done'] = done
+        overall['percent'] = int(round(done * 100 / total)) if total else 100
+        overall['items'] = items
+        return overall
+
+    def _preload_values(self, upc, base_url):
+        """What the panel would send to generate(): the item's values plus every note we hold."""
+        info = self.detail(upc, base_url=base_url)
+        fields = info.get('fields') or {}
+        notes = [n.get('english') or n.get('text') for n in info.get('notes') or []] + \
+                [v.get('english') for v in info.get('voiceNotes') or []] + ([info.get('defect')] if info.get('defect') else [])
+        values = {'title': fields.get('title') or info.get('title'), 'systemTitle': info.get('title'), 'brand': fields.get('brand'),
+                  'categoryPath': fields.get('categoryPath'), 'condition': fields.get('condition'),
+                  'conditionDescription': fields.get('conditionDescription'), 'notes': [n for n in notes if n],
+                  'aspects': fields.get('aspects') or {}}
+        return info, values
+
+    def _preload_run(self, upc, steps, base_url):
+        def mark(step, value):
+            with self._jobs_lock:
+                job = self._preloads.get(upc)
+                if job:
+                    job['steps'][step] = value
+        try:
+            if 'prepare' in steps:
+                mark('prepare', 'running')
+                try:
+                    with self.db('listagent.db') as conn:
+                        cur = conn.cursor()
+                        self.init_listagent(cur)
+                        proposal = (self._latest_proposals(cur, [upc]) or {}).get(upc) or {}
+                    if proposal.get('ready') or proposal.get('status') == 'blocked':
+                        mark('prepare', 'done' if proposal.get('ready') else 'blocked')
+                    elif self.build_proposal:
+                        self.build_proposal(upc, actor='lister', base_url=base_url)
+                        mark('prepare', 'done')
+                    else:
+                        mark('prepare', 'skipped')
+                except Exception as e:
+                    mark('prepare', 'error: ' + str(e)[:120])
+            info = values = None
+            for kind in ('title', 'description'):
+                if kind not in steps:
+                    continue
+                mark(kind, 'running')
+                try:
+                    if self.generated(upc).get(kind):
+                        mark(kind, 'done')
+                        continue
+                    if values is None:
+                        info, values = self._preload_values(upc, base_url)
+                    self.generate(upc, kind=kind, values=values, base_url=base_url, auto=True)
+                    mark(kind, 'done')
+                except Exception as e:
+                    mark(kind, 'error: ' + str(e)[:120])
+            if 'photos' in steps:
+                mark('photos', 'running')
+                try:
+                    if info is None:
+                        info = self.detail(upc, base_url=base_url)
+                    photos = info.get('photos') or []
+                    have = {p.get('from') for p in photos if p.get('source') == 'ai' and p.get('from')}
+                    own = [p for p in photos if p.get('source') in ('listing', 'prep') and p.get('name') not in have]
+                    if not own and not any(p.get('source') in ('listing', 'prep') for p in photos):
+                        own = [p for p in photos if p.get('source') == 'catalog' and p.get('name') not in have][:4]
+                    with self._jobs_lock:
+                        self._preloads[upc]['photos'] = {'done': 0, 'total': len(own)}
+                    for p in own:
+                        self.ai_photo(upc, url=p['url'], base_url=base_url)
+                        with self._jobs_lock:
+                            self._preloads[upc]['photos']['done'] += 1
+                    mark('photos', 'done')
+                except Exception as e:
+                    mark('photos', 'error: ' + str(e)[:120])
+        finally:
+            with self._jobs_lock:
+                job = self._preloads.get(upc)
+                if job:
+                    job['running'] = False
+                    job['finishedAt'] = _now()
+
+    def preload(self, upc, *, steps=None, base_url='http://localhost/'):
+        """Start (or report) the background preload of one unit. Returns the job state."""
+        upc = self.format_upc12(upc)
+        if not upc:
+            raise ListerError('upc is required')
+        steps = [s for s in (steps or list(self.PRELOAD_STEPS)) if s in self.PRELOAD_STEPS]
+        if not steps:
+            raise ListerError('nothing to preload: no steps')
+        if not self.app:
+            raise ListerError('preload is not available on this server', 501)
+        with self._jobs_lock:
+            job = self._preloads.get(upc)
+            if job and job.get('running') and time.time() - job.get('started', 0) <= PREPARE_STALE_SECONDS * 2:
+                return dict(job)
+            self._preloads[upc] = {'running': True, 'started': time.time(), 'startedAt': _now(), 'finishedAt': '',
+                                   'steps': {s: 'pending' for s in steps}, 'photos': None}
+        app = self.app
+
+        def run():
+            with app.app_context():
+                self._preload_run(upc, steps, base_url)
+
+        threading.Thread(target=run, name=f'lister-preload-{upc}', daemon=True).start()
+        return self.preload_status(upc)
+
+    def preload_all(self, upcs, *, steps=None, base_url='http://localhost/'):
+        """Preload a list of units one after another (the whole queue, typically)."""
+        upcs = [self.format_upc12(u) for u in upcs or [] if self.format_upc12(u)]
+        steps = [s for s in (steps or list(self.PRELOAD_STEPS)) if s in self.PRELOAD_STEPS]
+        if not upcs:
+            raise ListerError('upcs is required')
+        if not steps:
+            raise ListerError('nothing to preload: no steps')
+        if not self.app:
+            raise ListerError('preload is not available on this server', 501)
+        with self._jobs_lock:
+            if self._preload_all.get('running'):
+                return self.preload_all_status()
+            self._preload_all = {'running': True, 'upcs': upcs, 'done': 0, 'startedAt': _now(), 'finishedAt': ''}
+            for u in upcs:
+                job = self._preloads.get(u)
+                if not (job and job.get('running')):
+                    self._preloads[u] = {'running': True, 'started': time.time(), 'startedAt': _now(), 'finishedAt': '',
+                                         'steps': {s: 'pending' for s in steps}, 'photos': None, 'queued': True}
+        app = self.app
+
+        def run():
+            with app.app_context():
+                for u in upcs:
+                    with self._jobs_lock:
+                        job = self._preloads.get(u)
+                        if job:
+                            job['started'] = time.time()
+                            job.pop('queued', None)
+                    self._preload_run(u, steps, base_url)
+                with self._jobs_lock:
+                    self._preload_all['running'] = False
+                    self._preload_all['finishedAt'] = _now()
+
+        threading.Thread(target=run, name='lister-preload-all', daemon=True).start()
+        return self.preload_all_status()
 
     # -- voice notes ---------------------------------------------------------------------------
 
@@ -2351,11 +2563,31 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:amazon-check')
 
+    def api_lister_queue_preload(upc):
+        try:
+            if request.method == 'GET':
+                return jsonify({'success': True, 'preload': lister.preload_status(upc)})
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            return jsonify({'success': True, 'preload': lister.preload(upc, steps=data.get('steps'), base_url=base_url())})
+        except Exception as e:
+            return failure(e, 'lister:preload')
+
+    def api_lister_preload_all():
+        try:
+            if request.method == 'GET':
+                return jsonify({'success': True, **lister.preload_all_status()})
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            return jsonify({'success': True, **lister.preload_all(data.get('upcs') or [], steps=data.get('steps'), base_url=base_url())})
+        except Exception as e:
+            return failure(e, 'lister:preload-all')
+
     def api_lister_queue_generate(upc):
         try:
             guard_mutation()
             data = request.get_json(silent=True) or {}
-            result = lister.generate(upc, kind=_text(data.get('kind')).lower(), values=data.get('values') or {}, base_url=base_url())
+            result = lister.generate(upc, kind=_text(data.get('kind')).lower(), values=data.get('values') or {}, base_url=base_url(), auto=bool(data.get('auto')))
             return jsonify({'success': True, **result})
         except Exception as e:
             return failure(e, 'lister:generate')
@@ -2420,6 +2652,8 @@ def register(app, deps):
     app.add_url_rule('/api/lister/queue/<upc>/skip', 'api_lister_queue_skip', api_lister_queue_skip, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/mark-existing', 'api_lister_queue_mark_existing', api_lister_queue_mark_existing, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/generate', 'api_lister_queue_generate', api_lister_queue_generate, methods=['POST'])
+    app.add_url_rule('/api/lister/queue/<upc>/preload', 'api_lister_queue_preload', api_lister_queue_preload, methods=['GET', 'POST'])
+    app.add_url_rule('/api/lister/preload', 'api_lister_preload_all', api_lister_preload_all, methods=['GET', 'POST'])
     app.add_url_rule('/api/lister/queue/<upc>/amazon-check', 'api_lister_queue_amazon_check', api_lister_queue_amazon_check, methods=['POST'])
     app.add_url_rule('/api/lister/learn', 'api_lister_learn', api_lister_learn, methods=['POST'])
     app.add_url_rule('/api/lister/voice/<int:media_id>/analyze', 'api_lister_voice_analyze', api_lister_voice_analyze, methods=['POST'])

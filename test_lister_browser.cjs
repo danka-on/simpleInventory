@@ -92,7 +92,16 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     channel: 'msedge', headless: false,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { events: [], links: [], skip: [], prepare: [], learn: [], generate: [], detail: 0 };
+  const calls = { events: [], links: [], skip: [], prepare: [], learn: [], generate: [], detail: 0, preload: [] };
+  // Preload all: the fake job finishes one item per status poll.
+  const preload = { running: false, upcs: [], polls: 0, steps: [] };
+  const preloadItems = () => Object.fromEntries(preload.upcs.map((u, i) => {
+    const finished = preload.polls > i;
+    const steps = Object.fromEntries(preload.steps.map((st, j) => [st, finished ? 'done' : (preload.polls === i ? (j === 0 ? 'running' : 'pending') : 'pending')]));
+    return [u, { running: !finished, queued: preload.polls < i, started: 1, startedAt: 'x', finishedAt: finished ? 'y' : '', steps, photos: null }];
+  }));
+  const preloadAll = () => { const items = preloadItems(); const done = Object.values(items).filter(p => !p.running).length; preload.running = done < preload.upcs.length;
+    return { success: true, running: preload.running, upcs: preload.upcs, total: preload.upcs.length, done, percent: preload.upcs.length ? Math.round(done * 100 / preload.upcs.length) : 100, items }; };
   let linked = false;
   try {
     // Fake Sweet Shelves server: the extension must send the anti-CSRF header and cookies.
@@ -112,8 +121,12 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       if (url.pathname.includes('/tiny-')) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="90"><rect width="120" height="90"/></svg>' });
       if (url.pathname.includes('/big-')) return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800"><rect width="800" height="800"/></svg>' });
       if (url.pathname.startsWith('/static/')) return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
+      if (url.pathname === '/api/lister/preload' && request.method() === 'GET') { if (preload.running) preload.polls += 1; return json(preloadAll()); }
+      if (url.pathname.endsWith('/preload') && request.method() === 'GET') return json({ success: true, preload: preloadItems()[decodeURIComponent(url.pathname.split('/')[4])] || null });
       if (url.pathname === '/api/lister/qr') return route.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>' });
       assert.equal(request.headers()['x-sweet-shelves-lister'], '1', 'mutations carry the extension header: ' + url.pathname);
+      if (url.pathname === '/api/lister/preload') { const body = request.postDataJSON(); calls.preload.push(body); Object.assign(preload, { running: true, upcs: body.upcs, steps: body.steps, polls: 0 }); return json(preloadAll()); }
+      if (url.pathname.endsWith('/preload')) { calls.preload.push(request.postDataJSON()); return json({ success: true, preload: { running: false, steps: { prepare: 'done' }, photos: null, startedAt: 'x', finishedAt: 'y' } }); }
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
       if (url.pathname.endsWith('/skip')) { calls.skip.push(request.postDataJSON()); return json({ success: true, queue: 'queued' }); }
       if (url.pathname === '/api/lister/learn') { calls.learn.push(request.postDataJSON()); return json({ success: true, agreed: false, learned: { ebay: {} } }, 201); }
@@ -186,6 +199,20 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#statusAll');
     assert.equal((await panel.$$('.item')).length, 2);
     assert.ok(await panel.$('#autoSendPhotos'), 'the auto send-to-page switch is on the store card');
+    // Preload all: the whole queue is prepared in the background; the bar shows the percentage, the rows their state.
+    assert.ok(await panel.$eval('#preloadBar', el => el.hidden), 'no preload bar before a preload');
+    await panel.click('#preloadAll');
+    await panel.waitForFunction(() => !document.getElementById('preloadBar').hidden, null, { timeout: 5000 });
+    assert.deepEqual(calls.preload.at(-1), { upcs: ['883049370897-1', '012345678905'], steps: ['prepare'] }, 'the queued units with the switched-on steps (values only: no AI switch is on)');
+    assert.ok((await panel.textContent('#preloadBar')).includes('Preloading'), 'the bar says it is preloading');
+    assert.ok(await panel.$eval('#preloadAll', el => el.disabled), 'the button waits while it runs');
+    await panel.waitForFunction(() => document.querySelector('#preloadBar').textContent.includes('100%'), null, { timeout: 15000 });
+    assert.ok((await panel.textContent('#preloadBar')).includes('All 2 preloaded'), await panel.textContent('#preloadBar'));
+    assert.ok(await panel.$('.item[data-upc="883049370897-1"] .chip.preload.done'), 'each row gets its ✓ when it is done');
+    assert.ok(await panel.$('.item[data-upc="012345678905"] .chip.preload.done'));
+    assert.ok(!(await panel.$eval('#preloadAll', el => el.disabled)), 'the button is back');
+    await panel.click('#preloadHide');
+    assert.ok(await panel.$eval('#preloadBar', el => el.hidden), 'the finished bar can be dismissed');
     // Day theme by default; the header button switches to night and remembers it.
     assert.equal(await panel.$eval('html', el => el.dataset.theme), 'light');
     await panel.click('#themeBtn');

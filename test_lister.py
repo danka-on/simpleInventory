@@ -511,6 +511,16 @@ class ListerTestCase(unittest.TestCase):
             _time.sleep(0.05)
         self.assertEqual(self.lister._job_state('012345678905'), {'running': False, 'error': '', 'startedAt': self.lister._job_state('012345678905')['startedAt']})
         self.assertEqual(self.client.get('/api/lister/queue/012345678905').get_json()['item']['fields']['title'], 'Built title')
+        # A gate-blocked proposal is an answer, not something to keep polling for.
+        with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
+            conn.execute("INSERT INTO listing_queue (upc, title, status, added_at) VALUES ('000000000099', 'Blocked thing', 'queued', '2026-09-17T08:00:00')")
+            conn.execute('''INSERT INTO listing_proposals (upc, status, proposal_json, flags_json, created_at, updated_at)
+                            VALUES ('000000000099', 'blocked', '{}', ?, '2026-09-17T08:00:00', '2026-09-17T08:00:00')''',
+                         (json.dumps([{'level': 'block', 'code': 'traceable', 'message': 'On a shelf: No rack row with quantity for this barcode'}]),))
+            conn.commit()
+        blocked = self.client.post('/api/lister/queue/000000000099/prepare', json={}, base_url='https://pi.example').get_json()
+        self.assertEqual((blocked['status'], blocked['reasons']), ('blocked', ['On a shelf: No rack row with quantity for this barcode']))
+        self.assertEqual(len(self.built), 1, 'no rebuild for a blocked proposal unless forced')
 
     def test_ai_photo_edit_stores_the_result_as_a_listing_photo(self):
         uploads = self.root / 'static' / 'listingagent_uploads'
@@ -717,6 +727,79 @@ class ListerTestCase(unittest.TestCase):
             conn.commit()
         row = self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]
         self.assertEqual(row['defect'], 'Missing pieces', 'the BOL defect rides along, matched on the catalog UPC')
+
+    def test_preload_runs_prepare_ai_text_and_ai_photos_in_the_background_and_keeps_the_text(self):
+        import time as _time
+        (self.root / 'static' / 'listingagent_uploads').mkdir()
+        (self.root / 'static' / 'listingagent_uploads' / 'own.jpg').write_bytes(b'\xff\xd8jpeg')
+        with self.app.app_context():
+            listing_queue._listagent_add_photo(UPC + '-1', image_path='listingagent_uploads/own.jpg')
+        self.detail_payload = {'title': 'Lenox plate', 'images': [], 'inventory': {'total_quantity': 1, 'positions': ['B-1'], 'rows': []},
+                               'bol': {}, 'ebay_store': {'listings': []}, 'amazon_store': {'listings': []},
+                               'prep': {'notes': [{'id': 1, 'note': 'LT: x | EN: box opened', 'created_at': '2026-09-15'}], 'images': [], 'voice_notes': [], 'videos': []}}
+        posted = []
+
+        class FakeResponse:
+            status_code = 200
+
+            def __init__(self, body):
+                self.body = body
+
+            def json(self):
+                return self.body
+
+        def fake_post(url, **kwargs):
+            posted.append(url)
+            if 'openai' in url:
+                return FakeResponse({'data': [{'b64_json': 'aGVsbG8='}], 'usage': {}})
+            content = kwargs['json']['messages'][0]['content']
+            if content.startswith('Write one eBay listing title'):
+                return FakeResponse({'content': [{'text': 'Lenox Butterfly Meadow Plate AI'}], 'usage': {}})
+            return FakeResponse({'content': [{'text': '{"intro": "A plate.", "details": [], "condition": "Used, box opened.", "conditionNote": ""}'}], 'usage': {}})
+
+        import requests
+        with patch.object(requests, 'post', fake_post), patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'k', 'OPENAI_API_KEY': 'k'}):
+            res = self.client.post(f'/api/lister/queue/{UPC}-1/preload', json={'steps': ['prepare', 'title', 'description', 'photos']}, base_url='https://pi.example')
+            self.assertEqual(res.status_code, 200, res.get_json())
+            self.assertTrue(res.get_json()['preload']['running'])
+            for _ in range(100):
+                status = self.client.get(f'/api/lister/queue/{UPC}-1/preload').get_json()['preload']
+                if not status['running']:
+                    break
+                _time.sleep(0.05)
+        self.assertFalse(status['running'], status)
+        self.assertEqual(status['steps'], {'prepare': 'done', 'title': 'done', 'description': 'done', 'photos': 'done'}, status)
+        self.assertEqual(status['photos'], {'done': 1, 'total': 1})
+        self.assertEqual(self.built[0][0], UPC + '-1', 'the proposal was built')
+        self.assertEqual(sum('anthropic' in u for u in posted), 2)
+        self.assertEqual(sum('openai' in u for u in posted), 1)
+        # The text is kept and wins in the item's fields, marked as automatic; the AI photo is on file.
+        item = self.client.get(f'/api/lister/queue/{UPC}-1', base_url='https://pi.example').get_json()['item']
+        self.assertEqual(item['fields']['title'], 'Lenox Butterfly Meadow Plate AI')
+        self.assertIn('A plate.', item['fields']['descriptionText'])
+        self.assertEqual(item['fields']['generated'], {'title': 'auto', 'description': 'auto'})
+        self.assertEqual([p['source'] for p in item['photos']][:2], ['ai', 'listing'])
+        self.assertEqual(item['preload']['steps']['photos'], 'done')
+        # A second preload does not regenerate what exists.
+        with patch.object(requests, 'post', fake_post), patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'k', 'OPENAI_API_KEY': 'k'}):
+            self.client.post(f'/api/lister/queue/{UPC}-1/preload', json={'steps': ['title', 'description', 'photos']}, base_url='https://pi.example')
+            for _ in range(100):
+                if not self.client.get(f'/api/lister/queue/{UPC}-1/preload').get_json()['preload']['running']:
+                    break
+                _time.sleep(0.05)
+        self.assertEqual(len(posted), 3, 'nothing was generated twice')
+        # Preload all: one sequential job with a percentage.
+        with patch.object(requests, 'post', fake_post), patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'k', 'OPENAI_API_KEY': 'k'}):
+            res = self.client.post('/api/lister/preload', json={'upcs': [UPC + '-1', UPC], 'steps': ['title']}, base_url='https://pi.example')
+            self.assertEqual(res.status_code, 200, res.get_json())
+            for _ in range(100):
+                overall = self.client.get('/api/lister/preload').get_json()
+                if not overall['running']:
+                    break
+                _time.sleep(0.05)
+        self.assertEqual((overall['total'], overall['done'], overall['percent']), (2, 2, 100))
+        self.assertEqual(overall['items'][UPC]['steps'], {'title': 'done'})
+        self.assertEqual(self.client.post('/api/lister/preload', json={'upcs': []}).status_code, 400)
 
     def test_qr_endpoint_renders_or_explains(self):
         res = self.client.get('/api/lister/qr?text=https://pi.example/items-to-list/mobile-photos?upc=1')

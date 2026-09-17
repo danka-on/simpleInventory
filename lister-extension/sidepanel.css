@@ -306,3 +306,14 @@ body.locked .note { font-size: 13px; }
 .modal .box p { margin: 6px 0 12px; }
 details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 6px; }
 pre.copyall { white-space: pre-wrap; font: 12px ui-monospace, monospace; background: var(--chip); padding: 8px; border-radius: 6px; max-height: 160px; overflow: auto; }
+/* preload: the automatic work (values, AI title/description/photos) done ahead in the background */
+.tabs button.preload { white-space: nowrap; border-color: var(--blue); color: var(--blue); }
+.tabs button.preload:disabled { opacity: .7; }
+.preloadbar { display: flex; align-items: center; gap: 8px; margin: 6px 0 2px; font-size: 12px; color: var(--muted); }
+.preloadbar[hidden] { display: none; }
+.preloadbar .track { flex: 1; height: 8px; border-radius: 4px; background: var(--chip); overflow: hidden; }
+.preloadbar .track i { display: block; height: 100%; background: var(--blue); transition: width .4s; }
+.preloadbar.done .track i { background: var(--green); }
+.preloadbar b { color: var(--ink); }
+.chip.preload { background: var(--blue-bg); color: var(--blue); }
+.chip.preload.done { background: #d8f3e8; color: #0b5c40; }

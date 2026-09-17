@@ -41,7 +41,8 @@
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
     voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
-    busyTasks: new Map(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
+    busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
+    preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
   };
 
   const $ = id => document.getElementById(id);
@@ -66,8 +67,9 @@
   function busy(label) {
     const id = Symbol(label);
     state.busyTasks.set(id, label);
+    state.busyStarted.set(id, Date.now());
     renderBusy();
-    const release = () => { state.busyTasks.delete(id); renderBusy(); };
+    const release = () => { state.busyTasks.delete(id); state.busyStarted.delete(id); renderBusy(); };
     release.update = next => { if (state.busyTasks.has(id)) { state.busyTasks.set(id, next); renderBusy(); } };
     return release;
   }
@@ -75,6 +77,8 @@
   function renderBusy() {
     const el = $('busy');
     if (!el) return;
+    // Safety net: nothing legitimately runs longer than ten minutes; drop anything older so the bar cannot stick.
+    for (const [id, started] of state.busyStarted) if (Date.now() - started > 10 * 60 * 1000) { state.busyTasks.delete(id); state.busyStarted.delete(id); }
     const labels = [...state.busyTasks.values()];
     el.hidden = !labels.length;
     $('busyLabel').textContent = labels[labels.length - 1] || '';
@@ -167,6 +171,9 @@
     try {
       const data = await api('/api/lister/queue?platform=' + state.platform);
       state.items = data.items || [];
+      for (const it of state.items) if (it.preload?.running) { state.preload.items[it.upc] = it.preload; state.preload.watch.add(it.upc); }
+      if (state.preload.watch.size) pollPreload();
+      renderPreloadBar();
       state.counts[state.platform] = data.counts || {};
       state.connected = true; state.signIn = false;
       const active = state.items.filter(it => it.status === 'queued');
@@ -324,6 +331,8 @@
       const item = data.item;
       item.loadedAt = Date.now();
       state.details[upc] = item;
+      if (item.fields?.generated) state.aiGenerated[upc] = { ...item.fields.generated, ...(state.aiGenerated[upc] || {}) };
+      if (item.preload) state.preload.items[upc] = item.preload;
       if (upc === state.currentUpc) { renderDetail(); renderConfirm(); }
       void maybePrepare(item);
       void maybeTranscribe(item);
@@ -341,6 +350,7 @@
   async function maybePrepare(item, { force = false } = {}) {
     if (!item || (!state.settings.autoPrepare && !force)) return;
     if (item.proposal?.ready && !force) return;
+    if (!force && preloadRunning(item.upc)) return;  // the preload builds it
     // Not from the queue list: only once the item is opened, or a listing for it is under way on a store page.
     const listing = state.page?.store && (ASSIST_KINDS.has(state.page.kind) || state.page.kind === 'listing-form' || state.page.kind === 'offer-form');
     if (!force && state.view !== 'item' && !listing) return;
@@ -350,6 +360,10 @@
     try {
       const result = await api('/api/lister/queue/' + encodeURIComponent(key) + '/prepare', { method: 'POST', body: { force } });
       if (result.status === 'ready') { await loadDetail(key, { force: true }); return; }
+      if (result.status === 'blocked') {
+        if (key === state.currentUpc) toast('Listing Agent gate blocks this item: ' + ((result.reasons || [])[0] || 'see the review page') + '. Basic values are used.', true);
+        return;
+      }
       state.details[key].preparing = { running: true };
       if (key === state.currentUpc) renderDetail();
       const release = busy(`Preparing "${(item.title || item.fields?.title || key).slice(0, 40)}": title, price, specifics, description…`);
@@ -358,9 +372,12 @@
       const poll = async () => {
         tries += 1;
         const fresh = await loadDetail(key, { force: true });
-        if (!fresh) return;
-        if (fresh.proposal?.ready && !fresh.preparing?.running) { release(); if (key === state.currentUpc) toast('Listing values prepared'); return; }
+        if (!fresh) { if (tries < 40) state.prepareTimers[key] = setTimeout(poll, 4000); else release(); return; }
+        const finished = !fresh.preparing?.running;
+        if (finished && fresh.proposal?.ready) { release(); if (key === state.currentUpc) toast('Listing values prepared'); return; }
+        if (finished && fresh.proposal?.status === 'blocked') { release(); if (key === state.currentUpc) toast('Listing Agent gate blocks this item: ' + ((fresh.proposal.flags || []).find(f => f.level === 'block')?.message || 'see the review page') + '. Basic values are used.', true); return; }
         if (fresh.preparing?.error) { release(); if (key === state.currentUpc) toast('Prepare failed: ' + fresh.preparing.error, true); return; }
+        if (finished && tries > 2) { release(); return; }  // the job ended without a usable proposal
         if (tries < 40) state.prepareTimers[key] = setTimeout(poll, 4000); else release();
       };
       state.prepareTimers[key] = setTimeout(poll, 4000);
@@ -375,6 +392,113 @@
     for (const note of (item.voiceNotes || []).filter(v => v.status === 'pending' || v.status === 'error').slice(0, 2)) {
       void transcribe(item.upc, note.id, false);
     }
+  }
+
+  // -- Preload: everything the automatic switches would do, run on the server ahead of time -------------
+  const PRELOAD_LABEL = { prepare: 'values', title: 'AI title', description: 'AI description', photos: 'AI photos' };
+  function preloadSteps() {
+    const s = state.settings;
+    return ['prepare', s.autoAiTitle && 'title', s.autoAiDescription && 'description', s.autoAiPhotos && 'photos'].filter(Boolean);
+  }
+  function preloadOf(upc) { return state.preload.items[upc] || state.items.find(it => it.upc === upc)?.preload || null; }
+  function preloadRunning(upc) { const p = preloadOf(upc); return !!(p && p.running); }
+  function preloadSummary(p) {
+    const steps = Object.entries(p.steps || {});
+    const running = steps.find(([, v]) => v === 'running');
+    const failed = steps.filter(([, v]) => String(v).startsWith('error'));
+    const photos = p.photos && p.photos.total ? ` ${p.photos.done}/${p.photos.total}` : '';
+    const problem = (k, v) => PRELOAD_LABEL[k] + ': ' + String(v).replace(/^error:\s*/, '');
+    return { steps, running, failed, photos, problem };
+  }
+  // One item, as soon as it is picked with an AI switch on (values alone are maybePrepare's job).
+  async function preloadItem(upc, { force = false } = {}) {
+    if (!upc || state.connected === false) return;
+    const steps = preloadSteps();
+    if (steps.length < 2 && !force) return;
+    const key = upc + '|' + steps.join(',');
+    if (!force && state.preload.asked.has(key)) return;
+    state.preload.asked.add(key);
+    if (preloadRunning(upc)) { state.preload.watch.add(upc); pollPreload(); return; }
+    try {
+      const data = await api('/api/lister/queue/' + encodeURIComponent(upc) + '/preload', { method: 'POST', body: { steps } });
+      state.preload.items[upc] = data.preload;
+      state.preload.watch.add(upc);
+      renderItems(); pollPreload();
+    } catch (error) {
+      if (error.status !== 501) toast('Preload: ' + error.message, true);
+    }
+  }
+  // The whole list, one item after another, with the bar in the list header.
+  async function preloadAll() {
+    const upcs = state.items.filter(it => it.status === 'queued').map(it => it.upc);
+    if (!upcs.length) { toast('Nothing queued to preload'); return; }
+    const steps = preloadSteps();
+    if (steps.length < 2) toast('No AI switch is on, so only the listing values are prepared. Switch on AI title, description or photos to preload those as well.');
+    try {
+      const data = await api('/api/lister/preload', { method: 'POST', body: { upcs, steps } });
+      state.preload.startedHere = true;
+      applyPreloadAll(data);
+      for (const upc of upcs) state.preload.asked.add(upc + '|' + steps.join(','));
+      toast(`Preloading ${upcs.length} item${upcs.length === 1 ? '' : 's'} in the background`);
+      renderItems(); renderPreloadBar(); pollPreload();
+    } catch (error) {
+      if (error.status !== 501) toast('Preload all: ' + error.message, true);
+    }
+  }
+  function applyPreloadAll(data) {
+    state.preload.all = { running: !!data.running, total: data.total || 0, done: data.done || 0, percent: data.percent || 0, upcs: data.upcs || [] };
+    for (const [upc, p] of Object.entries(data.items || {})) {
+      const before = state.preload.items[upc];
+      state.preload.items[upc] = p;
+      if (p.running || (before && before.running)) state.preload.watch.add(upc);
+    }
+  }
+  function pollPreload() {
+    clearTimeout(state.preload.timer);
+    state.preload.timer = setTimeout(async () => {
+      if (state.connected === false) return;
+      try {
+        const all = await api('/api/lister/preload');
+        applyPreloadAll(all);
+        for (const upc of [...state.preload.watch]) {
+          if (!(all.items || {})[upc]) {
+            const data = await api('/api/lister/queue/' + encodeURIComponent(upc) + '/preload');
+            if (data.preload) state.preload.items[upc] = data.preload;
+          }
+          const p = state.preload.items[upc];
+          if (!p || !p.running) { state.preload.watch.delete(upc); if (p) await preloadFinished(upc, p); }
+        }
+      } catch (error) { console.warn('preload poll', error); }
+      renderItems(); renderPreloadBar();
+      if (state.preload.all?.running || state.preload.watch.size) pollPreload();
+    }, 3000);
+  }
+  async function preloadFinished(upc, p) {
+    const { failed, problem } = preloadSummary(p);
+    const row = state.items.find(it => it.upc === upc);
+    if (row) row.preload = p;
+    const fresh = state.details[upc] ? await loadDetail(upc, { force: true }) : null;
+    if (upc !== state.currentUpc) return;
+    if (failed.length) toast('Preload: ' + failed.map(([k, v]) => problem(k, v)).join(' · '), true);
+    else toast('Preloaded: ' + Object.keys(p.steps || {}).map(k => PRELOAD_LABEL[k]).join(', '));
+    if (fresh) { void maybeAutoText(); void maybeAutoSend(); }
+  }
+  function renderPreloadBar() {
+    const bar = $('preloadBar'); const button = $('preloadAll');
+    if (!bar || !button) return;
+    const all = state.preload.all;
+    const running = !!all?.running;
+    button.disabled = running;
+    button.textContent = running ? '⚡ Preloading…' : '⚡ Preload all';
+    if (!all || (!running && !state.preload.startedHere)) { bar.hidden = true; bar.classList.remove('done'); return; }
+    const failed = (all.upcs || []).filter(u => preloadSummary(state.preload.items[u] || {}).failed.length).length;
+    bar.hidden = false;
+    bar.classList.toggle('done', !running);
+    bar.innerHTML = `<div class="track"><i style="width:${all.percent}%"></i></div>` +
+      `<span>${running ? `Preloading <b>${all.done}</b> of ${all.total} · <b>${all.percent}%</b>` : `All ${all.total} preloaded · <b>100%</b>`}${failed ? ` · <span class="bad">${failed} failed</span>` : ''}</span>` +
+      (running ? '' : '<button id="preloadHide" class="mini" type="button" title="Hide">✓</button>');
+    const hide = $('preloadHide');
+    if (hide) hide.onclick = () => { state.preload.startedHere = false; renderPreloadBar(); };
   }
 
   async function transcribe(upc, mediaId, reanalyze) {
@@ -933,10 +1057,14 @@
 
   // Auto mode: every photo of ours (listing + prep) that has no AI version yet, once per item and session.
   async function maybeAutoPhotos(info) {
-    if (!info || !state.settings.autoAiPhotos || state.aiBusy) return;
+    if (!info || !state.settings.autoAiPhotos || state.aiBusy || preloadRunning(info.upc)) return;
     const done = new Set((info.photos || []).filter(p => p.source === 'ai').map(p => p.from).filter(Boolean));
-    const urls = (info.photos || []).filter(p => (p.source === 'listing' || p.source === 'prep') && !done.has(p.name) && !state.autoPhotos.has(p.url)).map(p => p.url);
-    if (!urls.length) { await maybeAutoSend(); return; }
+    const fresh = p => !done.has(p.name) && !state.autoPhotos.has(p.url);
+    let urls = (info.photos || []).filter(p => (p.source === 'listing' || p.source === 'prep') && fresh(p)).map(p => p.url);
+    if (!urls.length && !(info.photos || []).some(p => p.source === 'listing' || p.source === 'prep')) {
+      urls = (info.photos || []).filter(p => p.source === 'catalog' && fresh(p)).map(p => p.url).slice(0, 4);  // nothing of ours: the catalog pictures
+    }
+    if (!urls.length) { if (info.upc === state.currentUpc && !state.autoPhotosTold.has(info.upc)) { state.autoPhotosTold.add(info.upc); toast('Auto AI photoshop: every photo of this item already has an AI version'); } await maybeAutoSend(); return; }
     toast(`Auto AI photoshop: ${urls.length} photo${urls.length === 1 ? '' : 's'}…`);
     await aiPhotoshopUrls(info, urls);
     await maybeAutoSend();
@@ -1112,8 +1240,10 @@
     const info = detail();
     const page = state.page;
     if (!info || !page?.store || !(page.kind === 'listing-form' || page.kind === 'offer-form')) return;
+    if (preloadRunning(info.upc)) return;  // the preload is writing it; maybeAutoText runs again when it ends
     for (const kind of ['title', 'description']) {
       if (!state.settings[kind === 'title' ? 'autoAiTitle' : 'autoAiDescription']) continue;
+      if (info.fields?.generated?.[kind]) continue;  // written earlier (preload or a click): the fill uses the stored text
       const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc + '|' + kind;
       if (state.autoText.has(key)) continue;
       state.autoText.add(key);
@@ -1152,6 +1282,14 @@
       if (ps.status) chips.push(`<span class="chip ${ps.status === 'good' ? 'ok' : (ps.status === 'bad' ? 'bad' : 'warn')}" title="Item Prep status">${esc(ps.status)}${ps.reason ? ' · ' + esc(ps.reason) : ''}</span>`);
       if (it.defect && (it.defect || '').toLowerCase() !== (ps.reason || '').toLowerCase()) chips.push(`<span class="chip defect" title="Defect noted on the BOL">${esc(it.defect)}</span>`);
       if (it.preparing) chips.push('<span class="chip"><span class="spin"></span> preparing</span>');
+      const pl = preloadOf(it.upc);
+      if (pl) {
+        const s = preloadSummary(pl);
+        if (pl.queued) chips.push('<span class="chip preload" title="Waiting for its turn in Preload all">⚡ queued</span>');
+        else if (pl.running) chips.push(`<span class="chip preload"><span class="spin"></span> ${s.running ? esc(PRELOAD_LABEL[s.running[0]] || s.running[0]) + (s.running[0] === 'photos' ? esc(s.photos) : '') : 'preloading'}…</span>`);
+        else if (s.failed.length) chips.push(`<span class="chip warn" title="${esc(s.failed.map(([k, v]) => s.problem(k, v)).join(' · '))}">⚡ ${esc(s.failed.map(([k]) => PRELOAD_LABEL[k]).join(', '))} failed</span>`);
+        else chips.push(`<span class="chip preload done" title="${esc(s.steps.map(([k, v]) => PRELOAD_LABEL[k] + ' ' + (v === 'done' ? '✓' : v)).join(' · '))}">⚡ preloaded ✓</span>`);
+      }
       const ac = state.platform === 'amazon' ? it.amazonCheck : null;
       if (state.platform === 'amazon' && state.checkingAmazon.has(it.baseUpc)) chips.push('<span class="chip checking"><span class="spin"></span> Amazon check</span>');
       else if (ac?.status === 'restricted') chips.push(`<span class="chip bad" title="${esc((ac.reasons || []).join(' · ') || 'Amazon restricts this listing for us')}">Amazon ✕ restricted</span>`);
@@ -1179,6 +1317,7 @@
         state.currentUpc = el.dataset.upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); remember();
         renderItems(); renderDetail(); renderConfirm();
         void loadDetail(state.currentUpc).then(() => maybeAssist());
+        void preloadItem(state.currentUpc);
         if (state.page?.store) bindTab(state.currentUpc, state.platform);
         // Picked while the store's search page is open: search this UPC right away.
         state.pendingSearch = { upc: state.currentUpc, platform: state.platform };
@@ -1511,6 +1650,7 @@
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
     for (const [id, value] of [['statusAll', 'all'], ['statusGood', 'good'], ['statusBad', 'bad'], ['statusListed', 'listed']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
     $('reload').onclick = () => { state.details = {}; void connect().then(() => loadQueue()); void refreshTab(); };
+    $('preloadAll').onclick = () => void preloadAll();
     chrome.tabs.onActivated.addListener(scheduleRefresh);
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
       if (info.status === 'loading' && !info.url) {
@@ -1520,6 +1660,7 @@
       if (tab?.active && (info.status === 'complete' || info.url)) scheduleRefresh();
     });
     chrome.windows?.onFocusChanged?.addListener(() => scheduleRefresh());
+    setInterval(renderBusy, 30000);
     chrome.tabs.onRemoved.addListener(tabId => { delete state.tabItems[tabId]; try { void chrome.storage.session?.set({ ssListerTabs: state.tabItems }); } catch { /* ignore */ } });
     // Store pages render their forms after load; look again a little later.
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (tab?.active && info.status === 'complete') setTimeout(scheduleRefresh, 2500); });
