@@ -307,9 +307,9 @@
 
   function flash(el) {
     try {
-      const previous = el.style.boxShadow;
-      el.style.boxShadow = '0 0 0 3px rgba(10, 156, 108, 0.7)';
-      setTimeout(() => { el.style.boxShadow = previous; }, 1800);
+      // Same soft glow as the guide, faded back out after a moment.
+      ring(el, '#0a9c6c', true);
+      setTimeout(() => unring(el), 1800);
     } catch { /* ignore */ }
   }
 
@@ -629,6 +629,27 @@
     return { elements, rows };
   }
 
+  // Soft rounded glow instead of a hard outline: page containers clip outlines into brackets.
+  const RING_PROPS = ['boxShadow', 'borderRadius', 'backgroundColor', 'transition'];
+  function ring(el, colour, fill) {
+    if (el.dataset.ssRingPrev === undefined) el.dataset.ssRingPrev = JSON.stringify(RING_PROPS.map(k => el.style[k] || ''));
+    const rgb = colour.match(/\w\w/g).map(h => parseInt(h, 16)).join(',');
+    el.style.transition = 'box-shadow .25s ease, background-color .25s ease';
+    el.style.boxShadow = `0 0 0 2px rgba(${rgb},.55), 0 0 0 6px rgba(${rgb},.14)`;
+    if (!/[1-9]/.test(getComputedStyle(el).borderRadius)) el.style.borderRadius = '8px';
+    if (fill) el.style.backgroundColor = `rgba(${rgb},.07)`;
+  }
+  function unring(el) {
+    if (el.dataset.ssRingPrev === undefined) return;
+    try {
+      const prev = JSON.parse(el.dataset.ssRingPrev);
+      // Keep our transition until the glow has faded, then put the page's own back.
+      RING_PROPS.forEach((k, i) => { if (k !== 'transition') el.style[k] = prev[i]; });
+      setTimeout(() => { if (el.dataset.ssRingPrev === undefined) el.style.transition = prev[3]; }, 300);
+    } catch { /* ignore */ }
+    delete el.dataset.ssRingPrev;
+  }
+
   function guideElement(row) {
     return row.kind === 'photos' || row.kind === 'policy' ? row.el : guide.elements[row.index];
   }
@@ -637,14 +658,12 @@
     const el = guideElement(row);
     if (!el) return;
     try {
-      if (el.dataset.ssGuidePrev === undefined) el.dataset.ssGuidePrev = el.style.outline || '';
       // The 2 s refresh restyles every row: a field already done must not flash green again (it blinked).
       if (state === 'done' && el.dataset.ssGuideDone === '1') return;
       const colour = state === 'notes' ? '#2563eb' : (state === 'done' ? '#16a34a' : (state === 'required' ? '#dc2626' : '#f59e0b'));
-      el.style.outline = (state === 'done' ? '2px solid ' : '3px solid ') + colour;
-      el.style.outlineOffset = '2px';
+      ring(el, colour);
       // A filled field fades back; one filled from the prep notes keeps its blue outline as a reminder to read it.
-      if (state === 'done') setTimeout(() => { if (el.dataset.ssGuideDone === '1') { el.style.outline = el.dataset.ssGuidePrev || ''; el.style.outlineOffset = ''; } }, 2500);
+      if (state === 'done') setTimeout(() => { if (el.dataset.ssGuideDone === '1') unring(el); }, 2500);
       el.dataset.ssGuideDone = state === 'done' ? '1' : '';
     } catch { /* ignore */ }
   }
@@ -652,7 +671,7 @@
   function guideUnstyle(row) {
     const el = guideElement(row);
     if (!el) return;
-    try { el.style.outline = el.dataset.ssGuidePrev || ''; el.style.outlineOffset = ''; delete el.dataset.ssGuidePrev; delete el.dataset.ssGuideDone; } catch { /* ignore */ }
+    try { unring(el); delete el.dataset.ssGuideDone; } catch { /* ignore */ }
   }
 
   // The page's own "List it" / "Save and finish" button: scroll there and flash it (the user presses it).
@@ -718,14 +737,14 @@
   // The HUD wears the side panel's theme: day by default, night when the panel's moon button says so.
   const GUIDE_THEMES = {
     light: {
-      bg: '#ffffff', text: '#0f172a', head: '#f1f5f9', bar: '#e2e8f0', foot: '#f8fafc', line: '#e2e8f0',
-      muted: '#475569', value: '#0f172a', hint: '#1d4ed8', good: '#15803d', req: '#b91c1c', current: '#eef2ff',
-      btn: '#e2e8f0', btnText: '#0f172a', shadow: '0 12px 40px rgba(15,23,42,.22)',
+      bg: '#ffffff', text: '#0f172a', head: '#f5f8f6', foot: '#ffffff', line: '#e3e9e5', rail: '#dfe6e2',
+      muted: '#5b6a63', value: '#0f172a', hint: '#1d4ed8', good: '#15803d', req: '#b91c1c', current: '#e4f3ec',
+      chip: '#eef2f0', btn: '#eef2f0', btnText: '#0f172a', shadow: '0 12px 40px rgba(15,23,42,.22)',
     },
     dark: {
-      bg: '#0f172a', text: '#f8fafc', head: '#1e293b', bar: '#334155', foot: '#111827', line: '#334155',
-      muted: '#cbd5e1', value: '#e2e8f0', hint: '#93c5fd', good: '#86efac', req: '#fca5a5', current: '#1e293b',
-      btn: '#334155', btnText: '#ffffff', shadow: '0 12px 40px rgba(0,0,0,.45)',
+      bg: '#0f172a', text: '#f8fafc', head: '#18212f', foot: '#0f172a', line: '#2c3a4d', rail: '#31415a',
+      muted: '#cbd5e1', value: '#e2e8f0', hint: '#93c5fd', good: '#86efac', req: '#fca5a5', current: '#13312a',
+      chip: '#22303f', btn: '#22303f', btnText: '#ffffff', shadow: '0 12px 40px rgba(0,0,0,.45)',
     },
   };
   const GUIDE_SETTINGS_KEY = 'ssListerSettings';
@@ -761,46 +780,98 @@
     panel.style.color = t.text;
     panel.style.boxShadow = t.shadow;
     panel.querySelector('[data-ss="head"]').style.background = t.head;
-    panel.querySelector('[data-ss="bar"]').style.background = t.bar;
-    const foot = panel.querySelector('[data-ss="foot"]');
-    foot.style.background = t.foot;
-    foot.style.borderTop = '1px solid ' + t.line;
-    for (const button of panel.querySelectorAll('[data-ss="collapse"],[data-ss="done"]')) button.style.color = t.muted;
-    const next = panel.querySelector('[data-ss="next"]');
-    next.style.background = t.btn;
-    next.style.color = t.btnText;
+    panel.querySelector('[data-ss="bar"]').style.background = t.bg;
+    panel.querySelector('[data-ss="railline"]').style.background = t.rail;
+    panel.querySelector('[data-ss="foot"]').style.background = t.foot;
+    for (const button of panel.querySelectorAll('[data-ss="collapse"],[data-ss="done"],[data-ss="steps"],[data-ss="next"]')) button.style.color = t.muted;
     guideRender(false);
+  }
+
+  // Red = required and empty, amber = optional and empty, green = filled, blue = filled from the prep notes.
+  function rowColour(row) {
+    if (row.done) return row.fromNotes ? '#2563eb' : '#16a34a';
+    return row.required ? '#dc2626' : '#f59e0b';
+  }
+
+  // The one step you are on - or the checkpoint you are hovering - written out in full.
+  function paintFocus() {
+    const panel = guide?.panel;
+    if (!panel || guide.steps || guide.collapsed) return;
+    const t = guideTheme;
+    const body = panel.querySelector('[data-ss="body"]');
+    const previewing = guide.preview != null && guide.preview !== guide.index;
+    const row = guide.rows[guide.preview != null ? guide.preview : guide.index];
+    if (!row) {
+      body.innerHTML = `<div style="padding:10px 12px 14px;color:${t.muted};font-size:12px">${guide.rows.length ? 'Pick a checkpoint above, or press Tab for the first one that needs a value.' : 'No listing fields found on this page yet.'}</div>`;
+      return;
+    }
+    const colour = rowColour(row);
+    const flag = row.done ? (row.fromNotes ? 'from the notes' : 'filled') : (row.required ? 'required' : 'optional');
+    const ai = guide.options.aiFields?.[row.target];
+    const said = row.done
+      ? (row.value ? escapeHtml(row.value) : '<span style="opacity:.75">already on the page</span>') + (ai ? ` <span style="color:${t.good}">\u00b7 written by AI${ai === 'auto' ? ' automatically' : ''}</span>` : '')
+      : (row.suggestion ? escapeHtml(row.suggestion) : `<span style="color:${t.muted}">Nothing prepared for this one \u2014 fill it on the page.</span>`);
+    const canAi = row.target === 'title' || row.target === 'description';
+    body.innerHTML = `<div style="padding:9px 12px 12px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:8px;height:8px;border-radius:50%;background:${colour};flex:none"></span>
+          <b style="font-size:13.5px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.label)}</b>
+          <span style="font:700 9px system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:${colour};flex:none">${flag}</span>
+        </div>
+        <div style="margin-top:6px;color:${row.done ? t.value : t.muted};font-size:12px;max-height:50px;overflow:hidden">${said}</div>
+        ${previewing
+          ? `<div style="margin-top:7px;color:${t.muted};font-size:11px">Click the dot to go here</div>`
+          : (canAi ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="margin-top:8px;background:${t.chip};color:${t.text};border:0;border-radius:6px;padding:5px 9px;cursor:pointer;font:600 11px system-ui,sans-serif">Write it with AI</button>` : '')}
+      </div>`;
+    const aiBtn = body.querySelector('[data-ss-ai]');
+    if (aiBtn) aiBtn.onclick = event => { event.stopPropagation(); aiBtn.textContent = '\u2026'; panelAction('generate', { kind: aiBtn.dataset.ssAi }); };
   }
 
   function guidePanel() {
     if (guide.panel) return guide.panel;
     const panel = document.createElement('div');
     panel.id = 'ss-lister-guide';
-    panel.style.cssText = `position:fixed;left:16px;bottom:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:${guideTheme.bg};color:${guideTheme.text};font:13px/1.4 system-ui,sans-serif;border-radius:14px;box-shadow:${guideTheme.shadow};overflow:hidden`;
+    panel.style.cssText = `position:fixed;left:16px;bottom:16px;z-index:2147483647;width:min(300px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:${guideTheme.bg};color:${guideTheme.text};font:13px/1.4 system-ui,sans-serif;border-radius:13px;box-shadow:${guideTheme.shadow};overflow:hidden`;
     // Wherever the user dragged it last stays put for this browser (the header is the drag handle).
     try { guidePos = guidePos || readGuidePos(localStorage.getItem(GUIDE_POS_KEY)); } catch { /* private mode */ }
     applyGuidePos(panel, guidePos);
     panel.innerHTML = `
-      <div data-ss="head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:${guideTheme.head};cursor:pointer">
-        <span style="width:10px;height:10px;border-radius:50%;background:#0a9c6c;flex:none"></span>
-        <b data-ss="title" style="flex:1">Sweet Shelves Lister</b>
-        <button data-ss="collapse" title="Collapse" style="background:transparent;border:0;color:${guideTheme.muted};font-size:16px;cursor:pointer;padding:0 4px">–</button>
-        <button data-ss="done" title="Close the overlay (Esc)" style="background:transparent;border:0;color:${guideTheme.muted};font-size:16px;cursor:pointer;padding:0 4px">×</button>
+      <div data-ss="head" style="display:flex;align-items:center;gap:8px;padding:9px 10px;background:${guideTheme.head};cursor:pointer">
+        <span data-ss="dot" style="width:9px;height:9px;border-radius:50%;background:#0a9c6c;flex:none"></span>
+        <b data-ss="title" style="flex:1;min-width:0;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Sweet Shelves Lister</b>
+        <button data-ss="steps" title="Every step" style="background:transparent;border:0;color:${guideTheme.muted};font-size:13px;cursor:pointer;padding:0 4px">\u2304</button>
+        <button data-ss="collapse" title="Minimize" style="background:transparent;border:0;color:${guideTheme.muted};font-size:16px;cursor:pointer;padding:0 4px">\u2013</button>
+        <button data-ss="done" title="Close the overlay (Esc)" style="background:transparent;border:0;color:${guideTheme.muted};font-size:16px;cursor:pointer;padding:0 4px">\u00d7</button>
       </div>
-      <div data-ss="bar" style="height:5px;background:${guideTheme.bar}"><div data-ss="fill" style="height:100%;width:0;background:linear-gradient(90deg,#f59e0b,#16a34a);transition:width .3s"></div></div>
-      <div data-ss="body" style="overflow:auto;padding:6px 0"></div>
-      <div data-ss="foot" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid ${guideTheme.line};background:${guideTheme.foot}">
-        <button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:600">Use suggestion (Ctrl+Enter)</button>
-        <button data-ss="next" style="background:${guideTheme.btn};color:${guideTheme.btnText};border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
-        <button data-ss="ready" title="Everything has a value: jump to the page's List it button" style="display:none;flex:1 1 100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 14px system-ui,sans-serif;box-shadow:0 4px 14px rgba(22,163,74,.45)">✓ All set — go to List it</button>
-
+      <div data-ss="bar" style="position:relative;padding:11px 12px 10px;background:${guideTheme.bg}">
+        <div data-ss="railline" style="position:absolute;left:14px;right:14px;top:50%;height:2px;margin-top:-1px;border-radius:2px;background:${guideTheme.rail}"></div>
+        <div data-ss="rail" style="position:relative;display:flex;align-items:center;overflow-x:auto;overflow-y:hidden;scrollbar-width:none"></div>
+      </div>
+      <div data-ss="body" style="overflow:auto"></div>
+      <div data-ss="foot" style="display:flex;gap:6px;align-items:center;padding:0 12px 12px;background:${guideTheme.foot}">
+        <button data-ss="use" style="flex:1;background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:9px 11px;cursor:pointer;font:600 12.5px system-ui,sans-serif">Use this</button>
+        <button data-ss="next" style="background:transparent;color:${guideTheme.muted};border:0;border-radius:8px;padding:9px 6px;cursor:pointer;font:500 12.5px system-ui,sans-serif">Skip</button>
+        <button data-ss="ready" title="Everything has a value: jump to the page's List it button" style="display:none;flex:1 1 100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 13px system-ui,sans-serif;box-shadow:0 4px 14px rgba(22,163,74,.4)">\u2713 All set \u2014 go to List it</button>
       </div>`;
-    panel.querySelector('[data-ss="use"]').onclick = () => guideUse();
+    // The green button does whatever the step in front of you needs: take the suggestion, go to the
+    // field when there is nothing to take, or move on when it already has a value.
+    panel.querySelector('[data-ss="use"]').onclick = () => {
+      const row = guide?.rows[guide.index];
+      if (!row) { guideNext(); return; }
+      if (!row.done && row.suggestion && row.kind === 'field') guideUse();
+      else if (!row.done) guideGo(guide.index);
+      else guideNext();
+    };
     panel.querySelector('[data-ss="next"]').onclick = () => guideNext();
     panel.querySelector('[data-ss="ready"]').onclick = () => goToSubmit();
-
     panel.querySelector('[data-ss="done"]').onclick = () => { guideStop(); notifyGuide(); };
-    panel.querySelector('[data-ss="collapse"]').onclick = event => { event.stopPropagation(); guide.collapsed = !guide.collapsed; guideRender(); };
+    panel.querySelector('[data-ss="steps"]').onclick = event => {
+      event.stopPropagation();
+      guide.steps = !guide.steps; guide.preview = null;
+      if (guide.steps) guide.collapsed = false;
+      guideRender();
+    };
+    panel.querySelector('[data-ss="collapse"]').onclick = event => { event.stopPropagation(); guide.collapsed = !guide.collapsed; guide.preview = null; guideRender(); };
     panel.querySelector('[data-ss="head"]').onclick = () => { if (guide.collapsed && !panel.dataset.ssDragged) { guide.collapsed = false; guideRender(); } delete panel.dataset.ssDragged; };
     // Drag the overlay by its header.
     const head = panel.querySelector('[data-ss="head"]');
@@ -876,40 +947,81 @@
   }
 
   // scroll=true only for an explicit jump (click, Next, Tab); refreshes never move the page.
+  // scroll=true only for an explicit jump (click, Next, Tab); refreshes never move the page.
   function guideRender(scroll = false) {
     if (!guide) return;
+    const t = guideTheme;
     const open = guide.rows.filter(r => !r.done);
     const requiredOpen = open.filter(r => r.required);
     const current = guide.rows[guide.index];
     const panel = guidePanel();
     const total = guide.rows.length;
-    const done = total - open.length;
-    panel.querySelector('[data-ss="title"]').textContent = open.length
-      ? `${open.length} to fill · ${requiredOpen.length} required`
-      : 'Everything on the checklist has a value';
-    panel.querySelector('[data-ss="fill"]').style.width = (total ? Math.round(done / total * 100) : 100) + '%';
-    panel.querySelector('[data-ss="body"]').style.display = guide.collapsed ? 'none' : '';
-    panel.querySelector('[data-ss="foot"]').style.display = guide.collapsed ? 'none' : '';
-    panel.querySelector('[data-ss="collapse"]').textContent = guide.collapsed ? '+' : '–';
+    const allSet = Boolean(total) && !open.length;
+    panel.querySelector('[data-ss="title"]').textContent = allSet
+      ? `All ${total} have a value`
+      : (open.length ? `${open.length} left \u00b7 ${requiredOpen.length} required` : 'Nothing to fill here yet');
+    panel.querySelector('[data-ss="dot"]').style.background = allSet ? '#16a34a' : (requiredOpen.length ? '#dc2626' : '#f59e0b');
+    panel.querySelector('[data-ss="collapse"]').textContent = guide.collapsed ? '+' : '\u2013';
+    const stepsBtn = panel.querySelector('[data-ss="steps"]');
+    stepsBtn.textContent = guide.steps ? '\u2303' : '\u2304';
+    stepsBtn.title = guide.steps ? 'Back to the step you are on' : 'Every step';
+
+    // The checkpoints ARE the progress bar: how much of it is green says how far along the listing is,
+    // and every step stays one click away without a list in front of the field you are typing in.
+    const rail = panel.querySelector('[data-ss="rail"]');
+    rail.innerHTML = guide.rows.map((row, i) => {
+      const colour = rowColour(row);
+      const here = guide.index === i;
+      const size = here ? 11 : 8;
+      const ring = here ? `,0 0 0 2px ${t.bg},0 0 0 4px ${colour}` : '';
+      const state = row.done ? (row.value || 'filled') : (row.required ? 'required' : 'optional');
+      return `<button data-ss-cp="${i}" title="${escapeHtml(row.label + ' \u00b7 ' + state)}" aria-label="${escapeHtml(row.label)}" style="flex:1 1 0;min-width:15px;height:18px;display:flex;align-items:center;justify-content:center;background:none;border:0;padding:0;cursor:pointer">
+        <span style="width:${size}px;height:${size}px;border-radius:50%;background:${colour};box-shadow:0 0 0 3px ${t.bg}${ring}"></span></button>`;
+    }).join('');
+    for (const el of rail.querySelectorAll('[data-ss-cp]')) {
+      const i = Number(el.dataset.ssCp);
+      el.onclick = () => { guide.preview = null; guideGo(i); };
+      // Hovering reads a step out in the card below without leaving the field you are in.
+      el.onpointerenter = () => { if (!guide.collapsed && !guide.steps) { guide.preview = i; paintFocus(); } };
+      el.onpointerleave = () => { if (guide.preview != null) { guide.preview = null; paintFocus(); } };
+    }
+
     const body = panel.querySelector('[data-ss="body"]');
-    body.innerHTML = guide.rows.map((row, i) => {
-      const fromNotes = row.fromNotes && row.done;
-      const colour = fromNotes ? '#2563eb' : (row.done ? '#16a34a' : (row.required ? '#dc2626' : '#f59e0b'));
-      const isCurrent = current === row;
-      return `<div data-ss-row="${i}" style="display:flex;align-items:center;gap:8px;padding:6px 12px;cursor:pointer;${isCurrent ? `background:${guideTheme.current};` : ''}">
-        <span style="width:10px;height:10px;border-radius:50%;background:${colour};flex:none"></span>
-        <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.value ? ` <span style="color:${guideTheme.value};font-weight:700">· ${escapeHtml(row.value)}</span>` : ''}${row.required && !row.done ? ` <span style="color:${guideTheme.req};font-size:11px">required</span>` : ''}
-          ${!row.done && row.suggestion ? `<div style="color:${guideTheme.muted};font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}
-          ${fromNotes ? `<div style="color:${guideTheme.hint};font-size:11px">Filled from the warehouse prep notes. Read it once before listing.</div>` : ''}
-          ${row.done && guide.options.aiFields?.[row.target] ? `<div style="color:${guideTheme.good};font-size:11px">generated with AI${guide.options.aiFields[row.target] === 'auto' ? ' (automatically)' : ''}</div>` : ''}</span>
-        ${row.target === 'title' || row.target === 'description' ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="background:#0a9c6c;color:#fff;border:0;border-radius:6px;padding:2px 8px;cursor:pointer;font:600 11px system-ui,sans-serif">AI</button>` : ''}
-        <span style="color:${colour};font-weight:700">${row.done ? (fromNotes ? 'ⓘ' : '✓') : (row.required ? '!' : '·')}</span></div>`;
-    }).join('') || `<div style="padding:10px 12px;color:${guideTheme.muted}">No listing fields found on this page yet.</div>`;
-    for (const el of body.querySelectorAll('[data-ss-row]')) el.onclick = () => guideGo(Number(el.dataset.ssRow));
-    for (const el of body.querySelectorAll('[data-ss-ai]')) el.onclick = event => { event.stopPropagation(); el.textContent = '…'; panelAction('generate', { kind: el.dataset.ssAi }); };
-    panel.querySelector('[data-ss="use"]').style.display = current && !current.done && current.suggestion && current.kind === 'field' ? '' : 'none';
-    panel.querySelector('[data-ss="ready"]').style.display = total && !open.length ? '' : 'none';
-    panel.querySelector('[data-ss="next"]').style.display = open.length ? '' : 'none';
+    const foot = panel.querySelector('[data-ss="foot"]');
+    body.style.display = guide.collapsed ? 'none' : '';
+    foot.style.display = guide.collapsed || (guide.steps && !allSet) ? 'none' : '';
+    if (guide.steps) {
+      body.innerHTML = guide.rows.map((row, i) => {
+        const colour = rowColour(row);
+        const here = guide.index === i;
+        const ai = guide.options.aiFields?.[row.target];
+        const mark = row.done && row.fromNotes
+          ? ` <sup title="Filled from the warehouse prep notes. Read it once before listing." style="color:#2563eb;font-size:8px;font-weight:700;letter-spacing:.04em">NOTE</sup>`
+          : (row.done && ai ? ` <sup title="generated with AI${ai === 'auto' ? ' (automatically)' : ''}" style="color:${t.good};font-size:8px;font-weight:700;letter-spacing:.04em">AI</sup>` : '');
+        const state = row.done ? (row.value || '') : (row.required ? 'required' : 'optional');
+        return `<div data-ss-row="${i}" style="display:flex;align-items:center;gap:9px;padding:6px 12px;cursor:pointer;${here ? `background:${t.current};` : ''}">
+          <span style="width:8px;height:8px;border-radius:50%;background:${colour};flex:none"></span>
+          <span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="font-weight:${here ? 700 : 500}">${escapeHtml(row.label)}</span>${state ? ` <span style="color:${row.done ? t.muted : colour};font-size:11.5px">\u00b7 ${escapeHtml(state)}</span>` : ''}${mark}</span>
+          ${row.target === 'title' || row.target === 'description' ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="background:${t.chip};color:${t.text};border:0;border-radius:5px;padding:3px 7px;cursor:pointer;font:700 9.5px system-ui,sans-serif;flex:none">AI</button>` : ''}</div>`;
+      }).join('') || `<div style="padding:10px 12px;color:${t.muted}">No listing fields found on this page yet.</div>`;
+      for (const el of body.querySelectorAll('[data-ss-row]')) el.onclick = () => { guide.steps = false; guideGo(Number(el.dataset.ssRow)); };
+      for (const el of body.querySelectorAll('[data-ss-ai]')) el.onclick = event => { event.stopPropagation(); el.textContent = '\u2026'; panelAction('generate', { kind: el.dataset.ssAi }); };
+    } else {
+      paintFocus();
+    }
+
+    const use = panel.querySelector('[data-ss="use"]');
+    const next = panel.querySelector('[data-ss="next"]');
+    panel.querySelector('[data-ss="ready"]').style.display = allSet ? '' : 'none';
+    use.style.display = allSet || guide.steps ? 'none' : '';
+    next.style.display = allSet || guide.steps || !open.length ? 'none' : '';
+    if (!allSet && !guide.steps) {
+      const takes = current && !current.done && current.suggestion && current.kind === 'field';
+      const label = !current ? 'Start at the first one' : (current.done ? 'Next field' : (takes ? 'Use this' : 'Go to it'));
+      const key = !current ? 'Tab' : (current.done ? 'Tab' : (takes ? 'Ctrl+Enter' : ''));
+      use.innerHTML = `${escapeHtml(label)}${key ? ` <span style="opacity:.72;font-size:11px;font-weight:500">${key}</span>` : ''}`;
+    }
+
     for (const row of guide.rows) guideStyle(row, row.done ? (row.fromNotes ? 'notes' : 'done') : (row.required ? 'required' : 'optional'));
     const pointer = guidePointer();
     const el = current ? guideElement(current) : null;
@@ -918,8 +1030,9 @@
       if (scroll) { try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); if (current.kind === 'field') el.focus({ preventScroll: true }); } catch { /* ignore */ } }
       const rect = el.getBoundingClientRect();
       pointer.style.display = '';
-      pointer.style.background = current.done ? '#16a34a' : (current.required ? '#dc2626' : '#f59e0b');
-      pointer.textContent = current.done ? `${current.label} ✓` : `${current.label}${current.suggestion ? ' → ' + current.suggestion.slice(0, 60) : ''}`;
+      pointer.style.background = rowColour(current);
+      // The suggestion is in the overlay a few centimetres away; saying it twice is the clutter.
+      pointer.textContent = current.done ? `${current.label} \u2713` : current.label;
       pointer.style.left = Math.max(8, rect.left + window.scrollX) + 'px';
       pointer.style.top = Math.max(0, rect.top + window.scrollY - 30) + 'px';
     } else {
@@ -946,7 +1059,7 @@
     // Already up on this page (the URL changed, the fill ran again): refresh in place, never jump back to the first row.
     if (guide) { guide.options = options || guide.options; guideRefresh(); guideRender(false); notifyGuide(); return guideState(); }
     const { elements, rows } = guideNeeded(options || {});
-    guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, qtyTag: null, collapsed: false };
+    guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, qtyTag: null, collapsed: false, steps: false, preview: null };
     const handlers = {
       key(event) {
         if (!guide) return;
@@ -1110,15 +1223,13 @@
   }
 
   function highlight(el, kind) {
-    el.dataset.ssAssistPrev = el.style.outline || '';
-    el.style.outline = kind === 'best' ? '3px solid #0a9c6c' : '2px dashed #94a3b8';
-    el.style.outlineOffset = '2px';
+    ring(el, kind === 'best' ? '#0a9c6c' : '#94a3b8', kind === 'best');
     assist.marks.push(el);
   }
 
   function clearAssistMarks() {
     if (!assist) return;
-    for (const el of assist.marks) { try { el.style.outline = el.dataset.ssAssistPrev || ''; el.style.outlineOffset = ''; delete el.dataset.ssAssistPrev; } catch { /* ignore */ } }
+    for (const el of assist.marks) { try { unring(el); } catch { /* ignore */ } }
     for (const tag of assist.badges) tag.remove();
     assist.marks = []; assist.badges = [];
   }
@@ -1185,7 +1296,9 @@
       const pick = labels.map(l => named.find(n => M.normalize(n.label) === M.normalize(l) || M.normalize(n.label).startsWith(M.normalize(l)))).find(Boolean);
       if (pick) {
         result.suggested = pick.label;
-        const box = pick.r.closest('label') || pick.r.parentElement || pick.r;
+        // Highlight the whole option row (radio + its text), not the tiny wrapper around the radio.
+        let box = pick.r.closest('label') || pick.r.parentElement || pick.r;
+        while (box.parentElement && box.parentElement !== document.body && !/\w/.test(box.textContent || '') && box.parentElement.querySelectorAll('input[type="radio"]').length === 1) box = box.parentElement;
         highlight(box, 'best');
         if (!pick.r.checked && options.preselectCondition !== false && !assist.conditionClicked) { assist.conditionClicked = true; pick.r.click(); }
       }

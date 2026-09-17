@@ -7,15 +7,28 @@
 <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
+<!-- One header row: which store you are working, whether the server is there, and settings. -->
 <header class="top">
-  <img src="icons/icon48.png" alt="" width="22" height="22">
-  <div class="brand">Sweet Shelves Lister</div>
-  <button id="connStatus" class="chip" type="button" title="Connection">…</button>
-  <button id="themeBtn" class="icon" type="button" title="Day / night theme" aria-label="Toggle theme">🌙</button>
-  <button id="settingsBtn" class="icon" type="button" title="Settings" aria-label="Settings">⚙</button>
+  <div class="stores" role="tablist">
+    <button id="storeEbay" class="store ebay" type="button" role="tab" aria-selected="true">eBay <span id="countEbay" class="n"></span></button>
+    <button id="storeAmazon" class="store amazon" type="button" role="tab" aria-selected="false">Amazon <span id="countAmazon" class="n"></span></button>
+  </div>
+  <div class="sys">
+    <button id="connStatus" class="conn" type="button" title="Connection" aria-label="Connection"></button>
+    <button id="themeBtn" class="icon" type="button" title="Day / night theme" aria-label="Toggle theme">🌙</button>
+    <button id="settingsBtn" class="icon" type="button" title="Settings" aria-label="Settings">⚙</button>
+  </div>
 </header>
 
-<div id="busy" class="busy" hidden><div class="bar"><i></i></div><span id="busyLabel"></span></div>
+<!-- The way back out of an item, and the only place that says you are on a listing form. -->
+<div id="crumb" class="crumb" hidden>
+  <button id="backToQueue" class="back" type="button">‹ Queue</button>
+  <span id="crumbNow" class="now"></span>
+  <span id="crumbLock" class="lockmark" hidden>● on the form</span>
+</div>
+
+<!-- Always in the layout, invisible until something runs, so its row never pushes the panel about. -->
+<div id="busy" class="busy"><div class="bar"><i></i></div><span id="busyLabel"></span></div>
 
 <section id="settings" class="card" hidden>
   <h2>Settings</h2>
@@ -25,9 +38,10 @@
   <label class="check"><input id="setAutoGuide" type="checkbox"> Highlight fields that still need a value after filling</label>
   <label class="check"><input id="setAutoLink" type="checkbox"> Record the listing automatically when the store confirms it (with Undo)</label>
   <label class="check"><input id="setAutoPrepare" type="checkbox"> Prepare title, price, specifics and description in the background</label>
+  <div id="autoBox"></div>
   <div class="row">
     <button id="saveSettings" class="primary" type="button">Save</button>
-    <button id="openServer" type="button">Open Items to List</button>
+    <button id="openServer" type="button">Items to List</button>
     <button id="openLedger" type="button">Ledger</button>
     <button id="openUpdates" type="button">Update extension</button>
   </div>
@@ -39,18 +53,6 @@
   <p>The server needs your Cloudflare sign-in. Open it once in this browser, then come back.</p>
   <button id="signinBtn" class="primary" type="button">Open sign-in page</button>
 </section>
-
-<nav class="storebar">
-  <div class="seg" role="tablist">
-    <button id="storeEbay" class="seg-btn active" type="button">eBay <span id="countEbay" class="count"></span></button>
-    <button id="storeAmazon" class="seg-btn" type="button">Amazon <span id="countAmazon" class="count"></span></button>
-  </div>
-  <div class="viewtabs">
-    <button id="viewList" class="tab active" type="button">Queue</button>
-    <button id="viewItem" class="tab" type="button">Item</button>
-    <button id="listedBtn" class="tab listed" type="button" title="Items listed through the Lister">✓ Listed <span id="countListedToday" class="count"></span></button>
-  </div>
-</nav>
 
 <aside id="listedDrawer" class="drawer" hidden aria-label="Listed through the Lister">
   <div class="drawer-head">
@@ -76,35 +78,40 @@
   <div id="listedList" class="list"></div>
 </aside>
 
-<div id="lock" class="lock"><span>🔒</span><span id="lockTitle" class="grow"></span><button id="unlock" class="mini" type="button" title="Show the queue again">Queue</button></div>
-
-<section id="pageCard" class="card page"></section>
+<!-- Only what is being decided or has gone wrong; where you are is the action bar's job. -->
+<section id="pageCard" class="notice" hidden></section>
 
 <section id="pickCard" class="card pick" hidden></section>
 
-<section id="listCard" class="card items">
-  <div class="tabs">
-    <div class="seg small" role="tablist" title="Item Prep status">
-      <button id="statusAll" class="seg-btn active" type="button">All</button>
-      <button id="statusGood" class="seg-btn good" type="button">Good</button>
-      <button id="statusBad" class="seg-btn bad" type="button">Bad</button>
-      <button id="statusListed" class="seg-btn" type="button" title="Already on a store (not listed through the Lister) or listed on the other store">On store</button>
+<section id="listCard" class="queue">
+  <div class="tools">
+    <div class="search"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Title, UPC or bin"></div>
+    <div class="filters">
+      <button id="statusAll" class="fchip" type="button" aria-pressed="true">All <span class="n"></span></button>
+      <button id="statusFlagged" class="fchip flag" type="button" aria-pressed="false">Flagged <span class="n"></span></button>
+      <button id="statusListed" class="fchip" type="button" aria-pressed="false" title="Already on a store, or listed on the other one">On a store <span class="n"></span></button>
+      <button id="statusBlocked" class="fchip block" type="button" aria-pressed="false" title="Amazon will not take this one from us">Blocked <span class="n"></span></button>
+      <button id="preloadAll" class="fchip preload" type="button" title="Prepare every queued item in the background: listing values plus the AI title, description and photos that are switched on">⚡ Preload all</button>
     </div>
-    <input id="filter" type="search" placeholder="Filter by title or UPC">
-    <button id="preloadAll" class="mini preload" type="button" title="Prepare every queued item in the background: listing values plus the AI title, description and photos that are switched on">⚡ Preload all</button>
-    <button id="reload" class="icon" type="button" title="Reload" aria-label="Reload">↻</button>
   </div>
   <div id="preloadBar" class="preloadbar" hidden></div>
   <div id="itemList" class="list"></div>
+  <button id="listedBtn" class="listedlink" type="button" title="What the Lister has recorded">✓ <b><span id="countListedToday">0</span> listed today</b> through the Lister<span class="chev">›</span></button>
 </section>
 
-<section id="detail" class="card detail" hidden></section>
+<section id="detail" class="detail" hidden></section>
 
-<section id="confirm" class="card confirm" hidden></section>
+<section id="confirm" class="confirm" hidden></section>
 
 <div id="modal" class="modal" hidden></div>
 
-<footer class="foot"><span id="toast" role="status"></span><button id="toastAction" class="link" type="button" hidden></button></footer>
+<div id="toastWrap" class="toastwrap" hidden><span id="toast" role="status"></span><button id="toastAction" class="link" type="button" hidden></button></div>
+
+<!-- The one next thing to do, always in the same place. -->
+<footer class="actionbar">
+  <button id="goBtn" class="go" type="button">Start</button>
+  <button id="moreBtn" class="more" type="button" title="Other things you can do here" aria-label="Other actions">⋯</button>
+</footer>
 
 <script src="matcher.js"></script>
 <script src="sidepanel.js"></script>

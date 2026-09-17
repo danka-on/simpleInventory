@@ -45,7 +45,7 @@
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', promptDraft: null, titlePrompt: '', savedTitlePrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
-    voiceBusy: new Set(), qrOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
+    voiceBusy: new Set(), qrOpen: false, advOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
   };
@@ -54,18 +54,29 @@
   const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const money = value => (value == null || value === '' ? '' : Number(value).toFixed(2));
   const storeName = p => (p === 'amazon' ? 'Amazon' : 'eBay');
+  // Write markup only when it really changed. An identical re-render would otherwise throw the
+  // nodes away underneath: pictures reload, a caret in a box is lost, and the panel flickers.
+  const written = new WeakMap();
+  function setHtml(el, html) {
+    if (written.get(el) === html) return false;
+    written.set(el, html);
+    el.innerHTML = html;
+    return true;
+  }
 
   class SignInError extends Error { constructor() { super('Sign in to Sweet Shelves'); this.signIn = true; } }
 
   function toast(message, bad = false, action = null) {
     const el = $('toast');
     el.textContent = message || '';
-    el.className = bad ? 'bad' : '';
+    const wrap = $('toastWrap');
+    wrap.hidden = !message;
+    wrap.className = 'toastwrap' + (bad ? ' bad' : '');
     const button = $('toastAction');
     state.toastAction = action;
     button.hidden = !action;
     if (action) { button.textContent = action.label; button.onclick = () => { button.hidden = true; state.toastAction = null; void action.run(); }; }
-    if (message) setTimeout(() => { if (el.textContent === message) { el.textContent = ''; if (state.toastAction === action) { button.hidden = true; state.toastAction = null; } } }, action ? 15000 : 6000);
+    if (message) setTimeout(() => { if (el.textContent === message) { el.textContent = ''; $('toastWrap').hidden = true; if (state.toastAction === action) { button.hidden = true; state.toastAction = null; } } }, action ? 15000 : 6000);
   }
 
   // Something is running: show the moving bar with what it is until every task released it.
@@ -79,14 +90,30 @@
     return release;
   }
 
+  // The bar's row is always in the layout and only its ink fades, so nothing below it ever moves.
+  // It waits before lighting up, so a quick request does not flash, and once lit it stays lit for a
+  // moment, so a run of short requests cannot strobe.
+  const BUSY_DELAY = 200, BUSY_MIN = 450;
+  let busyWant = false, busyLit = false, busyLitAt = 0, busyTimer = null;
+  function showBusy(want) {
+    if (want === busyWant) return;
+    busyWant = want;
+    if (busyTimer) { clearTimeout(busyTimer); busyTimer = null; }
+    if (want === busyLit) return;
+    const light = () => { busyLit = want; busyLitAt = Date.now(); busyTimer = null; $('busy').classList.toggle('on', want); };
+    const wait = want ? BUSY_DELAY : Math.max(0, BUSY_MIN - (Date.now() - busyLitAt));
+    if (wait) busyTimer = setTimeout(light, wait); else light();
+  }
+
   function renderBusy() {
     const el = $('busy');
     if (!el) return;
     // Safety net: nothing legitimately runs longer than ten minutes; drop anything older so the bar cannot stick.
     for (const [id, started] of state.busyStarted) if (Date.now() - started > 10 * 60 * 1000) { state.busyTasks.delete(id); state.busyStarted.delete(id); }
     const labels = [...state.busyTasks.values()];
-    el.hidden = !labels.length;
-    $('busyLabel').textContent = labels[labels.length - 1] || '';
+    el.hidden = false;
+    showBusy(Boolean(labels.length));
+    if (labels.length) $('busyLabel').textContent = labels[labels.length - 1];
   }
 
   // Each store tab keeps its own item, so an unfinished eBay listing is untouched while another tab lists on Amazon.
@@ -328,7 +355,7 @@
     const all = (state.listed || []).filter(isOwnListing);
     const linked = (state.listed || []).filter(l => !isOwnListing(l));
     const today = all.filter(l => listedInRange(l, 'today')).length;
-    if ($('countListedToday')) $('countListedToday').textContent = today ? String(today) : '';
+    if ($('countListedToday')) $('countListedToday').textContent = String(today || 0);
     const drawer = $('listedDrawer');
     if (!drawer || drawer.hidden) return;
     const range = state.listedRange || 'today';
@@ -608,11 +635,13 @@
     const failed = (all.upcs || []).filter(u => preloadSummary(state.preload.items[u] || {}).failed.length).length;
     bar.hidden = false;
     bar.classList.toggle('done', !running);
-    bar.innerHTML = `<div class="track"><i style="width:${all.percent}%"></i></div>` +
-      `<span>${running ? `Preloading <b>${all.done}</b> of ${all.total} · <b>${all.percent}%</b>` : `All ${all.total} preloaded · <b>100%</b>`}${failed ? ` · <span class="bad">${failed} failed</span>` : ''}</span>` +
-      (running ? '' : '<button id="preloadHide" class="mini" type="button" title="Hide">✓</button>');
+    // Built once, then only the numbers move: rebuilding it each poll made the bar twitch.
+    setHtml(bar, '<div class="track"><i></i></div><span class="say"></span><button id="preloadHide" class="mini" type="button" title="Hide">✓</button>');
+    bar.querySelector('.track i').style.width = all.percent + '%';
+    setHtml(bar.querySelector('.say'), `${running ? `Preloading <b>${all.done}</b> of ${all.total} · <b>${all.percent}%</b>` : `All ${all.total} preloaded · <b>100%</b>`}${failed ? ` · <span class="bad">${failed} failed</span>` : ''}`);
     const hide = $('preloadHide');
-    if (hide) hide.onclick = () => { state.preload.startedHere = false; renderPreloadBar(); };
+    hide.hidden = running;
+    hide.onclick = () => { state.preload.startedHere = false; renderPreloadBar(); };
   }
 
   async function transcribe(upc, mediaId, reanalyze) {
@@ -815,7 +844,8 @@
     // double-click must not fire a second search (two navigations abort each other).
     state.searched.add(key);
     const result = await searchUpc({ auto: true });
-    if (!result?.ok) state.searched.delete(key);  // otherwise the next page update tries again
+    if (result?.ok) state.pendingSearch = null;  // used up: one click, one search
+    else state.searched.delete(key);  // otherwise the next page update tries again
   }
 
   async function searchUpc({ auto = false } = {}) {
@@ -1327,70 +1357,78 @@
   // -- rendering ---------------------------------------------------------------------------
 
   function renderAll() {
-    renderHeader(); renderStoreBar(); renderPage(); renderItems(); renderDetail(); renderConfirm();
+    renderHeader(); renderStoreBar(); renderPage(); renderItems(); renderDetail(); renderConfirm(); renderActionBar();
   }
 
+  // The server is a dot: green when it answers, red when it does not. The detail is its tooltip.
   function renderHeader() {
-    const chip = $('connStatus');
-    if (state.connected === null) { chip.textContent = 'connecting…'; chip.className = 'chip'; }
-    else if (state.connected) { chip.textContent = state.user ? state.user.split('@')[0] : 'connected'; chip.className = 'chip ok'; chip.title = serverBase() + (state.user ? ' as ' + state.user : ''); }
-    else { chip.textContent = state.signIn ? 'sign in' : 'offline'; chip.className = 'chip bad'; }
+    const dot = $('connStatus');
+    if (state.connected === null) { dot.className = 'conn'; dot.title = 'Connecting\u2026'; }
+    else if (state.connected) { dot.className = 'conn ok'; dot.title = (state.user ? state.user.split('@')[0] + ' \u00b7 ' : '') + serverBase(); }
+    else { dot.className = 'conn bad'; dot.title = state.signIn ? 'Sign in to Sweet Shelves' : 'Offline \u2014 click to try again'; }
     $('signin').hidden = !state.signIn;
-    $('versionLine').textContent = `Extension ${chrome.runtime.getManifest().version}` + (state.serverVersion ? ` · server ${state.serverVersion}` : '');
+    $('versionLine').textContent = `Extension ${chrome.runtime.getManifest().version}` + (state.serverVersion ? ` \u00b7 server ${state.serverVersion}` : '');
   }
 
+  // The panel is in one place at a time: the queue, or one item. The crumb is the way back.
   function renderStoreBar() {
-    $('storeEbay').classList.toggle('active', state.platform === 'ebay');
-    $('storeAmazon').classList.toggle('active', state.platform === 'amazon');
     for (const p of ['ebay', 'amazon']) {
+      $(p === 'ebay' ? 'storeEbay' : 'storeAmazon').setAttribute('aria-selected', String(state.platform === p));
       const c = state.counts[p] || {};
-      $(p === 'ebay' ? 'countEbay' : 'countAmazon').textContent = c.queued != null ? `(${c.queued})` : '';
+      $(p === 'ebay' ? 'countEbay' : 'countAmazon').textContent = c.queued != null ? c.queued : '';
     }
-    $('viewList').classList.toggle('active', state.view === 'list');
-    $('viewItem').classList.toggle('active', state.view === 'item');
-    $('listCard').hidden = state.view !== 'list' || Boolean(state.locked);
+    const item = current();
+    const onItem = state.view === 'item' && Boolean(item);
     const locked = state.locked ? state.items.find(it => it.upc === state.locked) : null;
     document.body.classList.toggle('locked', Boolean(state.locked));
-    $('lock').classList.toggle('on', Boolean(state.locked));
-    if (state.locked) $('lockTitle').textContent = `Listing: ${locked?.title || state.locked}`;
+    $('crumb').hidden = !onItem;
+    if (onItem) $('crumbNow').textContent = locked?.title || item.title || item.upc;
+    $('crumbLock').hidden = !state.locked;
+    $('listCard').hidden = onItem;
+    renderActionBar();
   }
 
-  // Folding "Automatic" menu. scope 'top' = store card (every switch), 'photos' = by the photos (photo switches only).
-  // Both menus edit the same settings; ids: top = the setting key, photos = photo_<key>.
-  function autoMenu(scope) {
-    const top = scope === 'top';
-    const items = AUTO_TOGGLES.filter(t => top || t.group === 'Photos');
-    const openKey = top ? 'togglesOpen' : 'photoTogglesOpen';
-    const open = Boolean(state.settings[openKey]);
+  // The automatic switches. They live in Settings and nowhere else, so nothing on the work surface
+  // can be knocked by accident; the item view reports what they are set to in one line.
+  function autoMenu() {
+    const items = AUTO_TOGGLES;
+    const open = Boolean(state.settings.togglesOpen);
     const s = state.settings;
     const on = items.filter(t => s[t.key] && !t.sub).map(t => t.short + (t.key === 'autoSendPhotos' && s.autoSendAiOnly ? ' (AI only)' : ''));
-    const id = t => (top ? '' : 'photo_') + t.key;
     const groups = [...new Set(items.map(t => t.group))];
     const row = t => {
       const dim = t.sub && !s.autoSendPhotos;
       return `<label class="sw${t.sub ? ' sub' : ''}${dim ? ' dim' : ''}" title="${esc(t.hint)}">
-          <input id="${id(t)}" data-auto="${t.key}" type="checkbox" role="switch" ${s[t.key] ? 'checked' : ''}><span class="track" aria-hidden="true"></span>
+          <input id="${t.key}" data-auto="${t.key}" type="checkbox" role="switch" ${s[t.key] ? 'checked' : ''}><span class="track" aria-hidden="true"></span>
           <span class="ico" aria-hidden="true">${t.icon}</span><span class="txt"><b>${esc(t.label)}</b><small>${esc(t.hint)}</small></span></label>`;
     };
-    return `<div class="toggles auto-${scope}${open ? ' open' : ''}">
-        <button id="${top ? 'togglesBtn' : 'photoTogglesBtn'}" class="toggles-head" type="button" aria-expanded="${open}" title="${open ? 'Hide' : 'Show'} the automatic switches">
-          <span class="caret">${open ? '▾' : '▸'}</span><span class="lbl">${top ? 'Automatic' : 'Automatic photos'}</span>
+    return `<div class="toggles${open ? ' open' : ''}">
+        <button id="togglesBtn" class="toggles-head" type="button" aria-expanded="${open}" title="${open ? 'Hide' : 'Show'} the automatic switches">
+          <span class="caret">${open ? '\u25be' : '\u25b8'}</span><span class="lbl">Automatic</span>
           <span class="sum ${on.length ? 'on' : 'muted'}">${on.length ? on.map(x => `<span class="pill">${esc(x)}</span>`).join('') : 'all off'}</span></button>
         <div class="toggles-body"${open ? '' : ' hidden'}>
-          ${groups.map(g => `<div class="tgroup">${top ? `<div class="tg-title">${esc(g)}</div>` : ''}${items.filter(t => t.group === g).map(row).join('')}</div>`).join('')}
+          ${groups.map(g => `<div class="tgroup"><div class="tg-title">${esc(g)}</div>${items.filter(t => t.group === g).map(row).join('')}</div>`).join('')}
         </div>
       </div>`;
   }
 
-  function wireAutoMenu(scope) {
-    const top = scope === 'top';
-    const head = $(top ? 'togglesBtn' : 'photoTogglesBtn');
-    const openKey = top ? 'togglesOpen' : 'photoTogglesOpen';
-    if (head) head.onclick = async () => { await saveSettings({ ...state.settings, [openKey]: !state.settings[openKey] }); if (top) renderPage(); else renderDetail(); };
-    const root = head?.closest('.toggles');
-    for (const box of root ? root.querySelectorAll('input[data-auto]') : []) box.onchange = async () => {
-      const key = box.dataset.auto;
-      const on = box.checked;
+  // Plain words for what the panel will do by itself, shown once on the item view.
+  function autoSummary() {
+    const s = state.settings;
+    const on = AUTO_TOGGLES.filter(t => s[t.key] && !t.sub).map(t => t.short + (t.key === 'autoSendPhotos' && s.autoSendAiOnly ? ' (AI only)' : ''));
+    if (s.autoFill) on.unshift('fill');
+    return on.length ? on.join(' \u00b7 ') : 'nothing \u2014 you drive';
+  }
+
+  function renderAutoMenu() {
+    const box = $('autoBox');
+    if (!box) return;
+    box.innerHTML = autoMenu();
+    const head = $('togglesBtn');
+    head.onclick = async () => { await saveSettings({ ...state.settings, togglesOpen: !state.settings.togglesOpen }); renderAutoMenu(); };
+    for (const check of box.querySelectorAll('input[data-auto]')) check.onchange = async () => {
+      const key = check.dataset.auto;
+      const on = check.checked;
       await saveSettings({ ...state.settings, [key]: on });
       toast({
         autoAiTitle: on ? 'Will write the title automatically on every listing' : 'Automatic title off',
@@ -1399,7 +1437,7 @@
         autoSendPhotos: on ? 'Photos will go to the page on every listing (never the too-small ones)' : 'Automatic photo send off',
         autoSendAiOnly: on ? 'Only AI generated photos are sent by default' : 'All of our photos are sent by default (AI version preferred)',
       }[key]);
-      renderPage(); renderDetail();
+      renderAutoMenu(); renderDetail();
       if (!on) return;
       if (key === 'autoAiTitle' || key === 'autoAiDescription') void maybeAutoText();
       else if (key === 'autoAiPhotos') { if (detail()) void maybeAutoPhotos(detail()); }
@@ -1407,49 +1445,100 @@
     };
   }
 
+  // Only what is being decided here, or has gone wrong. Where you are and what to do next is the
+  // action bar's job, so this card is empty - and invisible - most of the time.
   function renderPage() {
     const page = state.page || {};
     const el = $('pageCard');
+    const assist = state.assist && state.assist.kind === page.kind ? state.assist : null;
+    const lines = [];
+    if (assist && assist.suggested) lines.push(`<div class="flag info"><b>Suggested:</b> ${esc(assist.suggested)}${page.kind === 'listing-confirm' ? ' (pre-selected)' : ' \u2014 your click teaches the panel'}</div>`);
+    else if (assist && assist.candidates) lines.push('<div class="flag warn">No confident suggestion here; your choice will be remembered.</div>');
+    if (page.error) lines.push(`<div class="flag warn">Page script: ${esc(page.error)}</div>`);
+    setHtml(el, lines.join(''));
+    el.hidden = !lines.length;
+    // The page kind stopped being a line of text on the store card; keep it readable for tests and bug reports.
+    document.body.dataset.pageKind = page.kind || '';
+    document.body.dataset.store = page.store || '';
+    renderActionBar();
+  }
+
+  // The single next thing to do, named for where you actually are.
+  function nextAction() {
+    const item = current();
+    const page = state.page || {};
+    const g = state.guide;
+    if (state.connected === false) return { label: state.signIn ? 'Sign in to Sweet Shelves' : 'Try the server again', run: () => { state.connected = null; renderHeader(); return connect().then(() => loadQueue()); } };
+    if (!item) return { label: `Nothing queued for ${storeName(state.platform)}`, disabled: true };
+    const start = { label: `Start on ${storeName(state.platform)}`, run: () => startOn(state.platform), hint: 'Opens the store and types the UPC' };
+    if (!page.store) return start;
+    switch (page.kind) {
+      case 'listing-start':
+      case 'product-search':
+        return { label: `Search ${esc(item.baseUpc || item.upc)}`, run: () => searchUpc(), hint: 'Types the UPC into the store search and presses it' };
+      case 'listing-category':
+      case 'listing-match':
+      case 'listing-confirm':
+        return { label: 'Choose on the page', disabled: true, hint: 'The panel highlights the closest match; your click teaches it' };
+      case 'listing-form':
+      case 'offer-form':
+        if (!g?.active) return { label: 'Fill page', run: () => fillPage(), hint: 'Puts the prepared values into the form' };
+        if (g.open) return { label: `Checklist \u00b7 ${g.open} left`, run: () => guide('start'), hint: 'Back to the checklist overlay on the page' };
+        return { label: 'All set \u2014 list it on the page', run: () => guide('start'), hint: 'Every field has a value' };
+      case 'listing-success':
+      case 'offer-success':
+      case 'listing-live': {
+        const linked = (detail()?.links || []).some(l => l.platform === (page.store || state.platform));
+        if (linked) return { label: 'Recorded \u2713', disabled: true, hint: 'The listing is on the ledger and on Items to List' };
+        return { label: 'Record this listing', run: () => confirmLink(), hint: 'Ties the store item number to this UPC' };
+      }
+      default:
+        return start;
+    }
+  }
+
+  function renderActionBar() {
+    const go = $('goBtn');
+    if (!go) return;
+    const action = nextAction();
+    go.textContent = action.label;
+    go.disabled = Boolean(action.disabled);
+    go.title = action.hint || action.label;
+    go.onclick = () => { if (!action.disabled && action.run) void action.run(); };
+  }
+
+  // Everything else you could do right here, one level down.
+  function moreActions() {
     const item = current();
     const info = detail();
-    const toggles = autoMenu('top');
-    const wireToggles = () => wireAutoMenu('top');
-    if (!page.store) {
-      el.innerHTML = `<div class="store"><span class="badge none">no store page</span></div>
-        ${toggles}`;
-      wireToggles();
-      return;
-    }
-    const kindText = {
-      'listing-start': 'search for the product', 'listing-category': 'choose a category', 'listing-match': 'find a catalog match', 'listing-confirm': 'confirm details',
-      'listing-form': 'listing form', 'listing-success': 'listing confirmed', 'listing-live': 'live listing',
-      'seller-hub': 'Seller Hub', 'offer-form': 'add product / offer form', 'offer-success': 'offer saved', 'product-search': 'product search', inventory: 'inventory',
-    }[page.kind] || 'page';
-    const assist = state.assist && state.assist.kind === page.kind ? state.assist : null;
-    const assistLine = assist ? (assist.suggested
-      ? `<div class="flag info"><b>Suggested:</b> ${esc(assist.suggested)}${page.kind === 'listing-confirm' ? ' (pre-selected)' : ' — your click teaches the panel'}</div>`
-      : (assist.candidates ? '<div class="flag warn">No confident suggestion here; your choice will be remembered.</div>' : '')) : '';
-    const chips = [];
-    if (page.listingId && page.store === 'ebay') chips.push(`Item # <code>${esc(page.listingId)}</code>`);
-    if (page.asin) chips.push(`ASIN <code>${esc(page.asin)}</code>`);
-    if (page.sku) chips.push(`SKU <code>${esc(page.sku)}</code>`);
+    const page = state.page || {};
     const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
-    const g = state.guide;
-    const actions = item ? [
-      onForm && !g?.active ? `<button id="guideBtn" class="primary" type="button" title="Show the checklist overlay on the page (fill, AI text, pick a field live there)">Show checklist</button>` : '',
-    ].filter(Boolean).join('') : '';
-    el.innerHTML = `
-      <div class="store"><span class="badge ${page.store}">${storeName(page.store)}</span>
-        <span class="grow">${esc(kindText)}${g?.active && onForm ? ` <span class="muted small">· ${esc(g.open)} of ${esc(g.total)} left</span>` : ''}${state.genBusy ? ` <span class="muted small">· writing ${esc(state.genBusy)}…</span>` : ''}</span>
-        <button id="pageRefresh" class="icon" type="button" title="Re-read page">↻</button></div>
-      ${chips.length ? `<div class="chips">${chips.join('')}</div>` : ''}
-      ${assistLine}
-      ${actions ? `<div class="actions">${actions}</div>` : ''}
-      ${toggles}
-      ${page.error ? `<div class="flag warn">Page script: ${esc(page.error)}</div>` : ''}`;
-    $('pageRefresh').onclick = () => refreshTab();
-    if ($('guideBtn')) $('guideBtn').onclick = () => guide('start');
-    wireToggles();
+    const list = [];
+    if (state.view === 'list') list.push({ label: '\u26a1 Preload every queued item', run: () => preloadAll(), off: Boolean(state.preload.all?.running) });
+    if (info && state.view === 'item') list.push({ label: '\u2b05 Send photos to the page', run: () => sendPhotos(), off: !page.store || Boolean(state.busy) });
+    if (info && state.view === 'item') list.push({ label: '\u2728 AI photoshop the photos', run: () => aiPhotoshop(), off: Boolean(state.aiBusy) || !(info.photos || []).length });
+    if (onForm) list.push({ label: '\u25ce Pick a field on the page', run: () => startPick() });
+    if (page.store) list.push({ label: '\u21bb Re-read the page', run: () => refreshTab() });
+    list.push({ label: '\u21bb Reload the queue', run: () => { state.details = {}; void connect().then(() => loadQueue()); void refreshTab(); } });
+    if (item) list.push({ label: `\u2715 Take this off the ${storeName(state.platform)} list`, run: () => skipItem(item), danger: true });
+    list.push({ label: '\u2197 Items to List', run: () => chrome.tabs.create({ url: serverBase() + '/items-to-list' }) });
+    list.push({ label: '\u2197 Ledger', run: () => chrome.tabs.create({ url: serverBase() + '/lister-ledger' }) });
+    return list;
+  }
+
+  function openMore() {
+    const box = $('modal');
+    const list = moreActions();
+    box.innerHTML = `<div class="box menu"><h2>Also here</h2>
+      ${list.map((a, i) => `<button class="menu-item${a.danger ? ' danger' : ''}" data-more="${i}" type="button"${a.off ? ' disabled' : ''}>${esc(a.label)}</button>`).join('')}
+      <button class="menu-close" data-more="close" type="button">Close</button></div>`;
+    box.hidden = false;
+    box.onclick = event => {
+      const button = event.target.closest('[data-more]');
+      if (!button && event.target !== box) return;
+      box.hidden = true;
+      if (button && button.dataset.more !== 'close') void list[Number(button.dataset.more)].run();
+    };
   }
 
   // Put one value on the store page (after an AI text or a note was applied) without a full re-fill.
@@ -1479,83 +1568,149 @@
 
   function renderItems() {
     const filter = state.filter.trim().toLowerCase();
-    const byStatus = it => {
-      const f = state.statusFilter;
-      if (f === 'good' || f === 'bad') return (it.prepStatus?.status || '') === f;
-      if (f === 'listed') return it.alreadyOnStore || it.otherStatus === 'listed';
-      return true;
-    };
-    // Listed on this store through the Lister: gone from this store's list (the other store still has it until
-    // it is listed there too). Those items live in the "✓ Listed" side bar.
+    const isFlagged = it => (it.prepStatus?.status || '') === 'bad' || Boolean(it.defect);
+    const isOnStore = it => Boolean(it.alreadyOnStore) || it.otherStatus === 'listed';
+    const isBlocked = it => state.platform === 'amazon' && ['restricted', 'approval', 'no_asin'].includes(it.amazonCheck?.status || '');
+    const tests = { all: () => true, flagged: isFlagged, listed: isOnStore, blocked: isBlocked };
     rememberThumbs(state.items);
-    for (const [id, value] of [['statusAll', 'all'], ['statusGood', 'good'], ['statusBad', 'bad'], ['statusListed', 'listed']]) $(id).classList.toggle('active', state.statusFilter === value);
-    const rows = state.items.filter(it => it.status === 'queued' && byStatus(it) && (!filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter)));
+    const queued = state.items.filter(it => it.status === 'queued');
+    // The filters carry their own counts: the numbers are why you would press one.
+    for (const [id, value, n] of [['statusAll', 'all', queued.length], ['statusFlagged', 'flagged', queued.filter(isFlagged).length],
+      ['statusListed', 'listed', queued.filter(isOnStore).length], ['statusBlocked', 'blocked', queued.filter(isBlocked).length]]) {
+      const button = $(id);
+      button.setAttribute('aria-pressed', String(state.statusFilter === value));
+      button.querySelector('.n').textContent = n;
+      button.hidden = value === 'blocked' && state.platform !== 'amazon';
+    }
+    const match = it => !filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter);
+    const rows = queued.filter(it => (tests[state.statusFilter] || tests.all)(it) && match(it));
     const list = $('itemList');
     if (!rows.length) {
       const listedHere = state.items.filter(it => it.status === 'listed').length;
-      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : (listedHere ? `Everything queued for ${storeName(state.platform)} is listed. See <b>✓ Listed</b>.` : `Nothing queued for ${storeName(state.platform)}. Add items to the Listing Agent queue on <b>Items to List</b>.`))}</div>`;
+      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : (listedHere ? `Everything queued for ${storeName(state.platform)} is listed.` : `Nothing queued for ${storeName(state.platform)}. Add items to the Listing Agent queue on <b>Items to List</b>.`))}</div>`;
       return;
     }
-    const active = rows;
-    const row = (it, first) => {
-      const chips = [];
-      const other = state.platform === 'ebay' ? 'amazon' : 'ebay';
-      if (it.status === 'listed') chips.push(`<span class="chip store ${state.platform}" title="Listed on ${storeName(state.platform)} through the panel">${storeName(state.platform)} ✓ listed ${it.storeUrl ? `<a href="${esc(it.storeUrl)}" target="_blank" rel="noopener">↗</a>` : ''}</span>`);
-      else if (it.alreadyOnStore) chips.push(`<span class="chip store ${state.platform}" title="${storeName(state.platform)} already carries this UPC">on ${storeName(state.platform)} ${it.storeUrl ? `<a href="${esc(it.storeUrl)}" target="_blank" rel="noopener" title="Open the store listing">↗</a>` : ''}</span>`);
-      if (it.otherStatus === 'listed') chips.push(`<span class="chip store ${other}" title="Already listed on ${storeName(other)}">${storeName(other)} ✓ listed</span>`);
-      if (it.notes) chips.push(`<span class="chip note" title="Prep notes on file">${it.notes.written ? '📝 ' + esc(it.notes.written) : ''}${it.notes.written && it.notes.voice ? ' · ' : ''}${it.notes.voice ? '🎤 ' + esc(it.notes.voice) : ''}</span>`);
-      const ps = it.prepStatus || {};
-      if (ps.status) chips.push(`<span class="chip ${ps.status === 'good' ? 'ok' : (ps.status === 'bad' ? 'bad' : 'warn')}" title="Item Prep status">${esc(ps.status)}${ps.reason ? ' · ' + esc(ps.reason) : ''}</span>`);
-      if (it.defect && (it.defect || '').toLowerCase() !== (ps.reason || '').toLowerCase()) chips.push(`<span class="chip defect" title="Defect noted on the BOL">${esc(it.defect)}</span>`);
-      if (it.preparing) chips.push('<span class="chip"><span class="spin"></span> preparing</span>');
-      const pl = preloadOf(it.upc);
-      const preloadChips = [];  // shown in their own column on the right, apart from the item's facts
-      if (pl) {
-        const s = preloadSummary(pl);
-        if (pl.queued) preloadChips.push('<span class="chip preload" title="Waiting for its turn in Preload all">⚡ queued</span>');
-        else if (pl.running) preloadChips.push(`<span class="chip preload"><span class="spin"></span> ${s.running ? esc(PRELOAD_LABEL[s.running[0]] || s.running[0]) + (s.running[0] === 'photos' ? esc(s.photos) : '') : 'preloading'}…</span>`);
-        else if (s.failed.length) preloadChips.push(`<span class="chip warn" title="${esc(s.failed.map(([k, v]) => s.problem(k, v)).join(' · '))}">⚡ ${esc(s.failed.map(([k]) => PRELOAD_LABEL[k]).join(', '))} failed</span>`);
-        else preloadChips.push(`<span class="chip preload done" title="${esc(s.steps.map(([k, v]) => PRELOAD_LABEL[k] + ' ' + (v === 'done' ? '✓' : v)).join(' · '))}">⚡ preloaded ✓</span>`);
-      }
+    // Only the exceptions earn a word here: a row with nothing on it is the good row. At most two,
+    // in fixed slots - what blocks this item, then where it already lives.
+    const signalsOf = it => {
+      const signals = [];
       const ac = state.platform === 'amazon' ? it.amazonCheck : null;
-      if (state.platform === 'amazon' && state.checkingAmazon.has(it.baseUpc)) chips.push('<span class="chip checking"><span class="spin"></span> Amazon check</span>');
-      else if (ac?.status === 'restricted') chips.push(`<span class="chip bad" title="${esc(amazonCheckWhy(ac) || 'Amazon restricts this listing for us')}">Amazon ✕ restricted</span>`);
-      else if (ac?.status === 'approval') chips.push(`<span class="chip warn" title="${esc(amazonCheckWhy(ac) || 'Amazon needs to approve us for this')}">Amazon ⚠ needs approval</span>`);
-      else if (ac?.status === 'partial') chips.push(`<span class="chip ok" title="${esc(amazonCheckWhy(ac))}">Amazon ✓ <span class="dim">(${esc((ac.openConditions || []).map(conditionLabel).join(', '))})</span></span>`);
-      else if (ac?.status === 'no_asin') chips.push('<span class="chip warn" title="No ASIN for this UPC: Amazon has no product page to list against">not in Amazon catalog</span>');
-      else if (ac?.status === 'listable') chips.push(`<span class="chip ok" title="ASIN ${esc(ac.asin)}${ac.brand ? ' · ' + esc(ac.brand) : ''}">Amazon ✓</span>`);
-      else if (ac) chips.push(`<span class="chip" title="${esc(ac.error || 'check failed')}">Amazon ?</span>`);
-      const upcHtml = it.suffixed ? `${esc(it.baseUpc)}-<b class="suffix" title="Specific unit: the SKU keeps the -suffix">${esc(it.upc.split('-')[1])}</b>` : esc(it.upc);
-      return `<div class="item ${it.upc === state.currentUpc ? 'current' : ''} ${first ? 'first' : ''} ${it.status === 'listed' ? 'listed' : ''} ${ac?.status === 'restricted' ? 'restricted' : ''}" data-upc="${esc(it.upc)}" title="${esc(it.title)} (double-click to start on ${esc(storeName(state.platform))})">
-        ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
-        <div><div class="title">${esc(it.title || '(no title)')}</div>
-          <div class="meta"><span>${upcHtml}</span>${chips.join('')}</div></div>
-        <div class="preload-col">${preloadChips.join('')}</div>
-        ${it.status === 'queued' ? `<button class="remove" data-skip="${esc(it.upc)}" type="button" title="Remove from the ${storeName(state.platform)} list" aria-label="Remove">×</button>` : '<span></span>'}
-      </div>`;
+      if (state.platform === 'amazon' && state.checkingAmazon.has(it.baseUpc)) signals.push('<span class="sig quiet"><span class="spin"></span> checking</span>');
+      else if (ac?.status === 'restricted') signals.push(`<span class="sig block" title="${esc(amazonCheckWhy(ac) || 'Amazon restricts this listing for us')}">Amazon restricted</span>`);
+      else if (ac?.status === 'approval') signals.push(`<span class="sig block" title="${esc(amazonCheckWhy(ac) || 'Amazon needs to approve us for this')}">needs approval</span>`);
+      else if (ac?.status === 'no_asin') signals.push('<span class="sig block" title="No ASIN for this UPC: Amazon has no product page to list against">not in the catalogue</span>');
+      const bad = it.prepStatus?.status === 'bad' ? (it.prepStatus.reason || 'bad') : '';
+      const wrong = bad || it.defect || '';
+      // One flag, even when Item Prep and the BOL both have something to say; the tooltip carries both.
+      if (wrong) signals.push(`<span class="sig flag" title="${esc([bad ? 'Item Prep: ' + bad : '', it.defect ? 'BOL: ' + it.defect : ''].filter(Boolean).join(' · '))}">${esc(wrong)}</span>`);
+      const noted = it.notes ? [it.notes.written ? '\ud83d\udcdd ' + it.notes.written : '', it.notes.voice ? '\ud83c\udfa4 ' + it.notes.voice : ''].filter(Boolean).join(' \u00b7 ') : '';
+      if (noted) signals.push(`<span class="sig quiet" title="Prep notes on file">${esc(noted)}</span>`);
+      const other = state.platform === 'ebay' ? 'amazon' : 'ebay';
+      if (it.status === 'listed') signals.push(`<span class="sig done" title="Listed through the panel">listed${it.storeUrl ? ` <a href="${esc(it.storeUrl)}" target="_blank" rel="noopener">\u2197</a>` : ''}</span>`);
+      else if (it.alreadyOnStore) signals.push(`<span class="sig quiet" title="${storeName(state.platform)} already carries this UPC">on ${storeName(state.platform)}${it.storeUrl ? ` <a href="${esc(it.storeUrl)}" target="_blank" rel="noopener">\u2197</a>` : ''}</span>`);
+      else if (it.otherStatus === 'listed') signals.push(`<span class="sig quiet">on ${storeName(other)}</span>`);
+      if (it.preparing) signals.push('<span class="sig quiet"><span class="spin"></span> preparing</span>');
+      return signals.slice(0, 2);
     };
-    list.innerHTML = active.map((it, i) => row(it, i === 0)).join('');
-    for (const el of list.querySelectorAll('.item')) {
-      el.onclick = event => {
-        if (event.target.closest('a, button')) return;
-        // Double-click = start this item on the store (the row is re-rendered by the first click, so a
-        // native dblclick would land on a replaced node; compare with the previous click instead).
+    // Preload is one bolt: lit when it is ready, dim while it waits, amber when a step failed.
+    const boltOf = it => {
+      const pl = preloadOf(it.upc);
+      const s = pl ? preloadSummary(pl) : null;
+      return !pl ? '' : pl.running ? '<span class="spin" title="Preloading"></span>'
+        : pl.queued ? '<span class="bolt off" title="Waiting its turn in Preload all">\u26a1</span>'
+        : s.failed.length ? `<span class="bolt warn" title="${esc(s.failed.map(([k, v]) => s.problem(k, v)).join(' \u00b7 '))}">\u26a1</span>`
+        : `<span class="bolt on" title="${esc(s.steps.map(([k, v]) => PRELOAD_LABEL[k] + ' ' + (v === 'done' ? '\u2713' : v)).join(' \u00b7 '))}">\u26a1</span>`;
+    };
+    const upcHtml = it => (it.suffixed ? `${esc(it.baseUpc)}-<b class="suffix" title="Specific unit: the SKU keeps the -suffix">${esc(it.upc.split('-')[1])}</b>` : esc(it.upc));
+
+    // A row is built once and then patched in place. Rebuilding the list with innerHTML on every
+    // render throws the nodes away: the list jumps back to the top, every thumbnail reloads and the
+    // row flickers under the cursor - which is what a single click used to look like.
+    const newRow = it => {
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.dataset.upc = it.upc;
+      el.innerHTML = `<span class="stripe"></span>${it.thumb ? '<img alt="" loading="lazy">' : '<div class="noimg"></div>'}`
+        + '<div class="body"><div class="title"></div><div class="sub"></div></div>'
+        + '<span class="state"><span class="bolt-slot"></span><button class="start" type="button" aria-label="Start">\u25b6</button>'
+        + '<button class="remove" type="button" aria-label="Remove">\u00d7</button></span>';
+      return el;
+    };
+    const patchRow = (el, it) => {
+      const cls = `item${it.upc === state.currentUpc ? ' current' : ''}${isBlocked(it) ? ' blocked' : ''}${it.status === 'listed' ? ' listed' : ''}`;
+      if (el.className !== cls) el.className = cls;
+      const tip = `${it.title} \u2014 click to open it, \u25b6 to start on ${storeName(state.platform)}`;
+      if (el.title !== tip) el.title = tip;
+      // The picture is only touched when the picture itself changed, so it never reloads.
+      const pic = el.children[1];
+      if (it.thumb && pic.tagName === 'IMG') { if (pic.getAttribute('src') !== it.thumb) pic.setAttribute('src', it.thumb); }
+      else if (it.thumb) { const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; img.setAttribute('src', it.thumb); el.replaceChild(img, pic); }
+      else if (pic.tagName === 'IMG') { const box = document.createElement('div'); box.className = 'noimg'; el.replaceChild(box, pic); }
+      const body = el.children[2];
+      const text = it.title || '(no title)';
+      if (body.firstElementChild.textContent !== text) body.firstElementChild.textContent = text;
+      setHtml(body.lastElementChild, `<span class="upc">${upcHtml(it)}</span>${signalsOf(it).join('')}`);
+      const right = el.children[3];
+      setHtml(right.firstElementChild, boltOf(it));
+      const start = right.children[1];
+      start.dataset.start = it.upc;
+      start.title = `Open ${storeName(state.platform)} and search this UPC`;
+      const remove = right.lastElementChild;
+      remove.hidden = it.status !== 'queued';
+      remove.dataset.skip = it.upc;
+      remove.title = `Take it off the ${storeName(state.platform)} list`;
+    };
+    if (list.firstElementChild && !list.firstElementChild.dataset.upc) list.textContent = '';  // the empty message was here
+    const kept = new Map([...list.children].map(el => [el.dataset.upc, el]));
+    let previous = null;
+    for (const it of rows) {
+      let el = kept.get(it.upc);
+      if (el) kept.delete(it.upc); else el = newRow(it);
+      patchRow(el, it);
+      const place = previous ? previous.nextSibling : list.firstChild;
+      if (el !== place) list.insertBefore(el, place);   // moved only when it is in the wrong place
+      previous = el;
+    }
+    for (const el of kept.values()) el.remove();
+
+    // One handler for the whole list, wired once: the rows themselves come and go.
+    if (!list.dataset.wired) {
+      list.dataset.wired = '1';
+      list.onclick = event => {
+        const skip = event.target.closest('button[data-skip]');
+        if (skip) { event.stopPropagation(); const it = state.items.find(x => x.upc === skip.dataset.skip); if (it) void skipItem(it); return; }
+        // The row's play button opens the store on this item. It replaces the double-click, which
+        // cannot finish any more: the first click hands the panel over to the item view.
+        const play = event.target.closest('button[data-start]');
+        if (play) { event.stopPropagation(); pickItem(play.dataset.start); void startOn(state.platform); return; }
+        const el = event.target.closest('.item');
+        if (!el || event.target.closest('a, button')) return;
+        // Double-click = start this item on the store. Compared with the previous click rather than
+        // with a native dblclick, which a re-render during the gap could still swallow.
         const now = Date.now();
         const again = state.lastItemClick && state.lastItemClick.upc === el.dataset.upc && now - state.lastItemClick.at < 450;
         state.lastItemClick = again ? null : { upc: el.dataset.upc, at: now };
         if (again) { void startOn(state.platform); return; }
-        state.currentUpc = el.dataset.upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); state.promptDraft = null; remember();
-        renderItems(); renderDetail(); renderConfirm();
-        void loadDetail(state.currentUpc).then(() => maybeAssist());
-        void preloadItem(state.currentUpc);
-        if (state.page?.store) bindTab(state.currentUpc, state.platform);
-        // Picked while the store's search page is open: search this UPC right away.
-        state.pendingSearch = { upc: state.currentUpc, platform: state.platform };
-        void maybeAutoSearch({ force: true });
+        pickItem(el.dataset.upc);
       };
     }
-    for (const button of list.querySelectorAll('button[data-skip]')) {
-      button.onclick = event => { event.stopPropagation(); const it = state.items.find(x => x.upc === button.dataset.skip); if (it) void skipItem(it); };
+  }
+
+  // Opening a queue row: this item becomes the one the panel is working, and the item view takes over.
+  function pickItem(upc) {
+    if (!upc) return;
+    state.currentUpc = upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); state.promptDraft = null; remember();
+    setView('item');
+    renderItems(); renderConfirm();
+    void loadDetail(upc).then(() => maybeAssist());
+    void preloadItem(upc);
+    if (state.page?.store) bindTab(upc, state.platform);
+    // Picked while the store's search page is open: search this UPC right away. Opening a row is now
+    // how you open an item, so arm it only when that page is actually in front - otherwise a search
+    // page opened an hour later would run off and search on its own.
+    if (state.page?.kind === 'listing-start' || state.page?.kind === 'product-search') {
+      state.pendingSearch = { upc, platform: state.platform };
+      void maybeAutoSearch({ force: true });
     }
   }
 
@@ -1576,7 +1731,8 @@
     el.hidden = !item || state.view !== 'item';
     if (!item || state.view !== 'item') return;
     if (!info) {
-      el.innerHTML = `<div class="head">${item.thumb ? `<img src="${esc(item.thumb)}" alt="">` : '<div class="noimg"></div>'}<div><div class="name">${esc(item.title || item.upc)}</div><div class="muted small">${esc(item.upc)}</div></div></div><p class="muted"><span class="spin"></span> Loading item…</p>`;
+      // The waiting card keeps the room the real one will need, so nothing jumps when it arrives.
+      setHtml(el, `<div class="hero">${item.thumb ? `<img src="${esc(item.thumb)}" alt="">` : '<div class="noimg"></div>'}<div><div class="name">${esc(item.title || item.upc)}</div><div class="facts">${esc(item.upc)}</div></div></div><p class="muted loading"><span class="spin"></span> Loading item\u2026</p>`);
       return;
     }
     const v = values(info);
@@ -1599,88 +1755,108 @@
       if (platform === 'amazon' && entry.asin) return 'https://www.amazon.com/dp/' + encodeURIComponent(entry.asin);
       return '';
     };
-    const storeTile = platform => {
-      // A linked listing the store already carried says "on store", not "listed": the panel did not list it.
+    // One cell per store: green when it is on there, grey when it is not. No colour without meaning.
+    const storeCell = platform => {
+      // A linked listing the store already carried says "On store", not "Listed": the panel did not list it.
       const link = (info.links || []).find(l => l.platform === platform);
       const linkedExisting = !!link && !isOwnListing(link);
       const linked = !linkedExisting && (!!link || info.queue?.listed?.[platform]);
       const onStore = linkedExisting || ((info.existing || {})[platform] || []).length > 0;
       const skipped = info.queue?.skipped?.includes(platform);
-      const [cls, text, sub] = linked ? ['ok', 'LISTED', 'recorded by the panel'] : onStore ? ['warn', 'ON STORE', 'already carries this UPC'] : skipped ? ['off', 'SKIPPED', 'left off this list'] : ['todo', 'NOT LISTED', ''];
+      const [cls, text] = linked ? ['good', 'Listed'] : onStore ? ['good', 'On store'] : skipped ? ['idle', 'Skipped'] : ['idle', 'Not listed'];
       const url = (linked || onStore) ? storeUrlFor(platform) : '';
-      const open = url ? ` <a class="open" href="${esc(url)}" target="_blank" rel="noopener" title="Open the ${storeName(platform)} listing">open ↗</a>` : '';
-      return `<div class="tile ${cls}"><div class="k">${storeName(platform)}</div><div class="v">${text}${open}</div><div class="s">${esc(sub)}</div></div>`;
+      const live = platform === 'ebay' ? gate.liveEbay : gate.liveAmazon;
+      return `<div class="cell ${cls}"><div class="k">${storeName(platform)}</div>
+        <div class="v">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" title="Open the ${storeName(platform)} listing">${text} \u2197</a>` : text}</div>
+        <div class="s">${esc(live ?? 0)} live</div></div>`;
     };
     const rackQty = gate.rackQty ?? stock.quantity ?? 0;
     const listable = gate.listable ?? (stock.quantity || 0);
     const warehouseUrl = serverBase() + '/unified-search?q=' + encodeURIComponent(info.upc);
     const prepUrl = serverBase() + '/items-to-list?direct_search=1&q=' + encodeURIComponent(info.upc);
-    const stockLine = [
-      `<b>${esc(listable)}</b> to list`,
-      gate.prepQty != null ? `<a class="prep ${gate.mismatch ? 'differs' : ''}" href="${esc(prepUrl)}" target="_blank" rel="noopener" title="Open Items to List${gate.mismatch ? ' — prep counted ' + esc(gate.prepQty) + ', the rack holds ' + esc(rackQty) : ''}">prep ${esc(gate.prepQty)}${gate.mismatch ? ' <span class="neq">≠</span>' : ''}</a>` : '',
-      `live eBay ${esc(gate.liveEbay ?? 0)}`,
-      `Amazon ${esc(gate.liveAmazon ?? 0)}`,
-    ].filter(Boolean).join(' · ');
-    const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : '');
-    const tile = p => { const used = state.usedPhotos.has(p.url); return `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''} ${used ? 'used' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)}${used ? ' · already on the page' : ' · drag onto the store page'}">
+    const where = stock.positions?.length
+      ? `@ ${stock.positions.map(p => `<button type="button" class="loc" data-locpv="${esc(p)}" title="Show the shelf photo for ${esc(p)}">${esc(p)}</button>`).join(', ')}`
+      : 'no rack position';
+    // The thing you must act on, said once, in words - not a chip in a row of chips.
+    const alerts = [];
+    const wrong = (prep.status === 'bad' ? (prep.reason || 'marked bad in Item Prep') : '') || info.defect || '';
+    if (wrong) alerts.push(`<div class="alert warn">\u26a0 ${esc(wrong)} \u2014 say so in the condition note</div>`);
+    if (!rackQty) alerts.push('<div class="alert block">\u26a0 Nothing on the rack for this UPC</div>');
+    if (gate.mismatch) alerts.push(`<div class="alert warn">Item Prep counted ${esc(gate.prepQty)}, the rack holds ${esc(rackQty)} \u2014 <a href="${esc(prepUrl)}" target="_blank" rel="noopener">open Items to List</a></div>`);
+    if (existing.length && !linkedHere) alerts.push(`<div class="alert warn"><span class="grow">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}</span>
+      <button id="markExisting" class="tiny" type="button">Use that listing</button></div>`);
+    const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : p.source === 'catalog' ? 'catalog' : '');
+    const tile = p => { const used = state.usedPhotos.has(p.url); return `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''} ${used ? 'used' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)}${used ? ' \u00b7 already on the page' : ' \u00b7 drag onto the store page'}">
         <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}>
-        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px — never sent automatically">too small</span>${used ? '<span class="tag used" title="This photo already went into the page">used</span>' : ''}</div>`; };
-    const noteRow = (icon, lt, en, extra = '') => `<div class="note2"><span class="ico" title="${icon === '🎤' ? 'Voice note' : 'Written note'}">${icon}</span>
-        <div class="lt">${lt ? esc(lt) : '<span class="muted">—</span>'}</div><div class="en">${en ? esc(en) : '<span class="muted">—</span>'}</div>${extra}</div>`;
-    el.innerHTML = `
-      <div class="head">${(photos[0] || {}).url || item.thumb ? `<img src="${esc((photos[0] || {}).url || item.thumb)}" alt="">` : '<div class="noimg"></div>'}
+        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px \u2014 never sent automatically">too small</span>${used ? '<span class="tag used" title="This photo already went into the page">used</span>' : ''}</div>`; };
+    const noteRow = (icon, lt, en, extra = '', plain = false) => `<div class="note2${plain ? ' plain' : ''}"><span class="ico" title="${icon === '\ud83c\udfa4' ? 'Voice note' : 'Written note'}">${icon}</span>
+        <div class="lt">${lt ? esc(lt) : '<span class="muted">\u2014</span>'}</div><div class="en">${en ? esc(en) : '<span class="muted">\u2014</span>'}</div>${extra}</div>`;
+    const html = `
+      <div class="hero">${(photos[0] || {}).url || item.thumb ? `<img src="${esc((photos[0] || {}).url || item.thumb)}" alt="">` : '<div class="noimg"></div>'}
         <div><div class="name">${esc(v.title || item.title || item.upc)}</div>
-          <div class="muted small">${esc(info.upc)}${info.suffixed ? ` · <b>unit ${esc(info.upc.split('-')[1])}</b>` : ''}${info.cost != null ? ' · cost $' + money(info.cost) : ''}${v.price != null ? ' · price $' + esc(money(v.price)) : ''} · qty ${esc(v.quantity ?? '?')}</div>
-          ${prep.status ? `<div class="chips"><span class="chip ${prep.status === 'good' ? 'ok' : (prep.status === 'bad' ? 'bad' : 'warn')}" title="${esc(prep.reason || '')}">status: ${esc(prep.status.toUpperCase())}</span>${prep.reason ? `<span class="muted small">${esc(prep.reason)}</span>` : ''}</div>` : ''}
+          <div class="facts">${esc(info.upc.split('-')[0])}${info.suffixed ? ` \u00b7 <span class="unit">unit ${esc(info.upc.split('-')[1])}</span>` : ''}${info.cost != null ? ' \u00b7 $' + money(info.cost) : ''}${v.price != null ? ' \u2192 <b>$' + esc(money(v.price)) + '</b>' : ''} \u00b7 qty ${esc(v.quantity ?? '?')}</div>
         </div></div>
-      <div class="tiles">
-        <div class="tile stock ${rackQty ? 'ok' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Warehouse stock</div>
-          <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search">${esc(rackQty)} on the rack</a>${stock.positions?.length ? ` <span class="pos">@ ${stock.positions.map(p => `<button type="button" class="loc" data-locpv="${esc(p)}" title="Show the shelf photo for ${esc(p)}">${esc(p)}</button>`).join(', ')}</span>` : ''}</div>
-          <div class="s">${stockLine}</div></div>
-        ${storeTile('ebay')}${storeTile('amazon')}
+      ${alerts.join('')}
+      <div class="strip">
+        <div class="cell ${rackQty ? 'good' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Rack</div>
+          <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search"><span class="num">${esc(listable)}</span> to list</a>${gate.mismatch ? ' <span class="neq">\u2260</span>' : ''}</div>
+          <div class="s">${where}</div></div>
+        ${storeCell('ebay')}${storeCell('amazon')}
       </div>
-      ${existing.length && !linkedHere ? `<div class="flag warn">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}.
-        <button id="markExisting" class="mini" type="button">Use that listing</button> ${item.storeUrl ? `<a href="${esc(item.storeUrl)}" target="_blank" rel="noopener">open</a>` : ''}</div>` : ''}
 
-      <section class="sticky">
-      <h3>Notes <span class="grow"></span>${notes.length || voice.length || info.defect ? '<span class="muted">LT · EN</span>' : '<span class="muted">none</span>'}</h3>
-      ${voice.map(n => noteRow('🎤', n.lithuanian, n.english, `<div class="acts">
-          ${n.status === 'complete' || n.english ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span>' : `<button class="mini" data-transcribe="${n.id}" type="button" title="Transcribe and translate">text</button>`)}
-          <button class="mini" data-play="${esc(n.url)}" type="button" title="Play the recording">▶</button>
-          ${n.english ? `<button class="mini" data-usenote="${n.id}" type="button" title="Add to the condition note on the listing">→ listing</button>` : ''}
+      <div class="sect">
+        <div class="sect-h"><span class="lbl">Notes</span><span class="n">${notes.length || voice.length || info.defect ? 'LT \u00b7 EN' : 'none'}</span><span class="sp"></span></div>
+        ${voice.map(n => noteRow('\ud83c\udfa4', n.lithuanian, n.english, `<div class="acts">
+          ${n.status === 'complete' || n.english ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span>' : `<button class="tiny" data-transcribe="${n.id}" type="button" title="Transcribe and translate">text</button>`)}
+          <button class="tiny" data-play="${esc(n.url)}" type="button" title="Play the recording">\u25b6</button>
+          ${n.english ? `<button class="tiny" data-usenote="${n.id}" type="button" title="Add to the condition note on the listing">\u2192 listing</button>` : ''}
           ${n.error && !n.english ? `<span class="chip bad" title="${esc(n.error)}">failed</span>` : ''}</div>`)).join('')}
-      ${info.defect ? noteRow('📦', '', 'BOL reason: ' + info.defect) : ''}
-      ${notes.map(n => { const h = noteHalves(n); return noteRow('📝', h.lt, h.en, `<div class="acts muted small">${esc((n.createdAt || '').slice(0, 10))}</div>`); }).join('')}
-      <audio id="notePlayer" preload="none" hidden></audio>
-      </section>
-
-      <h3>Photos <span class="muted">(${photos.length})</span><span class="grow"></span><button id="addPhoto" class="mini primary" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : '+ Photo (QR)'}</button><button id="photoLink" class="mini" type="button" title="Telegram the same camera link to the phone — no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span> Sending…' : '+ Photo link'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
-      ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone — it opens straight into the camera. Press ↻ when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
-      ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo (QR) or + Photo link to shoot some on the phone.</div>'}
-      <div class="row tight">
-        <button id="sendPhotos" class="act send" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending…' : '⬅ Send to page'}</button>
-        <button id="aiPhotos" class="act ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '✨ AI photoshop'}</button>
+        ${info.defect ? noteRow('\ud83d\udce6', '', 'BOL reason: ' + info.defect, '', true) : ''}
+        ${notes.map(n => { const h = noteHalves(n); return noteRow('\ud83d\udcdd', h.lt, h.en, `<div class="acts muted small">${esc((n.createdAt || '').slice(0, 10))}</div>`, true); }).join('')}
+        ${!voice.length && !notes.length && !info.defect ? '<div class="muted small">No notes on this one.</div>' : ''}
+        <audio id="notePlayer" preload="none" hidden></audio>
       </div>
-      ${autoMenu('photos')}
-      <details id="aiPromptBox" ${state.promptOpen || state.aiPrompt || state.promptDraft?.upc === info.upc ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(promptFor(info))}</textarea>
-        <div class="row tight"><button id="aiPromptSave" class="mini" type="button" title="Keep this prompt for every item and every session">Save for all sessions</button><button id="aiPromptReset" class="mini" type="button" title="Back to the default prompt for every item">Reset to default</button>
-        <span class="muted small" id="aiPromptWhere">${state.promptDraft?.upc === info.upc ? 'this item only' : (state.aiPrompt ? 'saved for all items' : 'the default prompt')}</span></div></details>
-      <details ${state.titlePrompt ? 'open' : ''}><summary>AI title prompt${state.titlePrompt ? (state.titlePrompt === state.savedTitlePrompt ? ' <span class="muted">(saved)</span>' : ' <span class="muted">(this session)</span>') : ''}</summary>
-        <textarea id="titlePrompt" rows="3" placeholder="Extra instructions for the AI title, e.g. always put the size at the end">${esc(state.titlePrompt)}</textarea>
-        <div class="row tight"><button id="titlePromptSave" class="mini" type="button" title="Keep this prompt for every session, on every item">Save for all sessions</button><button id="titlePromptReset" class="mini" type="button" title="Back to the built-in title prompt">Reset to default</button></div>
-        <div class="muted small">Typing here changes the prompt for this session only.</div></details>
-      ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
+
+      <div class="sect">
+        <div class="sect-h"><span class="lbl">Photos</span><span class="n">${photos.length}${state.usedPhotos.size ? ` \u00b7 ${state.usedPhotos.size} sent` : ''}</span><span class="sp"></span>
+          <button id="addPhoto" class="tiny" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : 'QR'}</button>
+          <button id="photoLink" class="tiny" type="button" title="Telegram the same camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : 'Phone'}</button>
+          <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button></div>
+        ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone \u2014 it opens straight into the camera. Press \u21bb when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
+        ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use QR or Phone to shoot some.</div>'}
+        <div class="row tight">
+          <button id="sendPhotos" class="primary mini" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending\u2026' : '\u2b05 Send to page'}</button>
+          <button id="aiPhotos" class="mini" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '\u2728 AI photoshop'}</button>
+        </div>
+      </div>
+
+      <div class="autoline">By itself: <b>${esc(autoSummary())}</b><button class="edit" id="autoEdit" type="button">Change</button></div>
+
+      <details class="adv" id="advBox" ${state.advOpen ? 'open' : ''}><summary>Advanced \u2014 prompts, specifics, manual link</summary>
+        <div class="inner">
+          <div><h3>AI photoshop prompt <span class="muted" id="aiPromptWhere">${state.promptDraft?.upc === info.upc ? 'this item only' : (state.aiPrompt ? 'saved for all items' : 'the default prompt')}</span></h3>
+            <textarea id="aiPrompt" rows="3">${esc(promptFor(info))}</textarea>
+            <div class="row tight"><button id="aiPromptSave" class="tiny" type="button" title="Keep this prompt for every item and every session">Save for all</button><button id="aiPromptReset" class="tiny" type="button" title="Back to the default prompt for every item">Reset</button></div></div>
+          <div><h3>AI title prompt${state.titlePrompt ? (state.titlePrompt === state.savedTitlePrompt ? ' <span class="muted">saved</span>' : ' <span class="muted">this session</span>') : ''}</h3>
+            <textarea id="titlePrompt" rows="3" placeholder="Extra instructions for the AI title, e.g. always put the size at the end">${esc(state.titlePrompt)}</textarea>
+            <div class="row tight"><button id="titlePromptSave" class="tiny" type="button" title="Keep this prompt for every session, on every item">Save for all</button><button id="titlePromptReset" class="tiny" type="button" title="Back to the built-in title prompt">Reset</button></div></div>
+          ${aspects.length ? `<div><h3>Item specifics (${aspects.length})</h3><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></div>` : ''}
+        </div></details>
       `;
+    // Nothing about the item changed: leave the card alone, photos, open boxes, caret and all.
+    if (!setHtml(el, html)) return;
 
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
+    $('advBox').ontoggle = () => { state.advOpen = $('advBox').open; };
+    $('autoEdit').onclick = () => { $('settings').hidden = false; renderAutoMenu(); $('settings').scrollIntoView({ block: 'nearest' }); };
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
     for (const button of el.querySelectorAll('button[data-locpv]')) button.onclick = () => locPreview.open(button.dataset.locpv);
     for (const button of el.querySelectorAll('button[data-play]')) button.onclick = () => {
       const player = $('notePlayer');
-      if (player.src === button.dataset.play && !player.paused) { player.pause(); button.textContent = '▶'; return; }
-      for (const b of el.querySelectorAll('button[data-play]')) b.textContent = '▶';
-      player.src = button.dataset.play; void player.play().catch(() => toast('Could not play the recording', true)); button.textContent = '⏸';
-      player.onended = () => { button.textContent = '▶'; };
+      if (player.src === button.dataset.play && !player.paused) { player.pause(); button.textContent = '\u25b6'; return; }
+      for (const b of el.querySelectorAll('button[data-play]')) b.textContent = '\u25b6';
+      player.src = button.dataset.play; void player.play().catch(() => toast('Could not play the recording', true)); button.textContent = '\u23f8';
+      player.onended = () => { button.textContent = '\u25b6'; };
     };
     for (const button of el.querySelectorAll('button[data-usenote]')) button.onclick = async () => {
       const note = voice.find(n => n.id === Number(button.dataset.usenote));
@@ -1718,8 +1894,6 @@
     }
     $('sendPhotos').onclick = () => sendPhotos();
     $('aiPhotos').onclick = () => aiPhotoshop();
-    wireAutoMenu('photos');
-    $('aiPromptBox').ontoggle = () => { state.promptOpen = $('aiPromptBox').open; };  // stays open across re-renders once opened
     $('aiPrompt').oninput = () => {
       state.promptDraft = { upc: info.upc, text: $('aiPrompt').value };
       $('aiPromptWhere').textContent = 'this item only';
@@ -1747,6 +1921,7 @@
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
     $('photoLink').onclick = () => sendPhotoLink(info);
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
+    renderActionBar();
   }
 
   function renderGuideOnly() {
@@ -1842,7 +2017,7 @@
     const linked = info.links || [];
     const lastLink = state.lastLink && state.lastLink.upc === info.upc ? state.lastLink : null;
     const successPage = page.kind === 'listing-success' || page.kind === 'offer-success' || page.kind === 'listing-live';
-    el.innerHTML = `
+    const html = `
       <details ${successPage || lastLink ? 'open' : ''}><summary><b>Confirm &amp; link</b> <span class="muted">(recorded automatically when the store confirms; use this if it did not)</span></summary>
       ${linked.length ? `<div class="flag info">Linked: ${linked.map(l => `${esc(l.platform)} ${esc(l.listing_id || l.sku || l.asin)}${l.url ? ` <a href="${esc(l.url)}" target="_blank" rel="noopener">open</a>` : ''}`).join(' · ')}</div>` : ''}
       ${lastLink ? `<div class="flag info"><b>Recorded.</b><ul class="steps">${(lastLink.effects?.steps || []).map(s => `<li>${esc(s)}</li>`).join('')}</ul><button id="undoLink" class="link danger" type="button">Undo this link</button></div>` : ''}
@@ -1863,6 +2038,8 @@
       <label>Note<input id="cfNote" placeholder="optional"></label>
       <div class="row"><button id="confirmBtn" class="primary" type="button" ${state.busy === 'confirm' ? 'disabled' : ''}>${state.busy === 'confirm' ? 'Recording…' : 'Confirm & link'}</button>
         <span class="muted small">Marks it listed on Items to List and in the ledger.</span></div></details>`;
+    // Same card as a moment ago: keep the boxes, and whatever is half-typed in them.
+    if (!setHtml(el, html)) return;
     for (const radio of el.querySelectorAll('input[name="cfPlatform"]')) radio.onchange = () => { $('cfListingIdLabel').hidden = radio.value === 'amazon'; $('cfAsinLabel').hidden = radio.value === 'ebay'; };
     for (const id of ['cfPrice', 'cfQuantity']) $(id).oninput = () => { $(id).dataset.touched = '1'; };
     $('confirmBtn').onclick = () => confirmLink();
@@ -1893,6 +2070,7 @@
       const s = $('settings'); s.hidden = !s.hidden;
       $('setServer').value = state.settings.server; $('setActor').value = state.settings.actor;
       for (const key of ['autoFill', 'autoGuide', 'autoLink', 'autoPrepare']) $('set' + key[0].toUpperCase() + key.slice(1)).checked = state.settings[key] !== false;
+      renderAutoMenu();
     };
     $('saveSettings').onclick = async () => {
       let server = $('setServer').value.trim() || DEFAULTS.server;
@@ -1913,18 +2091,21 @@
     $('connStatus').onclick = () => { state.connected = null; renderHeader(); void connect().then(() => loadQueue()); };
     $('storeEbay').onclick = () => setPlatform('ebay');
     $('storeAmazon').onclick = () => setPlatform('amazon');
-    $('unlock').onclick = () => { state.locked = null; setView('list'); renderStoreBar(); };
-    $('viewList').onclick = () => setView('list');
-    $('viewItem').onclick = () => setView('item');
+    $('backToQueue').onclick = () => { state.locked = null; setView('list'); };
+    $('goBtn').onclick = () => { const action = nextAction(); if (!action.disabled && action.run) void action.run(); };
+    $('moreBtn').onclick = () => openMore();
     $('listedBtn').onclick = () => openListed($('listedDrawer').hidden);
     $('listedClose').onclick = () => openListed(false);
     $('listedReload').onclick = () => void loadListed();
     for (const b of document.querySelectorAll('#listedDrawer [data-range]')) b.onclick = () => { state.listedRange = b.dataset.range; renderListed(); };
     for (const b of document.querySelectorAll('#listedDrawer [data-store]')) b.onclick = () => { state.listedStore = b.dataset.store; renderListed(); };
-    document.addEventListener('keydown', event => { if (event.key === 'Escape' && !$('listedDrawer').hidden) openListed(false); });
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') return;
+      if (!$('listedDrawer').hidden) openListed(false);
+      else if (!$('modal').hidden) $('modal').hidden = true;
+    });
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
-    for (const [id, value] of [['statusAll', 'all'], ['statusGood', 'good'], ['statusBad', 'bad'], ['statusListed', 'listed']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
-    $('reload').onclick = () => { state.details = {}; void connect().then(() => loadQueue()); void refreshTab(); };
+    for (const [id, value] of [['statusAll', 'all'], ['statusFlagged', 'flagged'], ['statusListed', 'listed'], ['statusBlocked', 'blocked']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
     $('preloadAll').onclick = () => void preloadAll();
     chrome.tabs.onActivated.addListener(scheduleRefresh);
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => {

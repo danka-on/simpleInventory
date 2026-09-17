@@ -201,7 +201,7 @@ assert.ok(manifest.content_scripts[0].matches.every(m => m.endsWith('/lister/*')
 const panel = fs.readFileSync(path.join(root, 'sidepanel.html'), 'utf8');
 assert.ok(panel.includes('src="matcher.js"') && panel.includes('src="sidepanel.js"'));
 for (const id of ['connStatus', 'pageCard', 'itemList', 'detail', 'confirm', 'pickCard', 'settings', 'signin', 'toast',
-  'storeEbay', 'storeAmazon', 'viewList', 'viewItem', 'modal', 'toastAction', 'setAutoLink', 'setAutoPrepare', 'themeBtn', 'busy']) {
+  'storeEbay', 'storeAmazon', 'crumb', 'backToQueue', 'goBtn', 'moreBtn', 'modal', 'toastAction', 'setAutoLink', 'setAutoPrepare', 'themeBtn', 'busy']) {
   assert.ok(!fs.readFileSync(path.join(root, 'sidepanel.css'), 'utf8').includes('prefers-color-scheme'), 'the theme is chosen in the panel, not by the OS');
   assert.ok(panel.includes(`id="${id}"`), 'side panel has #' + id);
 }
@@ -223,6 +223,17 @@ assert.ok(sidepanelSource.includes("const isOwnListing = link => (link.kind || '
 assert.ok(sidepanelSource.includes('(state.listed || []).filter(isOwnListing)'),
   'the "Listed" count and drawer only hold listings the panel took from start to end');
 assert.ok(fs.readFileSync(path.join(root, 'sidepanel.css'), 'utf8').includes('.locpv'), 'the shelf photo popup is styled');
+// --- one next action, one home for the automatic switches --------------------------------------
+assert.ok(sidepanelSource.includes('function nextAction()') && sidepanelSource.includes("$('goBtn')"),
+  'the action bar names the single next thing to do');
+assert.ok(!panel.includes('id="autoBox"') || sidepanelSource.includes("$('autoBox')"), 'the automatic switches render into settings');
+assert.ok(!sidepanelSource.includes("'photo_'"), 'the duplicate photo switch menu is gone');
+assert.ok(sidepanelSource.includes('function autoSummary()'), 'the item view reports the automatic switches in one line');
+// --- the HUD: a focus card, a checkpoint rail, the list behind the chevron ----------------------
+const hud = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
+assert.ok(hud.includes('data-ss-cp=') && hud.includes('function rowColour('), 'every step is a checkpoint on the rail');
+assert.ok(hud.includes('function paintFocus()'), 'the overlay leads with the step you are on');
+assert.ok(hud.includes("data-ss=\"steps\""), 'the whole checklist is one click away');
 
 const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 for (const message of ['search', 'add-photos', 'guide-start', 'guide-next', 'guide-go', 'guide-use', 'guide-stop', 'assist-start', 'assist-stop', 'detect', 'fill']) {
