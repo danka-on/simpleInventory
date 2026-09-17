@@ -454,6 +454,19 @@ class ListerTestCase(unittest.TestCase):
         again = self.client.post(f'/api/lister/queue/{UPC}/mark-existing', json={'platform': 'ebay', 'entry': entry})
         self.assertEqual((again.status_code, again.get_json()['duplicate']), (200, True))
 
+    def test_linking_a_listing_the_store_already_had_is_not_counted_as_listed_by_the_panel(self):
+        entry = {'listingId': '112233445566', 'sku': 'office', 'upc': UPC, 'title': 'Old plate listing'}
+        self.client.post(f'/api/lister/queue/{UPC}/mark-existing', json={'platform': 'ebay', 'entry': entry})
+        own = self.client.post('/api/lister/links', json={'upc': '012345678905', 'platform': 'amazon', 'sku': 'AMZ-1', 'asin': 'B000TEST01'})
+        self.assertEqual(own.status_code, 201, own.get_json())
+        self.assertEqual(own.get_json()['link']['kind'], 'listed')
+        kinds = {l['sku'] or l['listing_id']: l['kind'] for l in self.client.get('/api/lister/links').get_json()['links']}
+        self.assertEqual(kinds, {'office': 'existing', 'AMZ-1': 'listed'})
+        listed = self.client.get('/api/lister/links?kind=listed').get_json()['links']
+        self.assertEqual([l['sku'] for l in listed], ['AMZ-1'])
+        existing = self.client.get('/api/lister/links?kind=existing').get_json()['links']
+        self.assertEqual([l['listing_id'] for l in existing], ['112233445566'])
+
     def test_detail_merges_inventory_prep_notes_voice_text_and_photos(self):
         (self.root / 'static' / 'listingagent_uploads').mkdir()
         self.detail_payload = {

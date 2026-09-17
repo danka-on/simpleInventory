@@ -668,9 +668,17 @@ class Lister:
                 effects_json TEXT,
                 created_by TEXT,
                 source TEXT NOT NULL DEFAULT 'extension',
+                kind TEXT NOT NULL DEFAULT 'listed',
                 created_at TEXT NOT NULL
             )
         ''')
+        # 'listed' = the panel took this listing from start to end on the store; 'existing' = the store
+        # already carried the UPC and the panel only linked that live listing ("Use that listing").
+        # Only 'listed' rows count as the Lister's own output.
+        cur.execute('PRAGMA table_info(listing_links)')
+        if 'kind' not in {r[1] for r in cur.fetchall()}:
+            cur.execute("ALTER TABLE listing_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'listed'")
+            cur.execute("UPDATE listing_links SET kind = 'existing' WHERE note LIKE 'already on the store%'")
         cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_links_upc ON listing_links(upc)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_links_platform_listing ON listing_links(platform, listing_id)')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_listing_links_platform_sku ON listing_links(platform, sku)')
@@ -930,6 +938,7 @@ class Lister:
 
     def record_link(self, data, *, actor='', base_url='http://localhost/'):
         clean = validate_link(data)
+        kind = 'existing' if _text(data.get('kind')) == 'existing' else 'listed'
         proposal_id = data.get('proposal_id') or data.get('proposalId')
         upc = _text(data.get('upc'))
         effects = {'steps': []}
@@ -1034,12 +1043,12 @@ class Lister:
                 cur.execute('DELETE FROM listing_helper_selections WHERE proposal_id = ?', (proposal['id'],))
             cur.execute('''
                 INSERT INTO listing_links (upc, proposal_id, platform, listing_id, offer_id, sku, asin, store_upc, url,
-                                           title, price, quantity, note, effects_json, created_by, source, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'extension', ?)
+                                           title, price, quantity, note, effects_json, created_by, source, kind, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'extension', ?, ?)
             ''', (upc, proposal['id'] if proposal else None, clean['platform'], clean['listing_id'] or None,
                   clean['offer_id'] or None, clean['sku'] or None, clean['asin'] or None, clean['store_upc'] or None,
                   clean['url'] or None, clean['title'] or None, clean['price'], clean['quantity'], clean['note'] or None,
-                  json.dumps(effects, default=str), actor or None, _now()))
+                  json.dumps(effects, default=str), actor or None, kind, _now()))
             link_id = cur.lastrowid
             conn.commit()
             cur.execute('SELECT * FROM listing_links WHERE id = ?', (link_id,))
@@ -1122,8 +1131,11 @@ class Lister:
                 'inventory_barcode': rack['barcode'], 'inventory_location': rack['location'],
                 'finder_alias_undo': alias_undo}
 
-    def links(self, *, upc='', platform='', listing_id='', sku='', asin='', limit=100):
+    def links(self, *, upc='', platform='', listing_id='', sku='', asin='', kind='', limit=100):
         clauses, params = [], []
+        if kind in ('listed', 'existing'):
+            clauses.append("COALESCE(NULLIF(TRIM(kind), ''), 'listed') = ?")
+            params.append(kind)
         if upc:
             variants = self._variants(self.format_upc12(upc) or upc)
             clauses.append(f"upc IN ({','.join('?' for _ in variants)})")
@@ -1941,7 +1953,7 @@ class Lister:
         entry = entry or {}
         body = {'platform': platform, 'upc': upc, 'listing_id': entry.get('listingId') or '', 'sku': entry.get('sku') or '',
                 'asin': entry.get('asin') or '', 'store_upc': entry.get('upc') or '', 'title': entry.get('title') or '',
-                'note': 'already on the store; linked from the side panel'}
+                'note': 'already on the store; linked from the side panel', 'kind': 'existing'}
         return self.record_link(body, actor=actor, base_url=base_url)
 
     # -- learning the store's intermediate steps ------------------------------------------------
@@ -2664,7 +2676,8 @@ def register(app, deps):
         try:
             links = lister.links(upc=_text(request.args.get('upc')), platform=_text(request.args.get('platform')).lower(),
                                  listing_id=_text(request.args.get('listing_id')), sku=_text(request.args.get('sku')),
-                                 asin=_text(request.args.get('asin')), limit=request.args.get('limit') or 100)
+                                 asin=_text(request.args.get('asin')), kind=_text(request.args.get('kind')).lower(),
+                                 limit=request.args.get('limit') or 100)
             return jsonify({'success': True, 'links': links})
         except Exception as e:
             return failure(e, 'lister:links')

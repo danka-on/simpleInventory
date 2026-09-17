@@ -70,8 +70,11 @@ class ListerStats:
         with self.lister.db('listagent.db') as conn:
             cur = conn.cursor()
             self.lister.init_tables(cur)
+            # Only listings the panel took from start to end count as the Lister's output; rows for a
+            # listing the store already carried ("Use that listing", kind = 'existing') are not ours.
             links = _rows(cur, '''SELECT id, upc, platform, listing_id, sku, asin, title, price, quantity, url, created_by, created_at
-                                  FROM listing_links ORDER BY created_at, id''')
+                                  FROM listing_links WHERE COALESCE(NULLIF(TRIM(kind), ''), 'listed') <> 'existing'
+                                  ORDER BY created_at, id''')
             skips = _rows(cur, "SELECT upc, platform, actor, created_at FROM lister_queue_state WHERE state = 'skipped'")
             choices = _rows(cur, 'SELECT upc, base_upc, platform, step, chosen, suggested, actor, created_at FROM lister_choices')
             if self.lister._has_table(cur, 'listing_queue'):

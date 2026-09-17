@@ -17,13 +17,21 @@ class ListerStatsTest(unittest.TestCase):
     seed = test_lister.ListerTestCase.seed
     sql = test_lister.ListerTestCase.sql
 
-    def link(self, upc, platform, created_at, actor='dan@example.com', price=10.0, quantity=1, **keys):
+    def link(self, upc, platform, created_at, actor='dan@example.com', price=10.0, quantity=1, kind='listed', **keys):
         with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
             self.lister.init_tables(conn.cursor())
-            conn.execute('''INSERT INTO listing_links (upc, platform, listing_id, sku, title, price, quantity, created_by, source, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'extension', ?)''',
-                         (upc, platform, keys.get('listing_id'), keys.get('sku'), 'Item ' + upc, price, quantity, actor, created_at))
+            conn.execute('''INSERT INTO listing_links (upc, platform, listing_id, sku, title, price, quantity, created_by, source, kind, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'extension', ?, ?)''',
+                         (upc, platform, keys.get('listing_id'), keys.get('sku'), 'Item ' + upc, price, quantity, actor, kind, created_at))
             conn.commit()
+
+    def test_a_listing_the_store_already_had_does_not_count_as_lister_output(self):
+        now = datetime.datetime.now().replace(microsecond=0).isoformat()
+        self.link(UPC + '-1', 'ebay', now, listing_id='111')
+        self.link(UPC + '-2', 'ebay', now, listing_id='222', kind='existing')
+        data = self.client.get('/api/lister/stats?days=7').get_json()
+        self.assertEqual(data['totals']['today']['listed'], 1)
+        self.assertEqual([l['upc'] for l in data['listings']], [UPC + '-1'])
 
     def test_stats_count_listings_per_day_store_and_person(self):
         today = datetime.date.today()

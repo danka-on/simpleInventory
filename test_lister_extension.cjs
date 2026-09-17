@@ -217,6 +217,11 @@ for (const route of ['/shelf-base/', '/shelf-image/', '/shelf-original/', 'garag
 }
 assert.ok(sidepanelSource.includes('https://www.ebay.com/itm/') && sidepanelSource.includes('https://www.amazon.com/dp/'),
   'a listed store tile links to the live listing');
+// --- "listed" means the panel listed it, not that the store already had it ---------------------
+assert.ok(sidepanelSource.includes("const isOwnListing = link => (link.kind || 'listed') !== 'existing'"),
+  'a link row knows whether the panel listed it or only linked what the store already had');
+assert.ok(sidepanelSource.includes('(state.listed || []).filter(isOwnListing)'),
+  'the "Listed" count and drawer only hold listings the panel took from start to end');
 assert.ok(fs.readFileSync(path.join(root, 'sidepanel.css'), 'utf8').includes('.locpv'), 'the shelf photo popup is styled');
 
 const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');

@@ -281,7 +281,11 @@
   }
 
   // -- "✓ Listed" side bar ------------------------------------------------------------------
-  // Every listing the Lister recorded (listing_links), newest first, filtered by day range and store.
+  // Listings the Lister took from start to end on the store (listing_links, kind 'listed'), newest first,
+  // filtered by day range and store. Rows for a listing the store already carried ("Use that listing",
+  // kind 'existing') are not the panel's own work: they are only counted as links in the summary.
+
+  const isOwnListing = link => (link.kind || 'listed') !== 'existing';
 
   function rememberThumbs(items) {
     state.thumbs ||= {};
@@ -321,7 +325,8 @@
   }
 
   function renderListed() {
-    const all = state.listed || [];
+    const all = (state.listed || []).filter(isOwnListing);
+    const linked = (state.listed || []).filter(l => !isOwnListing(l));
     const today = all.filter(l => listedInRange(l, 'today')).length;
     if ($('countListedToday')) $('countListedToday').textContent = today ? String(today) : '';
     const drawer = $('listedDrawer');
@@ -335,8 +340,10 @@
     const byStore = p => inRange.filter(l => l.platform === p).length;
     const people = {};
     for (const l of rows) { const who = l.created_by ? String(l.created_by).split('@')[0] : '—'; people[who] = (people[who] || 0) + 1; }
+    const linkedHereCount = linked.filter(l => listedInRange(l, range) && (store === 'all' || l.platform === store)).length;
     $('listedSummary').innerHTML = `<b>${rows.length}</b> listed · <span class="chip store ebay">eBay ${byStore('ebay')}</span><span class="chip store amazon">Amazon ${byStore('amazon')}</span>`
-      + (Object.keys(people).length ? ' · ' + Object.entries(people).sort((a, b) => b[1] - a[1]).map(([who, n]) => `${esc(who)} ${n}`).join(' · ') : '');
+      + (Object.keys(people).length ? ' · ' + Object.entries(people).sort((a, b) => b[1] - a[1]).map(([who, n]) => `${esc(who)} ${n}`).join(' · ') : '')
+      + (linkedHereCount ? ` <span class="muted" title="Listings the store already carried, linked with “Use that listing” — not listed through the Lister">· ${linkedHereCount} linked</span>` : '');
     const list = $('listedList');
     if (!rows.length) {
       list.innerHTML = `<div class="empty">${state.listedLoading && !state.listed ? 'Loading…' : 'Nothing listed through the Lister ' + ({ today: 'today', yesterday: 'yesterday', 7: 'in the last 7 days', 30: 'in the last 30 days' }[range] || 'yet') + '.'}</div>`;
@@ -1593,8 +1600,11 @@
       return '';
     };
     const storeTile = platform => {
-      const linked = (info.links || []).some(l => l.platform === platform) || info.queue?.listed?.[platform];
-      const onStore = ((info.existing || {})[platform] || []).length > 0;
+      // A linked listing the store already carried says "on store", not "listed": the panel did not list it.
+      const link = (info.links || []).find(l => l.platform === platform);
+      const linkedExisting = !!link && !isOwnListing(link);
+      const linked = !linkedExisting && (!!link || info.queue?.listed?.[platform]);
+      const onStore = linkedExisting || ((info.existing || {})[platform] || []).length > 0;
       const skipped = info.queue?.skipped?.includes(platform);
       const [cls, text, sub] = linked ? ['ok', 'LISTED', 'recorded by the panel'] : onStore ? ['warn', 'ON STORE', 'already carries this UPC'] : skipped ? ['off', 'SKIPPED', 'left off this list'] : ['todo', 'NOT LISTED', ''];
       const url = (linked || onStore) ? storeUrlFor(platform) : '';
