@@ -203,6 +203,20 @@ for (const id of ['connStatus', 'pageCard', 'itemList', 'detail', 'confirm', 'pi
   assert.ok(!fs.readFileSync(path.join(root, 'sidepanel.css'), 'utf8').includes('prefers-color-scheme'), 'the theme is chosen in the panel, not by the OS');
   assert.ok(panel.includes(`id="${id}"`), 'side panel has #' + id);
 }
+// --- the stock tile links out to the rest of the app ------------------------------------------
+const sidepanelSource = fs.readFileSync(path.join(root, 'sidepanel.js'), 'utf8');
+assert.ok(sidepanelSource.includes("'/unified-search?q='"), 'the rack count opens the warehouse search');
+assert.ok(sidepanelSource.includes("'/items-to-list?direct_search=1&q='"), 'prep opens Items to List on that barcode');
+assert.ok(!sidepanelSource.includes("'/item-prep?upc='"), 'the old Item Prep link is gone');
+assert.ok(sidepanelSource.includes('data-locpv='), 'each rack position is a button that opens its shelf photo');
+assert.ok(sidepanelSource.includes("querySelectorAll('button[data-locpv]')"), 'the position buttons are wired up');
+for (const route of ['/shelf-base/', '/shelf-image/', '/shelf-original/', 'garagemap_', 'officemap_']) {
+  assert.ok(sidepanelSource.includes(route), 'the shelf photo lookup tries ' + route);
+}
+assert.ok(sidepanelSource.includes('https://www.ebay.com/itm/') && sidepanelSource.includes('https://www.amazon.com/dp/'),
+  'a listed store tile links to the live listing');
+assert.ok(fs.readFileSync(path.join(root, 'sidepanel.css'), 'utf8').includes('.locpv'), 'the shelf photo popup is styled');
+
 const content = fs.readFileSync(path.join(root, 'content.js'), 'utf8');
 for (const message of ['search', 'add-photos', 'guide-start', 'guide-next', 'guide-go', 'guide-use', 'guide-stop', 'assist-start', 'assist-stop', 'detect', 'fill']) {
   assert.ok(content.includes(`case '${message}'`), 'page script answers ' + message);

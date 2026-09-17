@@ -10,6 +10,8 @@
   'use strict';
   const M = globalThis.SSListerMatcher;
   const SETTINGS_KEY = 'ssListerSettings';
+  // QR glyph for the "+ Photo (QR)" button, so the phone-camera route is the obvious one.
+  const QR_ICON = '<svg class="btn-ico" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1 1h6v6H1V1zm2 2v2h2V3H3zM9 1h6v6H9V1zm2 2v2h2V3h-2zM1 9h6v6H1V9zm2 2v2h2v-2H3zm6-2h2v2H9V9zm4 0h2v2h-2V9zm-4 4h2v2H9v-2zm2-2h2v2h-2v-2zm2 2h2v2h-2v-2z"/></svg>';
   const LEARNED_KEY = 'ssListerLearned';
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
@@ -43,7 +45,7 @@
     tab: null, page: null, report: null, pick: null, learned: {}, busy: '', lastLink: null,
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), usedPhotos: new Set(), photoFiles: {}, aiPrompt: '', promptDraft: null, titlePrompt: '', savedTitlePrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
-    voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
+    voiceBusy: new Set(), qrOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
   };
@@ -137,6 +139,80 @@
   function serverBase() {
     return String(state.settings.server || DEFAULTS.server).replace(/\/+$/, '');
   }
+
+  // -- location preview ---------------------------------------------------------------
+  // The warehouse pages open a shelf photo for a rack code (static/location-preview.js on the
+  // server). The panel cannot load that script (MV3 forbids remote code), so it asks the same
+  // routes here with absolute URLs and keeps the first image that loads.
+  const locPreview = (() => {
+    const mapKey = code => {
+      const base = String(code || '').replace(/\s+/g, '').toLowerCase().replace(/b\d+$/, '');
+      if (!base || /^ofloor\d+$/.test(base)) return base;
+      const shelf = base.match(/^(.*)s\d+$/);
+      return shelf ? shelf[1] : base;
+    };
+    const shelfUrls = code => {
+      const compact = String(code || '').replace(/\s+/g, '').toLowerCase();
+      if (!compact) return [];
+      const nobin = compact.replace(/b\d+$/, '');
+      const codes = nobin === compact ? [compact] : [compact, nobin];
+      // Garage and office codes have a marked "base" photo; everything else only has the shelf pic.
+      const routes = /^(gr|gmid|gfloor|misc|or|omr|ofloor)/.test(mapKey(compact))
+        ? ['/shelf-base/', '/shelf-image/', '/shelf-original/']
+        : ['/shelf-image/', '/shelf-original/'];
+      const urls = [];
+      for (const route of routes) for (const one of codes) urls.push(serverBase() + route + encodeURIComponent(one) + '.png');
+      return urls;
+    };
+    const mapUrls = code => {
+      const key = mapKey(code);
+      if (!key) return [];
+      const office = ['/static/shelves/office/maps/officemap_', '/static/shelves/maps/office/officemap_'];
+      const garage = ['/static/shelves/garage/maps/garagemap_', '/static/shelves/maps/garage/garagemap_'];
+      const order = /^(gr|gmid|gfloor|misc)/.test(key) ? garage.concat(office) : office.concat(garage);
+      return order.map(prefix => serverBase() + prefix + encodeURIComponent(key) + '.png');
+    };
+    const firstThatLoads = urls => new Promise(resolve => {
+      let index = 0;
+      const next = () => {
+        if (index >= urls.length) return resolve(null);
+        const src = urls[index++] + '?t=' + Date.now();
+        const img = new Image();
+        img.onload = () => resolve(src);
+        img.onerror = next;
+        img.src = src;
+      };
+      next();
+    });
+    let box = null;
+    const ensure = () => {
+      if (box) return box;
+      box = document.createElement('div');
+      box.className = 'locpv';
+      box.hidden = true;
+      box.innerHTML = '<div class="sheet"><div class="bar"><b class="code"></b><button class="close" type="button" aria-label="Close">✕</button></div><div class="pics"></div></div>';
+      box.addEventListener('click', event => { if (event.target === box || event.target.closest('.close')) close(); });
+      document.body.appendChild(box);
+      document.addEventListener('keydown', event => { if (event.key === 'Escape' && !box.hidden) close(); });
+      return box;
+    };
+    const close = () => { if (box) { box.hidden = true; box.querySelector('.pics').innerHTML = ''; } };
+    const open = async code => {
+      const el = ensure();
+      const pics = el.querySelector('.pics');
+      el.querySelector('.code').textContent = code;
+      pics.innerHTML = '<div class="muted small"><span class="spin"></span> Looking for the shelf photo…</div>';
+      el.hidden = false;
+      const token = code + ':' + Date.now();
+      el.dataset.token = token;
+      const [shelf, map] = await Promise.all([firstThatLoads(shelfUrls(code)), firstThatLoads(mapUrls(code))]);
+      if (el.dataset.token !== token || el.hidden) return;
+      const shot = (src, label) => `<figure><img src="${esc(src)}" alt="${esc(label + ' for ' + code)}"><figcaption>${esc(label)}</figcaption></figure>`;
+      pics.innerHTML = [shelf ? shot(shelf, 'Shelf photo') : '', map ? shot(map, 'Position map') : ''].filter(Boolean).join('')
+        || `<div class="muted small">No picture stored for <b>${esc(code)}</b>.</div>`;
+    };
+    return { open, close };
+  })();
 
   async function api(path, { method = 'GET', body } = {}) {
     const headers = { Accept: 'application/json', 'X-Sweet-Shelves-Lister': '1' };
@@ -1004,6 +1080,24 @@
     renderDetail();
   }
 
+  // "+ Photo link": the bot messages the phone the same camera page the QR code points at, so
+  // the phone is one notification tap away from shooting instead of pointing a camera at the screen.
+  async function sendPhotoLink(info) {
+    if (!info?.upc || state.photoLinkBusy) return;
+    state.photoLinkBusy = true;
+    renderDetail();
+    try {
+      const result = await api('/api/lister/photo-link', { method: 'POST', body: { upc: info.upc } });
+      const who = (result.sent || []).join(', ');
+      toast('\uD83D\uDCF2 Camera link sent' + (who ? ' to ' + who : '') + ' on Telegram');
+    } catch (error) {
+      toast('Photo link: ' + error.message, true);
+    } finally {
+      state.photoLinkBusy = false;
+      renderDetail();
+    }
+  }
+
   async function sendPhotos() {
     const info = detail();
     if (!info || !state.page?.store) { toast('Open the store listing form first', true); return; }
@@ -1482,20 +1576,31 @@
     const prep = info.prepStatus || {};
     const stock = info.inventory || {};
     const gate = info.gate || {};
+    const storeUrlFor = platform => {
+      const link = (info.links || []).find(l => l.platform === platform && l.url);
+      if (link) return link.url;
+      const entry = ((info.existing || {})[platform] || []).find(e => e.listingId || e.asin);
+      if (!entry) return '';
+      if (platform === 'ebay' && entry.listingId) return 'https://www.ebay.com/itm/' + encodeURIComponent(entry.listingId);
+      if (platform === 'amazon' && entry.asin) return 'https://www.amazon.com/dp/' + encodeURIComponent(entry.asin);
+      return '';
+    };
     const storeTile = platform => {
       const linked = (info.links || []).some(l => l.platform === platform) || info.queue?.listed?.[platform];
       const onStore = ((info.existing || {})[platform] || []).length > 0;
       const skipped = info.queue?.skipped?.includes(platform);
       const [cls, text, sub] = linked ? ['ok', 'LISTED', 'recorded by the panel'] : onStore ? ['warn', 'ON STORE', 'already carries this UPC'] : skipped ? ['off', 'SKIPPED', 'left off this list'] : ['todo', 'NOT LISTED', ''];
-      return `<div class="tile ${cls}"><div class="k">${storeName(platform)}</div><div class="v">${text}</div><div class="s">${esc(sub)}</div></div>`;
+      const url = (linked || onStore) ? storeUrlFor(platform) : '';
+      const open = url ? ` <a class="open" href="${esc(url)}" target="_blank" rel="noopener" title="Open the ${storeName(platform)} listing">open ↗</a>` : '';
+      return `<div class="tile ${cls}"><div class="k">${storeName(platform)}</div><div class="v">${text}${open}</div><div class="s">${esc(sub)}</div></div>`;
     };
     const rackQty = gate.rackQty ?? stock.quantity ?? 0;
     const listable = gate.listable ?? (stock.quantity || 0);
     const warehouseUrl = serverBase() + '/unified-search?q=' + encodeURIComponent(info.upc);
-    const prepUrl = serverBase() + '/item-prep?upc=' + encodeURIComponent(info.upc);
+    const prepUrl = serverBase() + '/items-to-list?direct_search=1&q=' + encodeURIComponent(info.upc);
     const stockLine = [
       `<b>${esc(listable)}</b> to list`,
-      gate.prepQty != null ? `<a class="prep ${gate.mismatch ? 'differs' : ''}" href="${esc(prepUrl)}" target="_blank" rel="noopener" title="Open Item Prep${gate.mismatch ? ' — prep counted ' + esc(gate.prepQty) + ', the rack holds ' + esc(rackQty) : ''}">prep ${esc(gate.prepQty)}${gate.mismatch ? ' <span class="neq">≠</span>' : ''}</a>` : '',
+      gate.prepQty != null ? `<a class="prep ${gate.mismatch ? 'differs' : ''}" href="${esc(prepUrl)}" target="_blank" rel="noopener" title="Open Items to List${gate.mismatch ? ' — prep counted ' + esc(gate.prepQty) + ', the rack holds ' + esc(rackQty) : ''}">prep ${esc(gate.prepQty)}${gate.mismatch ? ' <span class="neq">≠</span>' : ''}</a>` : '',
       `live eBay ${esc(gate.liveEbay ?? 0)}`,
       `Amazon ${esc(gate.liveAmazon ?? 0)}`,
     ].filter(Boolean).join(' · ');
@@ -1513,7 +1618,7 @@
         </div></div>
       <div class="tiles">
         <div class="tile stock ${rackQty ? 'ok' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Warehouse stock</div>
-          <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search">${esc(rackQty)} on the rack</a>${stock.positions?.length ? ` <span class="pos">@ ${esc(stock.positions.join(', '))}</span>` : ''}</div>
+          <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search">${esc(rackQty)} on the rack</a>${stock.positions?.length ? ` <span class="pos">@ ${stock.positions.map(p => `<button type="button" class="loc" data-locpv="${esc(p)}" title="Show the shelf photo for ${esc(p)}">${esc(p)}</button>`).join(', ')}</span>` : ''}</div>
           <div class="s">${stockLine}</div></div>
         ${storeTile('ebay')}${storeTile('amazon')}
       </div>
@@ -1532,9 +1637,9 @@
       <audio id="notePlayer" preload="none" hidden></audio>
       </section>
 
-      <h3>Photos <span class="muted">(${photos.length})</span><span class="grow"></span><button id="addPhoto" class="mini" type="button">${state.qrOpen ? 'Hide QR' : '+ Photo (QR)'}</button><button id="photoSelectAll" class="mini" type="button">${state.selectedPhotos.size ? 'Clear' : 'Select ours'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
-      ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to add photos of this unit, then press ↻.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
-      ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo (QR) to add some from the phone.</div>'}
+      <h3>Photos <span class="muted">(${photos.length})</span><span class="grow"></span><button id="addPhoto" class="mini primary" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : '+ Photo (QR)'}</button><button id="photoLink" class="mini" type="button" title="Telegram the same camera link to the phone — no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span> Sending…' : '+ Photo link'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
+      ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone — it opens straight into the camera. Press ↻ when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
+      ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo (QR) or + Photo link to shoot some on the phone.</div>'}
       <div class="row tight">
         <button id="sendPhotos" class="act send" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending…' : '⬅ Send to page'}</button>
         <button id="aiPhotos" class="act ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '✨ AI photoshop'}</button>
@@ -1552,6 +1657,7 @@
 
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
+    for (const button of el.querySelectorAll('button[data-locpv]')) button.onclick = () => locPreview.open(button.dataset.locpv);
     for (const button of el.querySelectorAll('button[data-play]')) button.onclick = () => {
       const player = $('notePlayer');
       if (player.src === button.dataset.play && !player.paused) { player.pause(); button.textContent = '▶'; return; }
@@ -1569,7 +1675,6 @@
       toast(pushed ? 'Condition note updated on the page' : 'Condition note updated');
       renderDetail();
     };
-    $('photoSelectAll').onclick = () => { if (state.selectedPhotos.size) state.selectedPhotos = new Set(); else state.selectedPhotos = new Set(photos.filter(p => p.source !== 'catalog').map(p => p.url)); renderDetail(); };
     $('photoRefresh').onclick = () => { delete state.details[info.upc]; void loadDetail(info.upc, { force: true }); };
     for (const box of el.querySelectorAll('input[data-select]')) box.onchange = () => { if (box.checked) state.selectedPhotos.add(box.dataset.select); else state.selectedPhotos.delete(box.dataset.select); box.closest('.photo').classList.toggle('selected', box.checked); };
     for (const tileEl of el.querySelectorAll('.photo')) {
@@ -1623,6 +1728,7 @@
       renderDetail();
     };
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
+    $('photoLink').onclick = () => sendPhotoLink(info);
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
   }
 

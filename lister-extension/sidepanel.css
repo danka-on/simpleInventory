@@ -42,6 +42,9 @@ button.danger { color: var(--red); }
 button.icon { padding: 4px 8px; font-size: 15px; line-height: 1; }
 button.link { background: none; border: none; color: var(--blue); padding: 0; text-decoration: underline; }
 button.mini { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
+/* the phone-camera button: the main way photos get added, so it is green and carries the QR glyph */
+button.mini.primary { padding: 4px 10px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+button .btn-ico { width: 13px; height: 13px; flex: none; }
 input, select, textarea { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }
 textarea { min-height: 70px; resize: vertical; }
 label { display: block; margin: 8px 0 0; color: var(--muted); font-size: 12px; }
@@ -327,3 +330,18 @@ pre.copyall { white-space: pre-wrap; font: 12px ui-monospace, monospace; backgro
 .preloadbar b { color: var(--ink); }
 .chip.preload { background: var(--blue-bg); color: var(--blue); }
 .chip.preload.done { background: #d8f3e8; color: #0b5c40; }
+
+/* Rack location chips and their shelf-photo popup */
+.tile .v .pos .loc { font: inherit; font-size: 12px; font-weight: 700; color: inherit; background: transparent; border: 0; border-bottom: 1px dotted currentColor; padding: 0; cursor: pointer; }
+.tile .v .pos .loc:hover { color: var(--blue); }
+.tile .v .open { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.locpv { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 12px; background: rgba(15, 23, 42, .72); }
+.locpv[hidden] { display: none; }
+.locpv .sheet { width: 100%; max-height: 92%; overflow: auto; background: var(--card); color: var(--ink); border-radius: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, .4); }
+.locpv .bar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--card); }
+.locpv .bar b { flex: 1; font-size: 14px; }
+.locpv .close { border: 0; background: transparent; color: var(--muted); font-size: 16px; cursor: pointer; }
+.locpv .pics { display: grid; gap: 10px; padding: 12px; }
+.locpv figure { margin: 0; }
+.locpv img { width: 100%; border-radius: 8px; display: block; }
+.locpv figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; }
