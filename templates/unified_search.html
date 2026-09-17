@@ -70,8 +70,9 @@
 
     /* Workspace */
     .workspace { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 14px; align-items: start; }
-    @media (max-width: 1000px) { .workspace { grid-template-columns: 1fr; } }
-    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+    @media (max-width: 1000px) { .workspace { grid-template-columns: minmax(0, 1fr); } }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+    .panel-toggle { display: none; }
     .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; }
     .panel-head .count { margin-left: auto; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel-2); color: var(--muted); }
     .panel-head .sub { font-weight: 500; color: var(--muted); font-size: 12px; }
@@ -189,6 +190,73 @@
     .img-overlay.show { display: flex; }
     .img-overlay img { max-width: 90vw; max-height: 72vh; border-radius: 10px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
     #imgPopupName { color: #fff; font-size: 15px; font-weight: 600; text-align: center; max-width: 90vw; word-break: break-word; }
+
+    /* ===== Phone =====
+       One column, nothing to pan sideways for, and the scan box stays in reach. */
+    @media (max-width: 720px) {
+      .app { padding: 10px 12px 44px; }
+
+      /* The keyboard hints mean nothing on a phone; the title row stays on one line. */
+      .topbar { gap: 10px; margin-bottom: 10px; flex-wrap: nowrap; }
+      .back-btn { padding: 8px 10px; }
+      .brand h1 { font-size: 17px; }
+      .brand p, .kbd-hint { display: none; }
+
+      /* The scan box follows the page down, so the next barcode never needs a scroll back up. */
+      .search { position: sticky; top: var(--ss-sticky-top, 44px); z-index: 30; padding: 10px; margin-bottom: 10px; }
+      .search-row { gap: 8px; }
+      .search-field svg { left: 12px; width: 16px; height: 16px; }
+      .search-input { padding: 12px 38px; }
+      .search-btn { padding: 0 16px; font-size: 14px; }
+      /* The scan box stays one row tall: the dashboard carries its own related-UPCs toggle. */
+      .search-options { display: none; }
+
+      /* Matches fold away to their header once an item is open. */
+      .panel-head { padding: 10px 12px; }
+      .panel-head .count { margin-left: 0; }
+      .panel-toggle { display: inline-flex; align-items: center; margin-left: auto; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); font-size: 12px; font-weight: 700; }
+      .panel.collapsed .result-list { display: none; }
+      .result-list { max-height: 46vh; }
+
+      .dashboard, .section { scroll-margin-top: calc(var(--ss-sticky-top, 44px) + var(--ss-search-h, 104px) + 10px); }
+      /* Thumbnail beside the name, not above it, so the name is the first thing on screen. */
+      .identity { padding: 12px; gap: 10px; flex-direction: row; }
+      .identity img { width: 56px; height: 56px; }
+      .identity h2 { font-size: 15px; overflow-wrap: anywhere; }
+      .identity .links { gap: 6px; }
+      .text-btn { padding: 6px 9px; font-size: 12px; }
+      .loc { padding: 5px 10px; }
+      .section { padding: 12px; }
+
+      /* Seven tiles fit three across instead of running off the screen. */
+      .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+      .tile { padding: 7px 8px; }
+      .tile .n { font-size: 18px; }
+      .tile .l { font-size: 10px; }
+      .tile .d { font-size: 11px; }
+
+      /* Every table becomes one card per row: label left, value right, empty cells dropped. */
+      .tbl-wrap { overflow-x: visible; }
+      table.tbl, .tbl tbody, .tbl tr, .tbl td { display: block; width: 100%; }
+      .tbl thead { display: none; }
+      .tbl tr { border: 1px solid var(--line); border-radius: 11px; background: var(--panel-2); padding: 6px 10px; margin-bottom: 8px; }
+      .tbl tr:last-child { margin-bottom: 0; }
+      .tbl td { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 4px 0; border-bottom: 0; min-width: 0; }
+      .tbl td::before { content: attr(data-label); font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+      .tbl td.num, .tbl td.nw { text-align: left; white-space: normal; }
+      .tbl td .loc, .tbl td .pill, .tbl td .chip { justify-self: start; }
+      .tbl td.wide { min-width: 0; }
+      .tbl td.empty { display: none; }
+
+      /* Activity: the date sits under its event instead of eating a quarter of the width. */
+      .ev { grid-template-columns: 12px minmax(0, 1fr); gap: 4px 8px; padding: 7px 0; }
+      .ev .dot { grid-column: 1; grid-row: 1; }
+      .ev .body { grid-column: 2; grid-row: 1; }
+      .ev .t { grid-column: 2; grid-row: 2; padding-top: 0; font-size: 11.5px; }
+
+      .missing { padding: 12px; }
+      .dialog { padding: 16px; }
+    }
   </style>
   <script src="/static/location-preview.js?v=20260317a"></script>
   <script src="/static/i18n.js"></script>
@@ -221,7 +289,7 @@
 
   <div class="workspace">
     <aside class="panel" id="matchesPanel" aria-label="Matches">
-      <div class="panel-head"><span>Matches</span><span class="sub" id="matchesSub">across every database</span><span class="count" id="matchesCount">0</span></div>
+      <div class="panel-head"><span>Matches</span><span class="sub" id="matchesSub">across every database</span><span class="count" id="matchesCount">0</span><button type="button" class="panel-toggle" id="matchesToggle" aria-controls="matchesList" aria-expanded="true">Hide</button></div>
       <div class="result-list" id="matchesList"><div class="empty">Search to find items</div></div>
     </aside>
 
@@ -272,6 +340,37 @@ const matchesCount = document.getElementById('matchesCount');
 const matchesSub = document.getElementById('matchesSub');
 const dashEmpty = document.getElementById('dashEmpty');
 const dashContent = document.getElementById('dashContent');
+const matchesPanel = document.getElementById('matchesPanel');
+const matchesToggle = document.getElementById('matchesToggle');
+
+// ===== Phone =====
+// The site banner is fixed and its height changes when it wraps, so the sticky scan box is
+// pinned to the measured bottom of the banner rather than to a guess.
+const phoneQuery = window.matchMedia('(max-width: 720px)');
+const isPhone = () => phoneQuery.matches;
+function syncStickyOffsets() {
+  const root = document.documentElement;
+  const banner = document.getElementById('ss-top-banner');
+  const bannerH = banner ? Math.ceil(banner.getBoundingClientRect().height) : 0;
+  root.style.setProperty('--ss-sticky-top', bannerH + 'px');
+  const search = document.querySelector('.search');
+  if (search) root.style.setProperty('--ss-search-h', Math.ceil(search.getBoundingClientRect().height) + 'px');
+}
+function syncPlaceholder() {
+  searchInput.placeholder = isPhone() ? 'Scan or type a name, SKU or order' : 'Scan a barcode, or type part of a name, SKU, ASIN or order number';
+}
+function setMatchesCollapsed(collapsed) {
+  matchesPanel.classList.toggle('collapsed', collapsed);
+  matchesToggle.textContent = collapsed ? 'Show' : 'Hide';
+  matchesToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  syncStickyOffsets();
+}
+matchesToggle.addEventListener('click', () => setMatchesCollapsed(!matchesPanel.classList.contains('collapsed')));
+phoneQuery.addEventListener('change', () => { syncPlaceholder(); syncStickyOffsets(); if (!isPhone()) setMatchesCollapsed(false); });
+window.addEventListener('resize', () => setTimeout(syncStickyOffsets, 150));
+syncPlaceholder();
+syncStickyOffsets();
+setTimeout(syncStickyOffsets, 600);   // the banner measures itself after its own scripts run
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 function attrEsc(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -466,6 +565,7 @@ function renderMatches(candidates, query, data) {
   const capped = Object.values(data?.databases || {}).some(db => db.count > (db.samples || []).length);
   if (capped) html += '<div class="more" style="padding:6px 8px">Showing the first rows from each database. Add another word or scan the barcode to narrow it down.</div>';
   matchesList.innerHTML = html;
+  setMatchesCollapsed(false);
   highlightSelected();
 }
 
@@ -515,6 +615,7 @@ async function openItem(upc, options = {}) {
   dashEmpty.hidden = true;
   dashContent.hidden = false;
   if (changed || options.forced) dashContent.innerHTML = '<div class="loading"><div class="spinner"></div>Gathering everything about this item…</div>';
+  if (isPhone() && changed) setMatchesCollapsed(true);
   if (window.innerWidth <= 1000 && changed) document.getElementById('dashboardPanel').scrollIntoView({behavior: 'smooth', block: 'start'});
   const signal = dash.controller.signal;
   const searchPromise = options.search && !changed ? Promise.resolve(options.search)
@@ -573,7 +674,8 @@ function table(columns, rows, footer) {
   const head = columns.map(c => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('');
   const body = rows.map(row => '<tr>' + columns.map(c => {
     const cell = c.cell(row);
-    return `<td class="${c.num ? 'num' : ''} ${c.nw ? 'nw' : ''} ${c.dim ? 'dim' : ''} ${c.wide ? 'wide' : ''}">${cell === '' || cell == null ? '<span class="dim">—</span>' : cell}</td>`;
+    const empty = cell === '' || cell == null;
+    return `<td class="${c.num ? 'num' : ''} ${c.nw ? 'nw' : ''} ${c.dim ? 'dim' : ''} ${c.wide ? 'wide' : ''} ${empty ? 'empty' : ''}" data-label="${attrEsc(c.label)}">${empty ? '<span class="dim">—</span>' : cell}</td>`;
   }).join('') + '</tr>').join('');
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${footer || ''}`;
 }
@@ -780,6 +882,7 @@ function renderDashboard() {
       ${events.length > recent.length ? `<div class="more">${events.length - recent.length} older event${events.length - recent.length === 1 ? '' : 's'} in the full trail.</div>` : ''}
     </section>
     ${missing.length ? `<div class="missing">Not found in:${missing.join('')}</div>` : ''}`;
+  syncStickyOffsets();
   highlightSelected();
 }
 
