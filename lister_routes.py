@@ -172,17 +172,253 @@ def note_text_variants(note):
     return text
 
 
-# The user's eBay description layout (2026-09-17): a warm boxed card, serif centred title, then
-# Key Features / Condition / Product Details. Claude supplies the words; this renders them.
+# The user's ilona-corner eBay description (2026-09-17): an ITEM DESCRIPTION card (intro, an important
+# condition note when there is a flaw, a facts list, "review all photos"), an ITEM CONDITION card, then the
+# shop's fixed welcome / condition & photos / authenticity / shipping / returns / help / footer blocks.
+# Claude writes only the item parts; everything from SHOP_FOOTER on is the user's text, kept as given.
 DESCRIPTION_OUTER = '<div style="max-width: 900px; margin: 0px auto; line-height: 1.7;">'
 DESCRIPTION_BOX = ('<div style="color: rgb(77, 74, 67); font-family: Arial, Helvetica, sans-serif; background: rgb(250, 247, 240); '
                    'border: 1px solid rgb(216, 207, 189); padding: 30px; margin-bottom: 18px;">')
 DESCRIPTION_TITLE = ('<div style="font-family:Georgia,\'Times New Roman\',serif; font-size:25px; color:#596456; text-align:center; '
-                     'letter-spacing:1px; margin-bottom:20px;">{title}</div>')
+                     'letter-spacing:1px; margin-bottom:20px;">ITEM DESCRIPTION</div>')
+CONDITION_BOX = ('<div style="background: rgb(250, 247, 240); border: 1px solid rgb(216, 207, 189); padding: 30px; margin-bottom: 35px;">\n'
+                 '  <div style="color: rgb(89, 100, 86); font-family: Georgia, &quot;Times New Roman&quot;, serif; font-size: 21px; '
+                 'text-align: center; letter-spacing: 1px; margin-bottom: 15px;">ITEM CONDITION</div>\n'
+                 '  <div style="background: rgb(241, 243, 237); border-left: 4px solid rgb(137, 149, 127); padding: 20px 24px;">{condition}</div>\n'
+                 '</div>')
+PHOTOS_LINE = '<p><strong>Please review all photos carefully, as they are part of the description.</strong></p>'
+CONDITION_WORDS = {
+    'NEW': 'New', 'NEW_OTHER': 'New (other)', 'NEW_WITH_DEFECTS': 'New with defects', 'USED_EXCELLENT': 'Used - excellent',
+    'USED_VERY_GOOD': 'Used - very good', 'USED_GOOD': 'Used - good', 'USED_ACCEPTABLE': 'Used - acceptable',
+    'FOR_PARTS_OR_NOT_WORKING': 'For parts or not working',
+}
+# What the eBay condition codes mean, so the AI does not upgrade "New (other)" to "new in original packaging".
+CONDITION_MEANING = {
+    'NEW': 'brand new, unused, in the original packaging',
+    'NEW_OTHER': 'new and unused, but possibly without the original packaging, open box or a store return; do not claim original packaging',
+    'NEW_WITH_DEFECTS': 'new and unused but with cosmetic defects',
+    'USED_EXCELLENT': 'used, excellent condition', 'USED_VERY_GOOD': 'used, very good condition', 'USED_GOOD': 'used, good condition',
+    'USED_ACCEPTABLE': 'used, acceptable condition with visible wear', 'FOR_PARTS_OR_NOT_WORKING': 'for parts or not working',
+}
+SHOP_FOOTER = """<div style="color: rgb(77, 74, 67); font-family: Arial, Helvetica, sans-serif; background: rgb(250, 247, 240); border: 1px solid rgb(216, 207, 189);">
+
+  <!-- HEADER -->
+
+  <div style="text-align:center; padding:36px 20px 28px 20px;
+  background:#f4efe4; border-bottom:1px solid #d8cfbd;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:32px; letter-spacing:4px; color:#596456;">
+      ILONA-CORNER
+    </div>
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:15px; font-style:italic; color:#8b806d; margin-top:8px;">
+      Beautiful Finds for Your Home &amp; Everyday Life
+    </div>
+
+    <div style="width:90px; height:1px; background:#b9a47b;
+    margin:20px auto 0 auto;"></div>
+
+  </div>
+
+
+  <!-- WELCOME -->
+
+  <div style="padding:30px 40px 20px 40px; text-align:center;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:21px; color:#596456; letter-spacing:1px;">
+      WELCOME TO OUR SHOP
+    </div>
+
+    <p style="max-width:720px; margin:15px auto;">
+      Thank you for visiting <strong>ilona-corner</strong>!
+      We are a small business offering carefully selected brand-name
+      home goods, d&eacute;cor, gifts, and everyday finds at great prices.
+    </p>
+
+    <p style="max-width:720px; margin:15px auto;">
+      Our merchandise is sourced through established U.S. retail
+      overstock, closeout, shelf-pull, surplus, and liquidation channels,
+      including merchandise originating from major department stores.
+    </p>
+
+  </div>
+
+
+  <!-- CONDITION & PHOTOS -->
+
+  <div style="margin:15px 40px; background:#ffffff;
+  border:1px solid #e3ddd1; padding:23px;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:18px; color:#596456; margin-bottom:10px;">
+      CONDITION &amp; PHOTOS
+    </div>
+
+    Each item's condition is clearly stated in the individual listing.
+    Our inventory may include new retail surplus, shelf-pull,
+    store display, sample, and other merchandise.
+
+    <br><br>
+
+    Because some items have been displayed, handled, transported,
+    or stored in a retail environment, minor cosmetic signs of handling
+    or packaging wear may occasionally be present.
+
+    <br><br>
+
+    Any known noticeable imperfections, damage, or missing components
+    are disclosed to the best of our ability. Retail packaging may show
+    shelf wear, stickers, adhesive residue, dents, tears, or other
+    cosmetic wear.
+
+    <br><br>
+
+    <strong>Please review the complete description and all photos
+    carefully before purchasing.</strong> Photos are an important
+    part of the item's condition description.
+
+  </div>
+
+
+  <!-- AUTHENTICITY -->
+
+  <div style="margin:15px 40px; background:#ffffff;
+  border:1px solid #e3ddd1; padding:23px;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:18px; color:#596456; margin-bottom:10px;">
+      AUTHENTICITY
+    </div>
+
+    We stand behind the authenticity of the branded merchandise we sell.
+    Our merchandise is sourced through established U.S. retail surplus,
+    overstock, closeout, shelf-pull, and liquidation channels.
+
+  </div>
+
+
+  <!-- SHIPPING -->
+
+  <div style="margin:15px 40px; background:#ffffff;
+  border:1px solid #e3ddd1; padding:23px;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:18px; color:#596456; margin-bottom:10px;">
+      PACKED WITH CARE
+    </div>
+
+    Every purchase is carefully inspected and securely packed
+    before shipment.
+
+    <br><br>
+
+    Orders ship from the <strong>USA</strong> to the delivery address
+    provided with your eBay order. Tracking information will be uploaded
+    once your package ships.
+
+  </div>
+
+
+  <!-- RETURNS -->
+
+  <div style="margin:15px 40px; background:#ffffff;
+  border:1px solid #e3ddd1; padding:23px;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:18px; color:#596456; margin-bottom:10px;">
+      RETURNS
+    </div>
+
+    We want you to feel confident about your purchase.
+    Returns are handled according to the return terms shown in the
+    individual listing and applicable eBay policies.
+
+    <br><br>
+
+    Returned merchandise should be returned in the same condition
+    received and include all original components, accessories,
+    tags, inserts, and packaging included with the order.
+
+    <br><br>
+
+    If your item arrives damaged, defective, or materially different
+    from the listing description, please contact us through eBay
+    messages so we can help.
+
+  </div>
+
+
+  <!-- CUSTOMER SERVICE -->
+
+  <div style="margin:15px 40px 35px 40px; background:#ffffff;
+  border:1px solid #e3ddd1; padding:23px;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:18px; color:#596456; margin-bottom:10px;">
+      WE'RE HERE TO HELP
+    </div>
+
+    Questions are always welcome. We are a small business and genuinely
+    appreciate every customer and every order.
+
+    <br><br>
+
+    If you have any questions or concerns, please contact us through
+    eBay messages and we will be happy to assist.
+
+    <br><br>
+
+    Our shop is closed on weekends. Messages received during the weekend
+    will be answered as soon as possible during regular weekday
+    business hours.
+
+  </div>
+
+
+  <!-- FOOTER -->
+
+  <div style="background:#596456; padding:35px 25px;
+  text-align:center; color:#ffffff;">
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:20px; letter-spacing:2px;">
+      THANK YOU FOR SHOPPING
+    </div>
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-size:27px; letter-spacing:3px; margin-top:5px;">
+      ILONA-CORNER
+    </div>
+
+    <div style="width:80px; height:1px; background:#d8c8a6;
+    margin:18px auto;"></div>
+
+    <div style="font-size:14px; color:#eee9df;">
+      Carefully Selected &nbsp;&bull;&nbsp;
+      Honestly Described &nbsp;&bull;&nbsp;
+      Packed With Care
+    </div>
+
+    <div style="font-family:Georgia,'Times New Roman',serif;
+    font-style:italic; margin-top:15px; color:#f4efe4;">
+      We hope you find something you love.
+    </div>
+
+  </div>
+
+</div>"""
 
 
 def _esc_html(value):
     return html_module.escape(_text(value), quote=False)
+
+
+def _rich(value, limit=None):
+    """Escaped text where **words** become <strong>words</strong> (the only markup Claude may use)."""
+    return re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', _esc_html(_text(value, limit)))
 
 
 def parse_description_json(text):
@@ -197,34 +433,40 @@ def parse_description_json(text):
     return data if isinstance(data, dict) else {'intro': html_to_text(raw)}
 
 
-def render_description(title, data, *, upc=''):
-    """Fill the user's template. Missing parts are left out rather than shown empty."""
+def render_description_item(title, data, *, upc='', condition=''):
+    """The two per-item cards of the template (ITEM DESCRIPTION, ITEM CONDITION)."""
     data = data or {}
-    intro = _text(data.get('intro'), 1200)
-    features = [_text(f, 200) for f in (data.get('features') or []) if _text(f)] if isinstance(data.get('features'), list) else []
-    condition = _text(data.get('condition'), 800)
+    intro = _text(data.get('intro'), 1200) or f'**{_text(title, 200)}**'
+    note = _text(data.get('conditionNote'), 600)
     details = []
     for entry in data.get('details') or []:
-        if isinstance(entry, dict) and _text(entry.get('label')) and _text(entry.get('value')):
+        if isinstance(entry, dict) and _text(entry.get('value')):
             details.append((_text(entry.get('label'), 60), _text(entry.get('value'), 200)))
-        elif isinstance(entry, str) and ':' in entry:
-            label, value = entry.split(':', 1)
-            if _text(label) and _text(value):
-                details.append((_text(label, 60), _text(value, 200)))
-    base = _base_upc(upc)
-    if base and not any(label.lower() == 'upc' for label, _ in details):
-        details.append(('UPC', base))
-    parts = [DESCRIPTION_OUTER, DESCRIPTION_BOX, DESCRIPTION_TITLE.format(title=_esc_html(title))]
-    if intro:
-        parts.append(f'<p>{_esc_html(intro)}</p>')
-    if features:
-        parts.append('<h2>Key Features</h2>\n<ul>\n' + '\n'.join(f'<li>{_esc_html(f)}</li>' for f in features) + '\n</ul>')
-    if condition:
-        parts.append(f'<h2>Condition</h2>\n<p>{_esc_html(condition)}</p>')
+        elif isinstance(entry, str) and _text(entry):
+            label, _, value = entry.partition(':') if ':' in entry else ('', '', entry)
+            details.append((_text(label, 60), _text(value, 200)))
+    labels = {label.lower() for label, _ in details}
+    if is_suffixed(upc) and 'quantity' not in labels:
+        details.append(('Quantity', '1'))  # a -suffix is one physical unit
+    condition_word = CONDITION_WORDS.get(_text(condition).upper(), '')
+    if condition_word and 'condition' not in labels:
+        details.append(('Condition', condition_word))
+    condition_text = _text(data.get('condition'), 800) or note or condition_word
+    lines = [f'<p>{_rich(intro)}</p>']
+    if note:
+        lines.append(f'<p><strong>IMPORTANT CONDITION NOTE:</strong> {_rich(note)}</p>')
     if details:
-        parts.append('<h2>Product Details</h2>\n<ul>\n' + '\n'.join(f'<li>{_esc_html(label)}: {_esc_html(value)}</li>' for label, value in details) + '\n</ul>')
-    parts.append('</div>\n</div>')
+        lines.append('<ul>\n' + '\n'.join(f'<li>{_esc_html(label) + ": " if label else ""}{_rich(value)}</li>' for label, value in details) + '\n</ul>')
+    lines.append(PHOTOS_LINE)
+    parts = [DESCRIPTION_BOX, '  ' + DESCRIPTION_TITLE, '  <div style="text-align: left;">\n' + '\n'.join(lines) + '\n  </div>', '</div>']
+    if condition_text:
+        parts.append(CONDITION_BOX.format(condition=_rich(condition_text)))
     return '\n\n'.join(parts)
+
+
+def render_description(title, data, *, upc='', condition=''):
+    """Fill the user's template: the item cards, then the shop's fixed blocks, inside the 900px wrapper."""
+    return '\n\n'.join([DESCRIPTION_OUTER, render_description_item(title, data, upc=upc, condition=condition), SHOP_FOOTER, '</div>'])
 
 
 def qr_svg(text):
@@ -1571,7 +1813,9 @@ class Lister:
             f"Inventory description: {_text(values.get('systemTitle'), 200)}" if _text(values.get('systemTitle')) else '',
             f"Brand: {_text(values.get('brand'), 80)}" if _text(values.get('brand')) else '',
             f"Category: {_text(values.get('categoryPath'), 200)}" if _text(values.get('categoryPath')) else '',
-            f"Condition: {_text(values.get('condition'), 40)}" if _text(values.get('condition')) else '',
+            (f"Condition: {_text(values.get('condition'), 40)}"
+             + (f" ({CONDITION_MEANING[_text(values.get('condition')).upper()]})" if _text(values.get('condition')).upper() in CONDITION_MEANING else '')
+             if _text(values.get('condition')) else ''),
             f"Condition notes from the warehouse: {_text(values.get('conditionDescription'), 800)}" if _text(values.get('conditionDescription')) else '',
             ('Prep notes:\n' + '\n'.join('- ' + n for n in notes)) if notes else '',
             f'UPC: {_base_upc(upc)}' if upc else '',
@@ -1583,18 +1827,30 @@ class Lister:
                       'key attributes (size, color, count, material) and nothing else. No quotes, no emojis, no ALL CAPS, '
                       'no words like "wow" or "look". Reply with the title only.\n\n' + facts_text)
         else:
-            prompt = ('Write the copy for an eBay listing description of this product and reply with ONE JSON object only, no markdown, '
-                      'with these keys: "intro" (one or two plain sentences presenting the product), "features" (3 to 6 short bullet '
-                      'strings with the key features), "condition" (one or two honest sentences: the condition, and any flaw from the '
-                      'warehouse condition notes stated plainly), "details" (a list of {"label", "value"} facts such as Brand, Material, '
-                      'Color, Pieces, Size, Model; only facts given below, no guesses). Do not include a price, shipping terms, or the '
-                      'word eBay.\n\n' + facts_text)
+            prompt = ('Write the item-specific copy for an eBay listing description of this product and reply with ONE JSON object '
+                      'only, no markdown fences, with these keys:\n'
+                      '"intro": one or two sentences presenting the product in a warm, factual tone, using only the facts below (no invented '
+                      'features, design names or materials), e.g. "Beautiful **MacKenzie-Childs '
+                      'Tutti Frutti Pineapple Figurine** featuring vibrant tropical colors and the signature **Courtly Check** pattern." '
+                      'Wrap the full product name and at most one signature feature in **double asterisks** (the only formatting allowed).\n'
+                      '"conditionNote": when the warehouse condition notes or prep notes mention any flaw, damage, wear, stain, chip, '
+                      'missing part or open/damaged packaging, one or two plain sentences stating it and pointing to the close-up photos, '
+                      'e.g. "This item is new and unused, but a few leaf tips have small chips/nicks. Please see the close-up photos for '
+                      'the exact condition." Otherwise an empty string.\n'
+                      '"details": a list of {"label", "value"} facts in this order when known: Brand, Collection, Item (what it is), '
+                      'Approx. Size, Material, Color, Pieces, Care, Imported (label "" and value "Imported" only if stated), Quantity, '
+                      'Condition (short, e.g. "New with minor cosmetic defects"). Wrap the size and material values in **double '
+                      'asterisks**. Only facts given below, never guesses; leave out what is unknown.\n'
+                      '"condition": two or three sentences for the ITEM CONDITION box: the condition in plain words and every flaw '
+                      'from the notes stated honestly; mention packaging only if the notes or condition say something about it, e.g. "New and unused. A few of the colorful leaf tips have very small chips/nicks. '
+                      'The imperfections are minor and are shown in the close-up photos."\n'
+                      'Do not include a price, shipping, returns, the shop name, or the word eBay. English only.\n\n' + facts_text)
         import requests
         try:
             response = requests.post(
                 'https://api.anthropic.com/v1/messages',
                 headers={'x-api-key': api_key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
-                json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 900 if kind == 'description' else 120,
+                json={'model': 'claude-haiku-4-5-20251001', 'max_tokens': 1200 if kind == 'description' else 120,
                       'messages': [{'role': 'user', 'content': prompt}]},
                 timeout=45,
             )
@@ -1618,8 +1874,12 @@ class Lister:
             pass
         if kind == 'title':
             return {'kind': kind, 'title': text.strip('"\'').splitlines()[0][:80]}
-        html = render_description(title, parse_description_json(text), upc=upc)
-        return {'kind': kind, 'descriptionHtml': html, 'descriptionText': html_to_text(html)}
+        data = parse_description_json(text)
+        condition = _text(values.get('condition'), 40)
+        html = render_description(title, data, upc=upc, condition=condition)
+        # Plain-text stores get the item part only, not the shop's eBay boilerplate.
+        return {'kind': kind, 'descriptionHtml': html,
+                'descriptionText': html_to_text(render_description_item(title, data, upc=upc, condition=condition))}
 
     # -- can Amazon take this UPC from us? (catalog ASIN + listing restrictions, cached per UPC) ---
 

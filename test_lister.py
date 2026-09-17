@@ -638,7 +638,7 @@ class ListerTestCase(unittest.TestCase):
 
         def fake_post(url, **kwargs):
             calls.append(kwargs['json']['messages'][0]['content'])
-            description = '```json\n{"intro": "A classic Lenox plate.", "features": ["Porcelain", "Dishwasher safe"], "condition": "Used - Good. Small chip on the rim.", "details": [{"label": "Material", "value": "Porcelain"}]}\n```'
+            description = '```json\n{"intro": "A classic **Lenox Butterfly Meadow** plate.", "conditionNote": "A small chip on the rim. Please see the close-up photos.", "condition": "Used - Good. Small chip on the rim.", "details": [{"label": "Material", "value": "**Porcelain**"}, {"label": "", "value": "Imported"}]}\n```'
             return FakeResponse(description if 'description' in kwargs['json']['messages'][0]['content'][:60] else '"Lenox Butterfly Meadow Dinner Plate 10.75 in"')
 
         import requests
@@ -651,15 +651,25 @@ class ListerTestCase(unittest.TestCase):
             html = desc.get_json()['descriptionHtml']
             self.assertTrue(html.startswith('<div style="max-width: 900px; margin: 0px auto; line-height: 1.7;">'), html[:80])
             self.assertIn('background: rgb(250, 247, 240)', html)
-            self.assertIn("font-family:Georgia,'Times New Roman',serif", html)
-            self.assertIn('>Lenox plate</div>', html)
-            self.assertIn('<p>A classic Lenox plate.</p>', html)
-            self.assertIn('<h2>Key Features</h2>\n<ul>\n<li>Porcelain</li>\n<li>Dishwasher safe</li>\n</ul>', html)
-            self.assertIn('<h2>Condition</h2>\n<p>Used - Good. Small chip on the rim.</p>', html)
-            self.assertIn('<h2>Product Details</h2>\n<ul>\n<li>Material: Porcelain</li>\n<li>UPC: ' + UPC + '</li>\n</ul>', html)
-            self.assertIn('Used - Good. Small chip on the rim.', desc.get_json()['descriptionText'])
+            self.assertIn('>ITEM DESCRIPTION</div>', html)
+            self.assertIn('<p>A classic <strong>Lenox Butterfly Meadow</strong> plate.</p>', html)
+            self.assertIn('<p><strong>IMPORTANT CONDITION NOTE:</strong> A small chip on the rim. Please see the close-up photos.</p>', html)
+            self.assertIn('<ul>\n<li>Material: <strong>Porcelain</strong></li>\n<li>Imported</li>\n<li>Quantity: 1</li>\n</ul>', html)
+            self.assertIn('Please review all photos carefully, as they are part of the description.', html)
+            self.assertIn('>ITEM CONDITION</div>', html)
+            self.assertIn('padding: 20px 24px;">Used - Good. Small chip on the rim.</div>', html)
+            # The shop's fixed blocks follow the item cards, unchanged, and the wrapper closes.
+            for fixed in ('WELCOME TO OUR SHOP', 'CONDITION &amp; PHOTOS', 'AUTHENTICITY', 'PACKED WITH CARE', 'RETURNS', "WE'RE HERE TO HELP", 'THANK YOU FOR SHOPPING'):
+                self.assertIn(fixed, html)
+            self.assertLess(html.index('ITEM CONDITION'), html.index('WELCOME TO OUR SHOP'))
+            self.assertEqual(html.count('<div'), html.count('</div>'))
+            self.assertNotIn('**', html)
+            text = desc.get_json()['descriptionText']
+            self.assertIn('Used - Good. Small chip on the rim.', text)
+            self.assertNotIn('WELCOME TO OUR SHOP', text, 'plain text carries the item only')
             self.assertEqual(lister_routes.render_description('T', lister_routes.parse_description_json('not json at all'), upc='1')
                              .count('<p>not json at all</p>'), 1, 'prose that is not JSON becomes the intro')
+            self.assertIn('&lt;b&gt;', lister_routes.render_description('T', {'intro': '<b>x</b>'}), 'model text is escaped')
             self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/generate', json={'kind': 'poem', 'values': {'title': 'x'}}).status_code, 400)
             self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/generate', json={'kind': 'title', 'values': {}}).status_code, 400)
         self.assertIn('chip on rim', calls[0])
