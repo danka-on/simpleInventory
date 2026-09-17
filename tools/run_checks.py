@@ -21,7 +21,8 @@ TESTS = [
     'test_application_architecture', 'test_fba_attention', 'test_amazon_resolution',
     'test_receiving_batch', 'test_custom_item_identity', 'test_warehouse_nameless',
     'test_ready_to_ship_suffix_matching',
-    'test_prep_fallback_lookup', 'test_prep_unmatched', 'test_pnl_report', 'test_listing_proposals',
+    'test_prep_fallback_lookup', 'test_prep_plus', 'test_prep_unmatched',
+    'test_pnl_report', 'test_listing_proposals',
     'test_listing_reconciliation', 'test_reconciliation_ai', 'test_voice_notes',
     'test_lister',
 ]

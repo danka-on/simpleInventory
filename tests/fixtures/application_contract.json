@@ -5804,6 +5804,29 @@
       "subdomain": ""
     },
     {
+      "rule": "/prep-plus",
+      "endpoint": "prep_plus_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/prep-plus/item",
+      "endpoint": "prep_plus_item",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/warehouse/name-dictation",
       "endpoint": "warehouse_name_dictation",
       "methods": [

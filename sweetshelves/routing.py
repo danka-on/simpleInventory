@@ -604,6 +604,23 @@ def register_routes():
         ebay_request=ss_ebay_catalog._ebay_buy_api_request,
         clear_cache=ss_runtime.cache.clear)
 
+    # Prep +: bench intake for damaged, barcode-less and store-found items that no
+    # manifest describes. Writes the same prep rows Item Prep does, so the finished
+    # unit shows up on Items-to-List without a second step.
+    from prep_plus import register as register_prep_plus
+    from . import prep_schema as plus_prep_schema, normalization as plus_normalization
+    register_prep_plus(ss_runtime.app,
+        db_connection=ss_database.db_connection,
+        normalize_upc=plus_normalization._normalize_upc,
+        normalize_lot=plus_normalization._normalize_lot_number,
+        reject_title=ss_warehouse_nameless._manual_title_rejection,
+        asset_scope=plus_normalization._items_to_list_asset_scope,
+        ensure_registry=ss_warehouse_receiving._ensure_custom_item_registry,
+        ensure_prep=plus_prep_schema._ensure_items_prep_tables,
+        clear_cache=ss_runtime.cache.clear,
+        preplog=ss_prep_log._preplog_add_entry,
+        update_data_version=ss_caching.update_data_version)
+
     from voice_note_routes import register as register_voice_notes
     register_voice_notes(ss_runtime.app, BASE_DIR)
 
