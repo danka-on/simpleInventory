@@ -44,6 +44,8 @@
         lookingUp: false
     };
     const scan = { last: 0, fast: 0, timer: null };
+    const IDLE_LOOKUP_MS = 600;   // the field has stopped changing
+    let idleLookup = null;
     let mic = null;
 
     // ---- small ui helpers ------------------------------------------------
@@ -484,6 +486,20 @@
         lookupStatus(`${candidates.length} catalog match${candidates.length > 1 ? 'es' : ''} — tap the right one, or say the name yourself.`);
     }
 
+    // A barcode we already hold is worth showing, not just filling in: the picture is how
+    // the person at the bench checks the name against the thing in their hand.
+    function showKnown(ours, results) {
+        const image = String(ours.image_url || '').trim();
+        results.innerHTML = `
+            <div class="lookup-hit" data-known="1">
+                ${image ? `<img src="${escapeHtml(image)}" alt="">` : '<span class="lookup-noimg">no photo</span>'}
+                <span class="lookup-text">
+                    <strong>${escapeHtml(ours.title || '')}</strong>
+                    <span class="muted">${escapeHtml(ours.label || '')}</span>
+                </span>
+            </div>`;
+    }
+
     async function lookupStores(options = {}) {
         const barcode = barcodeValue();
         if (!barcode) {
@@ -504,7 +520,7 @@
             const ours = await identify(barcode);
             if (barcodeValue() !== barcode) return;
             if (ours.found) {
-                results.innerHTML = '';
+                showKnown(ours, results);
                 // A scan must never overwrite a name the person already said or typed.
                 const typed = String(byId('itemTitle').value || '').trim();
                 if (typed && options.auto) lookupStatus(`We hold this as "${ours.title}" (${ours.label}). Your name is kept.`);
@@ -730,6 +746,13 @@
                 byId('lookupResults').innerHTML = '';
                 lookupStatus('');
             }
+            // Not every scanner types fast enough to trip the gun heuristic, and a code
+            // punched in by hand deserves the same answer. One settled, complete-looking
+            // barcode still only ever costs one lookup, because lookedUp guards the spend.
+            clearTimeout(idleLookup);
+            idleLookup = setTimeout(() => {
+                if (SCANNABLE.test(barcodeValue())) lookupStores({ auto: true });
+            }, IDLE_LOOKUP_MS);
         });
         // Capture phase, on the document: a scan should land in the barcode box whatever
         // happens to be focused, including nothing at all on a freshly opened page.
