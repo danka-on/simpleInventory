@@ -14,6 +14,8 @@
   <button id="settingsBtn" class="icon" type="button" title="Settings" aria-label="Settings">⚙</button>
 </header>
 
+<div id="busy" class="busy" hidden><div class="bar"><i></i></div><span id="busyLabel"></span></div>
+
 <section id="settings" class="card" hidden>
   <h2>Settings</h2>
   <label>Sweet Shelves server<input id="setServer" type="url" placeholder="https://pi.nexuscentralhq.org"></label>
@@ -56,6 +58,12 @@
 
 <section id="listCard" class="card items">
   <div class="tabs">
+    <div class="seg small" role="tablist" title="Item Prep status">
+      <button id="statusAll" class="seg-btn active" type="button">All</button>
+      <button id="statusGood" class="seg-btn good" type="button">Good</button>
+      <button id="statusBad" class="seg-btn bad" type="button">Bad</button>
+      <button id="statusListed" class="seg-btn" type="button" title="Already listed or on a store">Listed</button>
+    </div>
     <input id="filter" type="search" placeholder="Filter by title or UPC">
     <button id="reload" class="icon" type="button" title="Reload" aria-label="Reload">↻</button>
   </div>

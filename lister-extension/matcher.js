@@ -250,7 +250,8 @@
       out.sku = params.get('sku') || params.get('mSku') || params.get('sellerSku') || '';
       if (/\/product-search|\/productsearch/i.test(path)) out.kind = 'listing-start';
       else if (/\/abis\/(listing|Display|syh|display)/i.test(path) || /\/abis\//i.test(path)) {
-        out.kind = /product-search|search/i.test(path) ? 'listing-start' : 'offer-form';
+        // "List Your Products" (abis/listing/syh with no product yet) is the search step; with an ASIN it is the offer form.
+        out.kind = /product-search|search/i.test(path) || (!out.asin && !out.sku && /\/abis\/listing\/syh/i.test(path)) ? 'listing-start' : 'offer-form';
       } else if (/\/inventory/i.test(path) || /\/myinventory/i.test(path)) out.kind = 'inventory';
       if (out.asin) out.listingId = out.asin;
       return out;
@@ -294,6 +295,7 @@
     let score = 0;
     if (store === 'amazon') {
       if (/search term|product name|upc|ean|isbn|asin/.test(text)) score += 6;
+      if (/product title|keywords|title description|your catalog|amazon s catalog/.test(text)) score += 6;  // "List Your Products" search box
       if (descriptor.id === 'search-term' || descriptor.name === 'search-term') score += 6;
     } else {
       if (/what are you selling|what you re selling|tell us what|brand model|upc|isbn|ean|product|find your item|item you re selling|search/.test(text)) score += 4;

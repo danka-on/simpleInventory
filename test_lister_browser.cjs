@@ -15,7 +15,7 @@ const extensionPath = fs.existsSync(path.join(__dirname, 'lister-extension')) ? 
 const UPC = '883049370897';
 const queue = {
   ebay: [
-    { id: 11, upc: UPC + '-1', baseUpc: UPC, suffixed: true, title: 'Lenox Butterfly Meadow Dinner Plate (unit 1)', thumb: '', addedAt: '2026-09-14T08:00:00', platform: 'ebay', status: 'queued', listedAt: '', listed: { ebay: false, amazon: false }, skipped: { ebay: false, amazon: false }, otherStatus: 'queued', existing: [], storeUrl: '', alreadyOnStore: false, links: [], proposal: { id: 7, status: 'proposed', ready: true }, preparing: false },
+    { id: 11, upc: UPC + '-1', baseUpc: UPC, suffixed: true, title: 'Lenox Butterfly Meadow Dinner Plate (unit 1)', thumb: '', addedAt: '2026-09-14T08:00:00', platform: 'ebay', status: 'queued', listedAt: '', listed: { ebay: false, amazon: false }, skipped: { ebay: false, amazon: false }, otherStatus: 'queued', existing: [], storeUrl: '', alreadyOnStore: false, links: [], proposal: { id: 7, status: 'proposed', ready: true }, preparing: false, prepStatus: { status: 'bad', reason: 'chip' }, notes: { written: 1, voice: 1 }, defect: 'Missing pieces' },
     { id: 12, upc: '012345678905', baseUpc: '012345678905', suffixed: false, title: 'Other item', thumb: '', addedAt: '2026-09-15T08:00:00', platform: 'ebay', status: 'queued', listedAt: '', listed: { ebay: false, amazon: false }, skipped: { ebay: false, amazon: false }, otherStatus: 'listed', existing: [{ listingId: '112233445566', state: 'Active' }], storeUrl: 'https://www.ebay.com/itm/112233445566', alreadyOnStore: true, links: [], proposal: {}, preparing: false },
   ],
   amazon: [],
@@ -114,6 +114,10 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
       if (url.pathname.endsWith('/skip')) { calls.skip.push(request.postDataJSON()); return json({ success: true, queue: 'queued' }); }
       if (url.pathname === '/api/lister/learn') { calls.learn.push(request.postDataJSON()); return json({ success: true, agreed: false, learned: { ebay: {} } }, 201); }
+      if (url.pathname.endsWith('/amazon-check')) {
+        const restricted = url.pathname.includes('012345678905');
+        return json({ success: true, check: restricted ? { status: 'restricted', asin: 'B0OTHER', brand: 'Nike', reasons: ['Approval required for Nike'], error: '', cached: false } : { status: 'listable', asin: 'B0LENOX', brand: 'Lenox', reasons: [], error: '', cached: false } });
+      }
       if (url.pathname.endsWith('/generate')) { const body = request.postDataJSON(); calls.generate.push(body); return json(body.kind === 'title' ? { success: true, kind: 'title', title: 'AI Lenox Butterfly Meadow Plate' } : { success: true, kind: 'description', descriptionHtml: '<p>AI description</p>', descriptionText: 'AI description' }); }
       if (url.pathname === '/api/lister/events') { calls.events.push(request.postDataJSON()); return json({ success: true }); }
       if (url.pathname === '/api/lister/links') {
@@ -145,6 +149,27 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.equal(await panel.$eval('.item.current', el => el.dataset.upc), UPC + '-1');
     assert.ok((await panel.textContent('#countEbay')).includes('2'));
     assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('on eBay'), 'a UPC the store already carries says so');
+    // Suffixed rows highlight the suffix and carry the prep verdict instead of "unit 1".
+    const firstRow = await panel.textContent('.item[data-upc="883049370897-1"]');
+    assert.ok(!(await panel.$$eval('.item[data-upc="883049370897-1"] .chip', els => els.some(e => /^unit \d/.test(e.textContent.trim())))), 'no "unit 1" chip');
+    assert.equal(await panel.$eval('.item[data-upc="883049370897-1"] .suffix', el => el.textContent), '1');
+    assert.ok(firstRow.includes('bad · chip'), 'the Item Prep status and reason are on the row: ' + firstRow);
+    assert.equal(await panel.$eval('.item[data-upc="883049370897-1"] .chip.defect', el => el.textContent), 'Missing pieces', 'the BOL defect is its own bubble');
+    // Every queued item is checked against Amazon in the background; a restricted one turns red.
+    await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]').classList.contains('restricted'), null, { timeout: 15000 });
+    assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('Amazon ✕ restricted'));
+    assert.ok((await panel.textContent('.item[data-upc="883049370897-1"]')).includes('Amazon ✓'));
+    await panel.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 10000 });
+    // Note marker, store-coloured badge, and the status / listed filters.
+    assert.ok(firstRow.includes('📝 1') && firstRow.includes('🎤 1'), 'the row shows its note counts: ' + firstRow);
+    assert.ok(await panel.$('.item[data-upc="012345678905"] .chip.store.ebay'), 'a UPC the store carries gets an eBay-coloured badge');
+    await panel.click('#statusBad');
+    assert.deepEqual(await panel.$$eval('.item', els => els.map(e => e.dataset.upc)), ['883049370897-1'], 'Bad shows only the bad unit');
+    await panel.click('#statusListed');
+    assert.deepEqual(await panel.$$eval('.item', els => els.map(e => e.dataset.upc)), ['012345678905'], 'Listed shows what a store already carries');
+    await panel.click('#statusAll');
+    assert.equal((await panel.$$('.item')).length, 2);
+    assert.ok(await panel.$('#autoSendPhotos'), 'the auto send-to-page switch is on the store card');
     assert.ok((await panel.textContent('#pageCard')).includes('no store page'));
 
     // The X asks first, then tells the server which store list to leave.
@@ -164,7 +189,9 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#viewItem');
     await panel.waitForSelector('.tiles');
     const detailText = await panel.textContent('#detail');
-    for (const expected of ['unit 1', 'status: BAD', '1 on the rack', '@ B-1', '1 to list', 'prep 1', 'Small chip on the rim', 'from the prep notes']) {
+    for (const expected of ['unit 1', 'status: BAD', '1 on the rack', '@ B-1', '1 to list', 'prep 1', 'Small chip on the rim']) {
+      assert.ok(!(await panel.textContent('#detail')).includes('On the listing'), 'no "On the listing" label');
+      assert.ok(await panel.$('.sticky .note2'), 'notes sit on the yellow sticky');
       assert.ok(detailText.includes(expected), 'item view shows "' + expected + '"');
     }
     for (const gone of ['Prepped:', 'basic values', 'Prepare', 'Location matches', 'Copy all values', 'Open in Listing Agent', 'Items to List']) assert.ok(!detailText.includes(gone), 'item view no longer shows "' + gone + '"');
@@ -268,12 +295,17 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // The actions live on the overlay now, not on the store card.
     assert.ok(!(await panel.$('#fillBtn')) && !(await panel.$('#pickBtn')), 'no Fill / Pick buttons on the store card');
     const footButtons = await store.$$eval('#ss-lister-guide [data-ss="foot"] button', els => els.map(b => b.textContent.trim()));
-    for (const label of ['Fill page', 'Pick a field…', 'Hide', 'Next (Tab)']) assert.ok(footButtons.includes(label), 'overlay footer has ' + label + ': ' + footButtons);
+    for (const label of ['Fill page', 'Next (Tab)']) assert.ok(footButtons.includes(label), 'overlay footer has ' + label + ': ' + footButtons);
+    assert.ok(!footButtons.includes('Pick a field…') && !footButtons.includes('Hide'), 'no Pick a field / Hide on the overlay footer');
     // The AI button beside the Title row writes the title through the panel and puts it on the page.
     await store.click(`#ss-lister-guide [data-ss-row="${rows.findIndex(r => r.text.startsWith('Title'))}"] [data-ss-ai="title"]`);
     await store.waitForFunction(() => document.getElementById('title').value === 'AI Lenox Butterfly Meadow Plate', null, { timeout: 15000 });
     assert.equal(calls.generate[0].kind, 'title');
     assert.ok(calls.generate[0].values.notes.includes('scratched on the back'), 'the voice note text feeds the AI prompt');
+    await store.waitForFunction(() => Array.from(document.querySelectorAll('#ss-lister-guide [data-ss-row]')).some(r => r.textContent.includes('generated with AI')), null, { timeout: 10000 });
+    const titleRowText = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(r => r.textContent.replace(/\s+/g, ' ').trim()).find(t => t.startsWith('Title')));
+    assert.ok(await store.$eval('#ss-lister-guide', el => el.style.left === '16px' && el.style.right === ''), 'the overlay starts on the left');
+    assert.ok(titleRowText.includes('generated with AI') && !titleRowText.includes('automatically'), 'a manual AI run is marked, without "(automatically)": ' + titleRowText);
     // Re-reading the page while the guide is up must not throw (0.2.2 did: "reading 'length'").
     await panel.click('#pageRefresh');
     await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 10000 });

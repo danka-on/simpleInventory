@@ -14,7 +14,7 @@
   const CURRENT_KEY = 'ssListerCurrent2';
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false };
   const CONDITIONS = ['NEW', 'NEW_OTHER', 'NEW_WITH_DEFECTS', 'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE', 'FOR_PARTS_OR_NOT_WORKING'];
   const VALUE_LABELS = {
     title: 'Title', price: 'Price', quantity: 'Quantity', sku: 'SKU / custom label', upc: 'UPC', asin: 'ASIN',
@@ -22,7 +22,7 @@
   };
   const START_URLS = {
     ebay: () => 'https://www.ebay.com/sl/prelist/suggest?sr=wn',
-    amazon: upc => 'https://sellercentral.amazon.com/product-search/search?q=' + encodeURIComponent(upc),
+    amazon: () => 'https://sellercentral.amazon.com/abis/listing/syh',  // "List Your Products": the panel types the UPC there
   };
 
   const state = {
@@ -32,6 +32,7 @@
     autoFilled: new Set(), searched: new Set(), autoLinked: new Set(), fillSessions: {}, pendingSearch: null,
     guide: null, selectedPhotos: new Set(), photoFiles: {}, aiPrompt: '', aiBusy: '', prepareTimers: {}, prepareAsked: new Set(),
     voiceBusy: new Set(), qrOpen: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
+    busyTasks: new Map(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), statusFilter: 'all', aiGenerated: {},
   };
 
   const $ = id => document.getElementById(id);
@@ -52,6 +53,29 @@
     if (message) setTimeout(() => { if (el.textContent === message) { el.textContent = ''; if (state.toastAction === action) { button.hidden = true; state.toastAction = null; } } }, action ? 15000 : 6000);
   }
 
+  // Something is running: show the moving bar with what it is until every task released it.
+  function busy(label) {
+    const id = Symbol(label);
+    state.busyTasks.set(id, label);
+    renderBusy();
+    return () => { state.busyTasks.delete(id); renderBusy(); };
+  }
+
+  function renderBusy() {
+    const el = $('busy');
+    if (!el) return;
+    const labels = [...state.busyTasks.values()];
+    el.hidden = !labels.length;
+    $('busyLabel').textContent = labels[labels.length - 1] || '';
+  }
+
+  // Each store tab keeps its own item, so an unfinished eBay listing is untouched while another tab lists on Amazon.
+  function bindTab(upc, platform, tabId = state.tab?.id) {
+    if (!tabId || !upc) return;
+    state.tabItems[tabId] = { upc, platform };
+    try { void chrome.storage.session?.set({ ssListerTabs: state.tabItems }); } catch { /* session storage unavailable */ }
+  }
+
   // -- storage ------------------------------------------------------------------------
 
   async function loadStorage() {
@@ -61,6 +85,7 @@
     state.currentUpc = stored[CURRENT_KEY] || null;
     state.platform = stored[PLATFORM_KEY] === 'amazon' ? 'amazon' : 'ebay';
     state.aiPrompt = stored[PROMPT_KEY] || '';
+    try { state.tabItems = (await chrome.storage.session?.get('ssListerTabs'))?.ssListerTabs || {}; } catch { state.tabItems = {}; }
   }
 
   async function saveSettings(settings) {
@@ -118,6 +143,7 @@
 
   async function loadQueue({ keep = true } = {}) {
     if (state.connected === false) return;
+    const done = busy('Loading the queue…');
     try {
       const data = await api('/api/lister/queue?platform=' + state.platform);
       state.items = data.items || [];
@@ -136,8 +162,35 @@
       if (error.signIn) { state.connected = false; state.signIn = true; }
       else toast(error.message, true);
     }
+    done();
     renderAll();
     if (state.currentUpc) void loadDetail(state.currentUpc);
+    void runAmazonChecks();
+  }
+
+  // Can Amazon take each queued UPC from us? One check at a time; the row shows the result.
+  async function runAmazonChecks() {
+    if (state.amazonRunning) return;
+    const pending = state.items.filter(it => it.status === 'queued' && !it.amazonCheck && !state.checkingAmazon.has(it.baseUpc));
+    if (!pending.length) return;
+    state.amazonRunning = true;
+    const done = busy('Checking Amazon listability…');
+    try {
+      for (const it of pending) {
+        state.checkingAmazon.add(it.baseUpc); renderItems();
+        try {
+          const data = await api('/api/lister/queue/' + encodeURIComponent(it.upc) + '/amazon-check', { method: 'POST', body: {} });
+          for (const row of state.items) if (row.baseUpc === it.baseUpc) row.amazonCheck = data.check;
+        } catch (error) {
+          for (const row of state.items) if (row.baseUpc === it.baseUpc) row.amazonCheck = { status: 'error', error: error.message, reasons: [] };
+          if (error.status === 501 || error.signIn) break;
+        } finally {
+          state.checkingAmazon.delete(it.baseUpc); renderItems();
+        }
+      }
+    } finally {
+      state.amazonRunning = false; done();
+    }
   }
 
   function current() {
@@ -150,6 +203,7 @@
 
   async function loadDetail(upc, { force = false } = {}) {
     if (!upc || (!force && state.details[upc] && Date.now() - state.details[upc].loadedAt < 30000)) { renderDetail(); renderConfirm(); return state.details[upc]; }
+    const done = busy('Loading the item…');
     try {
       const data = await api('/api/lister/queue/' + encodeURIComponent(upc));
       const item = data.item;
@@ -163,6 +217,8 @@
     } catch (error) {
       toast(error.message, true);
       return null;
+    } finally {
+      done();
     }
   }
 
@@ -178,15 +234,16 @@
       if (result.status === 'ready') { await loadDetail(key, { force: true }); return; }
       state.details[key].preparing = { running: true };
       if (key === state.currentUpc) renderDetail();
+      const release = busy('Preparing title, price, specifics and description…');
       let tries = 0;
       clearTimeout(state.prepareTimers[key]);
       const poll = async () => {
         tries += 1;
         const fresh = await loadDetail(key, { force: true });
         if (!fresh) return;
-        if (fresh.proposal?.ready && !fresh.preparing?.running) { if (key === state.currentUpc) toast('Listing values prepared'); return; }
-        if (fresh.preparing?.error) { if (key === state.currentUpc) toast('Prepare failed: ' + fresh.preparing.error, true); return; }
-        if (tries < 40) state.prepareTimers[key] = setTimeout(poll, 4000);
+        if (fresh.proposal?.ready && !fresh.preparing?.running) { release(); if (key === state.currentUpc) toast('Listing values prepared'); return; }
+        if (fresh.preparing?.error) { release(); if (key === state.currentUpc) toast('Prepare failed: ' + fresh.preparing.error, true); return; }
+        if (tries < 40) state.prepareTimers[key] = setTimeout(poll, 4000); else release();
       };
       state.prepareTimers[key] = setTimeout(poll, 4000);
     } catch (error) {
@@ -206,6 +263,7 @@
     const key = upc + ':' + mediaId;
     if (state.voiceBusy.has(key)) return;
     state.voiceBusy.add(key);
+    const done = busy('Transcribing a voice note…');
     if (upc === state.currentUpc) renderDetail();
     try {
       const data = await api('/api/lister/voice/' + mediaId + '/analyze', { method: 'POST', body: { reanalyze } });
@@ -221,7 +279,7 @@
       if (note) { note.status = 'error'; note.error = error.message; }
       if (error.status !== 409 && error.status !== 429) toast('Voice note: ' + error.message, true);
     } finally {
-      state.voiceBusy.delete(key);
+      state.voiceBusy.delete(key); done();
       if (upc === state.currentUpc) renderDetail();
     }
   }
@@ -290,10 +348,16 @@
         state.page.error = error.message;
       }
     }
+    const bound = tab?.id ? state.tabItems[tab.id] : null;
     if (state.page.store && state.page.store !== state.platform) {
       // Follow the store the user is looking at.
       state.platform = state.page.store; remember();
       await loadQueue();
+    }
+    if (bound && state.page.store && bound.platform === state.page.store && state.items.some(it => it.upc === bound.upc) && state.currentUpc !== bound.upc) {
+      // This tab has its own item (another tab may be on a different one).
+      state.currentUpc = bound.upc; state.report = null; state.guide = null; remember();
+      void loadDetail(bound.upc);
     }
     // On the listing form the current item locks in and its details take over the panel;
     // leaving that page (success, another site) brings the queue back.
@@ -337,9 +401,10 @@
   }
 
   // Title / description written by Claude from the item's values, condition and prep notes.
-  async function generate(info, kind) {
+  async function generate(info, kind, { auto = false } = {}) {
     const v = values(info);
     state.genBusy = kind; renderPage();
+    const done = busy('Writing the ' + kind + ' with AI…');
     try {
       const notes = [...(info.notes || []).map(n => n.english || n.text), ...(info.voiceNotes || []).map(n => n.english), info.defect].filter(Boolean);
       const data = await api('/api/lister/queue/' + encodeURIComponent(info.upc) + '/generate', { method: 'POST', body: { kind, values: {
@@ -347,14 +412,18 @@
         conditionDescription: v.conditionDescription, notes, aspects: info.fields.aspects || {},
       } } });
       const edits = state.edits[info.upc] = { ...(state.edits[info.upc] || {}) };
+      // Done for this item on this page: switching the auto toggle on later must not run it again.
+      if (state.page?.store) state.autoText.add((state.tab?.id || 0) + '|' + state.page.store + '|' + info.upc + '|' + kind);
       if (kind === 'title') edits.title = data.title;
       else { edits.descriptionText = data.descriptionText; edits.descriptionHtml = data.descriptionHtml; }
       const pushed = await pushValue(info, kind);
+      state.aiGenerated[info.upc] = { ...(state.aiGenerated[info.upc] || {}), [kind]: auto ? 'auto' : 'manual' };
+      if (state.guide?.active) await guide('start', { silent: true });  // refresh the overlay's "generated with AI" marks
       toast((kind === 'title' ? 'Title written: ' + data.title : 'Description written from the item and its notes') + (pushed ? ' (on the page)' : ''));
     } catch (error) {
       toast('AI ' + kind + ': ' + error.message, true);
     } finally {
-      state.genBusy = ''; renderPage(); renderDetail();
+      state.genBusy = ''; done(); renderPage(); renderDetail();
     }
   }
 
@@ -432,6 +501,7 @@
       if (info.proposal?.id) void api('/api/lister/events', { method: 'POST', body: { proposal_id: info.proposal.id, event: filled.length ? 'helper_filled' : 'helper_fill_failed', note: `${store} ${state.page.kind || ''}${auto ? ' (auto)' : ''}`, payload: { filled, unmatched: result.report.unmatched, aspects: result.report.aspects } } }).catch(() => {});
       if (state.settings.autoGuide) await guide('start', { silent: true });
       await maybeAutoText();
+      await maybeAutoSend();
     } catch (error) {
       toast('Fill failed: ' + error.message, true);
     } finally {
@@ -449,7 +519,7 @@
         if (!info) return;
         const v = values(info);
         const noteFields = v.conditionDescriptionSource === 'notes' && v.conditionDescription ? ['conditionDescription'] : [];
-        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields } });
+        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, aiFields: state.aiGenerated[info.upc] || {} } });
         if (!silent && !response.state.needed.length) toast('Nothing left to fill on this page');
       } else if (action === 'go') response = await pageMessage({ type: 'guide-go', index });
       else response = await pageMessage({ type: 'guide-' + action });
@@ -530,6 +600,7 @@
         data.duplicate ? null : { label: 'Undo', run: () => undoLink(data.link.id) });
       delete state.details[upc];
       await loadQueue({ keep: false });
+      if (state.currentUpc) bindTab(state.currentUpc, body.platform);
       if (auto) state.view = 'list';
       renderAll();
     } catch (error) {
@@ -624,8 +695,8 @@
     state.pendingSearch = { upc: item.upc, platform };
     const url = START_URLS[platform](item.baseUpc || item.upc);
     const onStore = state.page?.store === platform && state.tab?.id;
-    if (onStore) await chrome.tabs.update(state.tab.id, { url });
-    else await chrome.tabs.create({ url, active: true });
+    if (onStore) { await chrome.tabs.update(state.tab.id, { url }); bindTab(item.upc, platform); }
+    else { const created = await chrome.tabs.create({ url, active: true }); bindTab(item.upc, platform, created?.id); }
   }
 
   // -- photos ------------------------------------------------------------------------------------
@@ -652,7 +723,44 @@
     if (!info || !state.page?.store) { toast('Open the store listing form first', true); return; }
     const urls = selectedPhotoUrls(info);
     if (!urls.length) { toast('No photos to send', true); return; }
+    await sendPhotoUrls(info, urls);
+  }
+
+  // Our photos, AI version preferred over its original when one exists.
+  function bestPhotoUrls(info) {
+    const photos = info.photos || [];
+    const aiFor = new Map(photos.filter(p => p.source === 'ai' && p.from).map(p => [p.from, p.url]));
+    const out = [];
+    for (const p of photos) {
+      if (p.source === 'catalog') continue;
+      const url = p.source === 'ai' ? p.url : (aiFor.get(p.name) || p.url);
+      if (!out.includes(url)) out.push(url);
+    }
+    return out.slice(0, 24);
+  }
+
+  function pendingAiPhotos(info) {
+    const done = new Set((info.photos || []).filter(p => p.source === 'ai').map(p => p.from).filter(Boolean));
+    return (info.photos || []).some(p => (p.source === 'listing' || p.source === 'prep') && !done.has(p.name));
+  }
+
+  // Auto send: once per tab and item, after the fill (or after the automatic AI photos finished).
+  async function maybeAutoSend() {
+    const info = detail();
+    const page = state.page;
+    if (!info || !state.settings.autoSendPhotos || !page?.store || !(page.kind === 'listing-form' || page.kind === 'offer-form')) return;
+    if (state.settings.autoAiPhotos && pendingAiPhotos(info)) return;  // maybeAutoPhotos sends when done
+    const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc;
+    if (state.autoSent.has(key)) return;
+    const urls = bestPhotoUrls(info);
+    if (!urls.length) return;
+    state.autoSent.add(key);
+    await sendPhotoUrls(info, urls);
+  }
+
+  async function sendPhotoUrls(info, urls) {
     state.busy = 'photos'; renderDetail();
+    const done = busy('Sending photos to the page…');
     try {
       const files = [];
       for (const url of urls) { const f = await photoFile(url); files.push({ name: f.name, type: f.type, base64: f.base64 }); }
@@ -661,7 +769,7 @@
     } catch (error) {
       toast('Photos: ' + error.message, true);
     } finally {
-      state.busy = ''; renderDetail();
+      state.busy = ''; done(); renderDetail();
     }
   }
 
@@ -681,6 +789,7 @@
     if (!urls.length) return;
     for (const url of urls) state.autoPhotos.add(url);
     await aiPhotoshopUrls(info, urls);
+    await maybeAutoSend();
   }
 
   async function aiPhotoshopUrls(info, urls) {
@@ -688,11 +797,13 @@
     state.aiPrompt = prompt && prompt !== info.aiPhotoPrompt ? prompt : '';
     remember();
     let done = 0;
+    const release = busy('AI photoshop…');
     for (const url of urls) {
       state.aiBusy = `AI photoshop ${done + 1}/${urls.length}…`; renderDetail();
       try {
         const data = await api('/api/lister/photos/ai', { method: 'POST', body: { upc: info.upc, url, prompt } });
         info.photos.unshift(data.photo);
+        state.autoPhotos.add(url);  // a manual run counts: the auto switch skips this photo later
         state.selectedPhotos.delete(url);
         state.selectedPhotos.add(data.photo.url);
         done += 1;
@@ -701,7 +812,7 @@
         break;
       }
     }
-    state.aiBusy = '';
+    state.aiBusy = ''; release();
     if (done) toast(`${done} photo${done === 1 ? '' : 's'} cleaned up; the originals are kept`);
     renderDetail();
   }
@@ -745,12 +856,18 @@
     const toggles = `<div class="toggles">
         <label class="check"><input id="autoAiTitle" type="checkbox" ${state.settings.autoAiTitle ? 'checked' : ''}> AI title as the page loads</label>
         <label class="check"><input id="autoAiDescription" type="checkbox" ${state.settings.autoAiDescription ? 'checked' : ''}> AI description as the page loads</label>
+        <label class="check"><input id="autoAiPhotosTop" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> AI photoshop on every photo</label>
+        <label class="check"><input id="autoSendPhotos" type="checkbox" ${state.settings.autoSendPhotos ? 'checked' : ''}> send photos to the page as it loads</label>
       </div>`;
     const wireToggles = () => {
       for (const key of ['autoAiTitle', 'autoAiDescription']) {
         const box = $(key);
         if (box) box.onchange = async () => { await saveSettings({ ...state.settings, [key]: box.checked }); toast(box.checked ? 'Will write the ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' automatically on every listing' : 'Automatic ' + (key === 'autoAiTitle' ? 'title' : 'description') + ' off'); if (box.checked) void maybeAutoText(); };
       }
+      const sendBox = $('autoSendPhotos');
+      if (sendBox) sendBox.onchange = async () => { await saveSettings({ ...state.settings, autoSendPhotos: sendBox.checked }); toast(sendBox.checked ? 'Photos will go to the page on every listing' : 'Automatic photo send off'); if (sendBox.checked) void maybeAutoSend(); };
+      const photosBox = $('autoAiPhotosTop');
+      if (photosBox) photosBox.onchange = async () => { await saveSettings({ ...state.settings, autoAiPhotos: photosBox.checked }); toast(photosBox.checked ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off'); renderDetail(); if (photosBox.checked && detail()) void maybeAutoPhotos(detail()); };
     };
     if (!page.store) {
       el.innerHTML = `<div class="store"><span class="badge none">no store page</span><span class="grow muted small">Pick an item, then start the listing. The panel searches the UPC, fills the form and records the listing.</span></div>
@@ -778,7 +895,6 @@
       page.kind === 'listing-start' ? `<button id="searchBtn" class="primary" type="button" title="Type the UPC into the store's product search">Search UPC</button>` : '',
       !onForm && page.kind !== 'listing-start' && !ASSIST_KINDS.has(page.kind) ? `<button id="startBtn" type="button">Start on ${storeName(state.platform)}</button>` : '',
       onForm && !g?.active ? `<button id="guideBtn" class="primary" type="button" title="Show the checklist overlay on the page (fill, AI text, pick a field live there)">Show checklist</button>` : '',
-      onForm && g?.active ? `<span class="muted small">Fill, AI text and Pick a field are on the checklist overlay on the page.</span>` : '',
     ].filter(Boolean).join('') : '';
     el.innerHTML = `
       <div class="store"><span class="badge ${page.store}">${storeName(page.store)}</span>
@@ -815,32 +931,49 @@
       const key = (state.tab?.id || 0) + '|' + page.store + '|' + info.upc + '|' + kind;
       if (state.autoText.has(key)) continue;
       state.autoText.add(key);
-      await generate(info, kind);
+      await generate(info, kind, { auto: true });
     }
   }
 
   function renderItems() {
     const filter = state.filter.trim().toLowerCase();
-    const rows = state.items.filter(it => !filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter));
+    const byStatus = it => {
+      const f = state.statusFilter;
+      if (f === 'good' || f === 'bad') return (it.prepStatus?.status || '') === f;
+      if (f === 'listed') return it.status === 'listed' || it.alreadyOnStore || it.otherStatus === 'listed';
+      return true;
+    };
+    for (const [id, value] of [['statusAll', 'all'], ['statusGood', 'good'], ['statusBad', 'bad'], ['statusListed', 'listed']]) $(id).classList.toggle('active', state.statusFilter === value);
+    const rows = state.items.filter(it => byStatus(it) && (!filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter)));
     const list = $('itemList');
     if (!rows.length) {
-      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : `Nothing queued for ${storeName(state.platform)}. Add items to the Listing Agent queue on <b>Items to List</b>.`}</div>`;
+      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : `Nothing queued for ${storeName(state.platform)}. Add items to the Listing Agent queue on <b>Items to List</b>.`)}</div>`;
       return;
     }
     const active = rows.filter(it => it.status === 'queued');
     const done = rows.filter(it => it.status !== 'queued');
     const row = (it, first) => {
       const chips = [];
-      if (it.alreadyOnStore) chips.push(`<span class="chip warn" title="The store already carries this UPC">on ${storeName(state.platform)} ${it.storeUrl ? `<a href="${esc(it.storeUrl)}" target="_blank" rel="noopener" title="Open the store listing">↗</a>` : ''}</span>`);
-      if (it.status === 'listed') chips.push(`<span class="chip ok">listed ${it.storeUrl ? `<a href="${esc(it.storeUrl)}" target="_blank" rel="noopener">↗</a>` : ''}</span>`);
-      if (it.otherStatus === 'listed') chips.push(`<span class="chip info" title="Already listed on the other store">${storeName(state.platform === 'ebay' ? 'amazon' : 'ebay')} ✓</span>`);
-      if (it.suffixed) chips.push(`<span class="chip warn" title="Specific unit: the SKU keeps the -suffix">unit ${esc(it.upc.split('-')[1])}</span>`);
+      const other = state.platform === 'ebay' ? 'amazon' : 'ebay';
+      if (it.status === 'listed') chips.push(`<span class="chip store ${state.platform}" title="Listed on ${storeName(state.platform)} through the panel">${storeName(state.platform)} ✓ listed ${it.storeUrl ? `<a href="${esc(it.storeUrl)}" target="_blank" rel="noopener">↗</a>` : ''}</span>`);
+      else if (it.alreadyOnStore) chips.push(`<span class="chip store ${state.platform}" title="${storeName(state.platform)} already carries this UPC">on ${storeName(state.platform)} ${it.storeUrl ? `<a href="${esc(it.storeUrl)}" target="_blank" rel="noopener" title="Open the store listing">↗</a>` : ''}</span>`);
+      if (it.otherStatus === 'listed') chips.push(`<span class="chip store ${other}" title="Already listed on ${storeName(other)}">${storeName(other)} ✓ listed</span>`);
+      if (it.notes) chips.push(`<span class="chip note" title="Prep notes on file">${it.notes.written ? '📝 ' + esc(it.notes.written) : ''}${it.notes.written && it.notes.voice ? ' · ' : ''}${it.notes.voice ? '🎤 ' + esc(it.notes.voice) : ''}</span>`);
+      const ps = it.prepStatus || {};
+      if (ps.status) chips.push(`<span class="chip ${ps.status === 'good' ? 'ok' : (ps.status === 'bad' ? 'bad' : 'warn')}" title="Item Prep status">${esc(ps.status)}${ps.reason ? ' · ' + esc(ps.reason) : ''}</span>`);
+      if (it.defect && (it.defect || '').toLowerCase() !== (ps.reason || '').toLowerCase()) chips.push(`<span class="chip defect" title="Defect noted on the BOL">${esc(it.defect)}</span>`);
       if (it.preparing) chips.push('<span class="chip"><span class="spin"></span> preparing</span>');
-      else if (it.proposal?.ready) chips.push('<span class="chip ok" title="Title, price, specifics and description are prepared">ready</span>');
-      return `<div class="item ${it.upc === state.currentUpc ? 'current' : ''} ${first ? 'first' : ''} ${it.status === 'listed' ? 'listed' : ''}" data-upc="${esc(it.upc)}" title="${esc(it.title)}">
+      const ac = it.amazonCheck;
+      if (state.checkingAmazon.has(it.baseUpc)) chips.push('<span class="chip checking"><span class="spin"></span> Amazon check</span>');
+      else if (ac?.status === 'restricted') chips.push(`<span class="chip bad" title="${esc((ac.reasons || []).join(' · ') || 'Amazon restricts this listing for us')}">Amazon ✕ restricted</span>`);
+      else if (ac?.status === 'no_asin') chips.push('<span class="chip warn" title="No ASIN for this UPC: Amazon has no product page to list against">not in Amazon catalog</span>');
+      else if (ac?.status === 'listable') chips.push(`<span class="chip ok" title="ASIN ${esc(ac.asin)}${ac.brand ? ' · ' + esc(ac.brand) : ''}">Amazon ✓</span>`);
+      else if (ac && ac.status !== 'listable') chips.push(`<span class="chip" title="${esc(ac.error || 'check failed')}">Amazon ?</span>`);
+      const upcHtml = it.suffixed ? `${esc(it.baseUpc)}-<b class="suffix" title="Specific unit: the SKU keeps the -suffix">${esc(it.upc.split('-')[1])}</b>` : esc(it.upc);
+      return `<div class="item ${it.upc === state.currentUpc ? 'current' : ''} ${first ? 'first' : ''} ${it.status === 'listed' ? 'listed' : ''} ${ac?.status === 'restricted' ? 'restricted' : ''}" data-upc="${esc(it.upc)}" title="${esc(it.title)}">
         ${it.thumb ? `<img src="${esc(it.thumb)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
         <div><div class="title">${esc(it.title || '(no title)')}</div>
-          <div class="meta"><span>${esc(it.upc)}</span>${chips.join('')}</div></div>
+          <div class="meta"><span>${upcHtml}</span>${chips.join('')}</div></div>
         ${it.status === 'queued' ? `<button class="remove" data-skip="${esc(it.upc)}" type="button" title="Remove from the ${storeName(state.platform)} list" aria-label="Remove">×</button>` : '<span></span>'}
       </div>`;
     };
@@ -852,6 +985,7 @@
         state.currentUpc = el.dataset.upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); remember();
         renderItems(); renderDetail(); renderConfirm();
         void loadDetail(state.currentUpc).then(() => maybeAssist());
+        if (state.page?.store) bindTab(state.currentUpc, state.platform);
         // Picked while the store's search page is open: search this UPC right away.
         state.pendingSearch = { upc: state.currentUpc, platform: state.platform };
         void maybeAutoSearch({ force: true });
@@ -897,7 +1031,7 @@
       const linked = (info.links || []).some(l => l.platform === platform) || info.queue?.listed?.[platform];
       const onStore = ((info.existing || {})[platform] || []).length > 0;
       const skipped = info.queue?.skipped?.includes(platform);
-      const [cls, text, sub] = linked ? ['ok', 'LISTED', 'recorded by the panel'] : onStore ? ['warn', 'ON STORE', 'already carries this UPC'] : skipped ? ['off', 'SKIPPED', 'left off this list'] : ['todo', 'NOT LISTED', 'to do'];
+      const [cls, text, sub] = linked ? ['ok', 'LISTED', 'recorded by the panel'] : onStore ? ['warn', 'ON STORE', 'already carries this UPC'] : skipped ? ['off', 'SKIPPED', 'left off this list'] : ['todo', 'NOT LISTED', ''];
       return `<div class="tile ${cls}"><div class="k">${storeName(platform)}</div><div class="v">${text}</div><div class="s">${esc(sub)}</div></div>`;
     };
     const rackQty = gate.rackQty ?? stock.quantity ?? 0;
@@ -916,13 +1050,6 @@
         ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden>too small</span></div>`;
     const noteRow = (icon, lt, en, extra = '') => `<div class="note2"><span class="ico" title="${icon === '🎤' ? 'Voice note' : 'Written note'}">${icon}</span>
         <div class="lt">${lt ? esc(lt) : '<span class="muted">—</span>'}</div><div class="en">${en ? esc(en) : '<span class="muted">—</span>'}</div>${extra}</div>`;
-    const copyAll = [
-      `Title: ${v.title}`, `Price: ${money(v.price)} ${v.currency || ''}`.trim(), `Quantity: ${v.quantity ?? ''}`, `SKU: ${v.sku}`, `UPC: ${v.upc}`,
-      `Condition: ${v.condition}${v.conditionDescription ? ' - ' + v.conditionDescription : ''}`, v.brand ? `Brand: ${v.brand}` : '',
-      v.categoryPath ? `eBay category: ${v.categoryPath} (${v.categoryId})` : '',
-      aspects.length ? 'Item specifics: ' + aspects.map(([k, vals]) => `${k}=${vals.join('/')}`).join('; ') : '',
-      '', v.descriptionText || '',
-    ].filter((line, i, arr) => line !== '' || (arr[i + 1] || '') !== '').join('\n');
     el.innerHTML = `
       <div class="head">${(photos[0] || {}).url || item.thumb ? `<img src="${esc((photos[0] || {}).url || item.thumb)}" alt="">` : '<div class="noimg"></div>'}
         <div><div class="name">${esc(v.title || item.title || item.upc)}</div>
@@ -938,8 +1065,8 @@
       ${existing.length && !linkedHere ? `<div class="flag warn">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}.
         <button id="markExisting" class="mini" type="button">Use that listing</button> ${item.storeUrl ? `<a href="${esc(item.storeUrl)}" target="_blank" rel="noopener">open</a>` : ''}</div>` : ''}
 
-      <h3>Notes <span class="grow"></span>${notes.length || voice.length || info.defect || v.conditionDescription ? '<span class="muted">LT · EN</span>' : '<span class="muted">none</span>'}</h3>
-      ${v.conditionDescription ? `<div class="note cond"><b>On the listing${v.conditionDescriptionSource === 'notes' ? ' · from the prep notes, read once' : ''}:</b> ${esc(v.conditionDescription)}</div>` : ''}
+      <section class="sticky">
+      <h3>Notes <span class="grow"></span>${notes.length || voice.length || info.defect ? '<span class="muted">LT · EN</span>' : '<span class="muted">none</span>'}</h3>
       ${voice.map(n => noteRow('🎤', n.lithuanian, n.english, `<div class="acts">
           ${n.status === 'complete' || n.english ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span>' : `<button class="mini" data-transcribe="${n.id}" type="button" title="Transcribe and translate">text</button>`)}
           <button class="mini" data-play="${esc(n.url)}" type="button" title="Play the recording">▶</button>
@@ -948,18 +1075,20 @@
       ${info.defect ? noteRow('📦', '', 'BOL reason: ' + info.defect) : ''}
       ${notes.map(n => { const h = noteHalves(n); return noteRow('📝', h.lt, h.en, `<div class="acts muted small">${esc((n.createdAt || '').slice(0, 10))}</div>`); }).join('')}
       <audio id="notePlayer" preload="none" hidden></audio>
+      </section>
 
       <h3>Photos <span class="muted">(${photos.length})</span><span class="grow"></span><button id="addPhoto" class="mini" type="button">${state.qrOpen ? 'Hide QR' : '+ Photo (QR)'}</button><button id="photoSelectAll" class="mini" type="button">${state.selectedPhotos.size ? 'Clear' : 'Select ours'}</button><button id="photoRefresh" class="mini" type="button" title="Reload photos (after taking new ones on the phone)">↻</button></h3>
       ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone to add photos of this unit, then press ↻.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
       ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use + Photo (QR) to add some from the phone.</div>'}
       <div class="row tight">
-        <button id="sendPhotos" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? 'Sending…' : 'Send to page'}</button>
-        <button id="aiPhotos" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? esc(state.aiBusy) : 'AI photoshop'}</button>
-        <label class="check small"><input id="autoAiPhotos" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> auto on every photo</label>
+        <button id="sendPhotos" class="act send" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos (or all of ours) into the page's photo uploader">${state.busy === 'photos' ? '<span class="spin"></span> Sending…' : '⬆ Send to page'}</button>
+        <button id="aiPhotos" class="act ai" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '✨ AI photoshop'}</button>
+        <label class="check small"><input id="autoAiPhotos" type="checkbox" ${state.settings.autoAiPhotos ? 'checked' : ''}> auto AI on every photo</label>
+        <label class="check small"><input id="autoSendPhotosDetail" type="checkbox" ${state.settings.autoSendPhotos ? 'checked' : ''}> auto send to page</label>
       </div>
       <details ${state.aiPrompt ? 'open' : ''}><summary>AI photoshop prompt</summary><textarea id="aiPrompt" rows="3">${esc(state.aiPrompt || info.aiPhotoPrompt || '')}</textarea><button id="aiPromptReset" class="mini" type="button">Reset to default</button></details>
       ${aspects.length ? `<details><summary>Item specifics (${aspects.length})</summary><div class="chips">${aspects.map(([k, vals]) => `<code title="click to copy" data-copy="${esc(vals[0])}">${esc(k)}: ${esc(vals.join(' / '))}</code>`).join('')}</div></details>` : ''}
-      <details><summary>Text for manual paste</summary><pre class="copyall">${esc(copyAll)}</pre></details>`;
+      `;
 
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
@@ -1007,7 +1136,8 @@
     }
     $('sendPhotos').onclick = () => sendPhotos();
     $('aiPhotos').onclick = () => aiPhotoshop();
-    $('autoAiPhotos').onchange = async () => { await saveSettings({ ...state.settings, autoAiPhotos: $('autoAiPhotos').checked }); toast($('autoAiPhotos').checked ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off'); if ($('autoAiPhotos').checked) void maybeAutoPhotos(info); };
+    $('autoSendPhotosDetail').onchange = async () => { await saveSettings({ ...state.settings, autoSendPhotos: $('autoSendPhotosDetail').checked }); renderPage(); if ($('autoSendPhotosDetail').checked) void maybeAutoSend(); };
+    $('autoAiPhotos').onchange = async () => { await saveSettings({ ...state.settings, autoAiPhotos: $('autoAiPhotos').checked }); renderPage(); toast($('autoAiPhotos').checked ? 'Every photo of ours will get an AI version automatically' : 'Automatic AI photoshop off'); if ($('autoAiPhotos').checked) void maybeAutoPhotos(info); };
     $('aiPromptReset').onclick = () => { $('aiPrompt').value = info.aiPhotoPrompt || ''; state.aiPrompt = ''; remember(); };
     $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
@@ -1180,6 +1310,7 @@
     $('viewList').onclick = () => setView('list');
     $('viewItem').onclick = () => setView('item');
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
+    for (const [id, value] of [['statusAll', 'all'], ['statusGood', 'good'], ['statusBad', 'bad'], ['statusListed', 'listed']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
     $('reload').onclick = () => { state.details = {}; void connect().then(() => loadQueue()); void refreshTab(); };
     chrome.tabs.onActivated.addListener(scheduleRefresh);
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
@@ -1190,6 +1321,7 @@
       if (tab?.active && (info.status === 'complete' || info.url)) scheduleRefresh();
     });
     chrome.windows?.onFocusChanged?.addListener(() => scheduleRefresh());
+    chrome.tabs.onRemoved.addListener(tabId => { delete state.tabItems[tabId]; try { void chrome.storage.session?.set({ ssListerTabs: state.tabItems }); } catch { /* ignore */ } });
     // Store pages render their forms after load; look again a little later.
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (tab?.active && info.status === 'complete') setTimeout(scheduleRefresh, 2500); });
   }

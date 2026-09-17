@@ -5862,6 +5862,17 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/lister/queue/<upc>/amazon-check",
+      "endpoint": "api_lister_queue_amazon_check",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/lister/learn",
       "endpoint": "api_lister_learn",
       "methods": [

@@ -271,11 +271,13 @@
     const doc = ownDocument(el);
     // A visible search/continue button next to the box is the most reliable trigger.
     const scope = form || el.closest('[class*="search" i], [class*="prelist" i], section, main') || doc.body;
-    const button = Array.from(scope.querySelectorAll('button, input[type=submit], [role=button]')).find(b => {
+    // The submit button comes AFTER the box in the page: Seller Central also has a "Search" tab tile before it.
+    const candidates = Array.from(scope.querySelectorAll('button, input[type=submit], [role=button]')).filter(b => {
       if (!isVisible(b)) return false;
       const text = M.normalize((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.value || ''));
       return /^(search|get started|continue|find|go|next|submit|search now)$/.test(text) || /search|get started/.test(text);
     });
+    const button = candidates.find(b => el.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) || candidates[0];
     for (const type of ['keydown', 'keypress', 'keyup']) {
       el.dispatchEvent(new KeyboardEvent(type, { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true }));
     }
@@ -523,7 +525,12 @@
     if (guide.panel) return guide.panel;
     const panel = document.createElement('div');
     panel.id = 'ss-lister-guide';
-    panel.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:#0f172a;color:#f8fafc;font:13px/1.4 system-ui,sans-serif;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.45);overflow:hidden';
+    panel.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:2147483647;width:min(360px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:#0f172a;color:#f8fafc;font:13px/1.4 system-ui,sans-serif;border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.45);overflow:hidden';
+    // Remembered position for this site (the user can drag it by the header).
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('ss-lister-guide-pos') || 'null');
+      if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) { panel.style.left = Math.max(0, Math.min(saved.left, window.innerWidth - 80)) + 'px'; panel.style.top = Math.max(0, Math.min(saved.top, window.innerHeight - 60)) + 'px'; panel.style.bottom = 'auto'; }
+    } catch { /* ignore */ }
     panel.innerHTML = `
       <div data-ss="head" style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e293b;cursor:pointer">
         <span style="width:10px;height:10px;border-radius:50%;background:#0a9c6c;flex:none"></span>
@@ -537,17 +544,36 @@
         <button data-ss="use" style="background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit;font-weight:600">Use suggestion (Ctrl+Enter)</button>
         <button data-ss="next" style="background:#334155;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Next (Tab)</button>
         <button data-ss="fill" title="Fill the form from the item's values" style="background:#1d4ed8;color:#fff;border:0;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Fill page</button>
-        <button data-ss="pick" title="Click a field on the page and choose which value goes in" style="background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Pick a field…</button>
-        <button data-ss="hide" title="Hide the checklist (Esc)" style="background:transparent;color:#cbd5e1;border:1px solid #475569;border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit">Hide</button>
+
       </div>`;
     panel.querySelector('[data-ss="use"]').onclick = () => guideUse();
     panel.querySelector('[data-ss="next"]').onclick = () => guideNext();
     panel.querySelector('[data-ss="fill"]').onclick = () => panelAction('fill');
-    panel.querySelector('[data-ss="pick"]').onclick = () => panelAction('pick');
-    panel.querySelector('[data-ss="hide"]').onclick = () => { guideStop(); notifyGuide(); };
+
     panel.querySelector('[data-ss="done"]').onclick = () => { guideStop(); notifyGuide(); };
     panel.querySelector('[data-ss="collapse"]').onclick = event => { event.stopPropagation(); guide.collapsed = !guide.collapsed; guideRender(); };
-    panel.querySelector('[data-ss="head"]').onclick = () => { if (guide.collapsed) { guide.collapsed = false; guideRender(); } };
+    panel.querySelector('[data-ss="head"]').onclick = () => { if (guide.collapsed && !panel.dataset.ssDragged) { guide.collapsed = false; guideRender(); } delete panel.dataset.ssDragged; };
+    // Drag the overlay by its header.
+    const head = panel.querySelector('[data-ss="head"]');
+    head.style.cursor = 'move';
+    head.addEventListener('pointerdown', event => {
+      if (event.target.closest('button')) return;
+      const rect = panel.getBoundingClientRect();
+      const offset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      let moved = false;
+      const move = e => {
+        moved = true;
+        panel.style.left = Math.max(0, Math.min(e.clientX - offset.x, window.innerWidth - rect.width)) + 'px';
+        panel.style.top = Math.max(0, Math.min(e.clientY - offset.y, window.innerHeight - 40)) + 'px';
+        panel.style.bottom = 'auto';
+      };
+      const up = () => {
+        document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
+        if (moved) { panel.dataset.ssDragged = '1'; try { sessionStorage.setItem('ss-lister-guide-pos', JSON.stringify({ left: parseFloat(panel.style.left), top: parseFloat(panel.style.top) })); } catch { /* ignore */ } }
+      };
+      document.addEventListener('pointermove', move); document.addEventListener('pointerup', up);
+      event.preventDefault();
+    });
     document.documentElement.appendChild(panel);
     guide.panel = panel;
     return panel;
@@ -587,7 +613,8 @@
         <span style="width:10px;height:10px;border-radius:50%;background:${colour};flex:none"></span>
         <span style="flex:1;min-width:0"><span style="font-weight:${isCurrent ? 700 : 500}">${escapeHtml(row.label)}</span>${row.value ? ` <span style="color:#e2e8f0;font-weight:700">· ${escapeHtml(row.value)}</span>` : ''}${row.required && !row.done ? ' <span style="color:#fca5a5;font-size:11px">required</span>' : ''}
           ${!row.done && row.suggestion ? `<div style="color:#cbd5e1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">→ ${escapeHtml(row.suggestion.slice(0, 90))}</div>` : ''}
-          ${fromNotes ? '<div style="color:#93c5fd;font-size:11px">Filled from the warehouse prep notes. Read it once before listing.</div>' : ''}</span>
+          ${fromNotes ? '<div style="color:#93c5fd;font-size:11px">Filled from the warehouse prep notes. Read it once before listing.</div>' : ''}
+          ${row.done && guide.options.aiFields?.[row.target] ? `<div style="color:#86efac;font-size:11px">generated with AI${guide.options.aiFields[row.target] === 'auto' ? ' (automatically)' : ''}</div>` : ''}</span>
         ${row.target === 'title' || row.target === 'description' ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="background:#0a9c6c;color:#fff;border:0;border-radius:6px;padding:2px 8px;cursor:pointer;font:600 11px system-ui,sans-serif">AI</button>` : ''}
         <span style="color:${colour};font-weight:700">${row.done ? (fromNotes ? 'ⓘ' : '✓') : (row.required ? '!' : '·')}</span></div>`;
     }).join('') || '<div style="padding:10px 12px;color:#cbd5e1">No listing fields found on this page yet.</div>';

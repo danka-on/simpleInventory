@@ -25,7 +25,7 @@ from pathlib import Path
 
 from flask import jsonify, render_template, request, send_from_directory
 
-VERSION = '0.2.11'
+VERSION = '0.2.12'
 PLATFORMS = ('ebay', 'amazon')
 OPEN_STATUSES = ('proposed', 'held', 'needs_photos', 'blocked')
 MUTATION_HEADER = 'X-Sweet-Shelves-Lister'
@@ -308,6 +308,8 @@ class Lister:
         self.remove_from_queue = deps.get('_listagent_remove_from_queue')
         self.mark_bol_listed = deps.get('_listing_center_mark_bol_listed')
         self.add_listing_photo = deps.get('_listagent_add_photo')
+        self.amazon_catalog_view = deps.get('api_listingagent_amazon_catalog_search')
+        self.amazon_restriction_view = deps.get('api_listingagent_amazon_restriction_check')
         self.bump_data_version = deps.get('update_data_version')
         self.base_dir = deps.get('BASE_DIR')
         self.static_folder = Path(static_folder)
@@ -370,6 +372,20 @@ class Lister:
             )
         ''')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_lister_choices_base ON lister_choices(base_upc, platform, step)')
+        # Can this UPC be listed on Amazon by us (catalog ASIN + listing restrictions)? Cached per catalog UPC.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS lister_amazon_checks (
+                base_upc TEXT PRIMARY KEY,
+                asin TEXT,
+                title TEXT,
+                brand TEXT,
+                status TEXT NOT NULL,
+                reasons TEXT,
+                error TEXT,
+                condition_type TEXT,
+                checked_at TEXT NOT NULL
+            )
+        ''')
         # Per-store "X" on the side panel: the item leaves that store's list but stays queued for the other.
         cur.execute('''
             CREATE TABLE IF NOT EXISTS lister_queue_state (
@@ -932,6 +948,35 @@ class Lister:
                 continue
         return out
 
+    def _defects(self, upcs):
+        """The BOL's defect note per catalog UPC (raw_bol_items.prep_reason), e.g. "Missing pieces"."""
+        out = {}
+        bases = {}
+        for upc in upcs:
+            base = _base_upc(upc)
+            for key in {base, base.lstrip('0') or base, base.zfill(12) if base.isdigit() else base}:
+                if key:
+                    bases.setdefault(key, set()).add(upc)
+        if not bases:
+            return out
+        keys = tuple(bases)
+        try:
+            with self.db('rawbol.db') as conn:
+                cur = conn.cursor()
+                if not self._has_table(cur, 'raw_bol_items'):
+                    return out
+                cur.execute(f"SELECT upc, prep_reason FROM raw_bol_items WHERE TRIM(COALESCE(upc, '')) IN ({','.join('?' for _ in keys)}) AND TRIM(COALESCE(prep_reason, '')) != '' ORDER BY rowid DESC", keys)
+                for row in cur.fetchall():
+                    row = _row(row)
+                    reason = _text(row.get('prep_reason'), 120)
+                    if reason.lower() in ('nan', 'none', 'null'):
+                        continue
+                    for upc in bases.get(_text(row.get('upc')), ()):
+                        out.setdefault(upc, reason)
+        except sqlite3.Error:
+            return out
+        return out
+
     def _latest_proposals(self, cur, upcs):
         """Newest non-superseded proposal per UPC: id, status and whether it carries listing fields."""
         out = {}
@@ -978,7 +1023,11 @@ class Lister:
             upcs = [self.format_upc12(r['upc']) or _text(r['upc']) for r in rows]
             links = self._links_for_upcs(cur, list({*upcs, *[r['upc'] for r in rows]}))
             proposals = self._latest_proposals(cur, upcs)
+            amazon_checks = self._amazon_checks(cur, upcs)
         thumbs = self._thumbs(upcs)
+        prep_statuses = self._prep_statuses(upcs)
+        note_counts = self._note_counts(upcs)
+        defects = self._defects(upcs)
         active, done, hidden = [], [], 0
         other = 'amazon' if platform == 'ebay' else 'ebay'
         for row, upc in zip(rows, upcs):
@@ -1014,6 +1063,10 @@ class Lister:
                 'proposal': {k: proposal[k] for k in ('id', 'status', 'ready', 'updatedAt') if k in proposal},
                 'preparing': self._job_state(upc).get('running', False),
                 'checkRequest': bool(row.get('has_check_request')),
+                'amazonCheck': amazon_checks.get(_base_upc(upc)),
+                'prepStatus': prep_statuses.get(upc),
+                'notes': note_counts.get(upc),
+                'defect': defects.get(upc, ''),
             }
             (done if listed_at else active).append(item)
         done.sort(key=lambda it: -_order_key(it['listedAt']))
@@ -1030,6 +1083,61 @@ class Lister:
             rv = rv[0]
         data = rv.get_json(silent=True) if hasattr(rv, 'get_json') else (rv or {})
         return (data or {}).get('item') or {} if (data or {}).get('success') else {}
+
+    def _prep_statuses(self, upcs):
+        """Item Prep's verdict per unit for the queue rows (one query): upc -> {'status', 'reason'}."""
+        keys = tuple({v for u in upcs for v in self._variants(u)})
+        if not keys:
+            return {}
+        out = {}
+        try:
+            with self.db('bol.db') as conn:
+                cur = conn.cursor()
+                if not self._has_table(cur, 'items_prep_status'):
+                    return out
+                cur.execute(f"SELECT upc, status, reason, updated_at FROM items_prep_status WHERE upc IN ({','.join('?' for _ in keys)}) ORDER BY COALESCE(updated_at, '') ASC, id ASC", keys)
+                by_key = {}
+                for r in cur.fetchall():
+                    r = _row(r)
+                    by_key[_text(r.get('upc'))] = {'status': _text(r.get('status')).lower(), 'reason': _text(r.get('reason'), 120)}
+        except sqlite3.Error:
+            return out
+        for upc in upcs:
+            for v in self._variants(upc):
+                if v in by_key:
+                    out[upc] = by_key[v]
+                    break
+        return out
+
+    def _note_counts(self, upcs):
+        """How many written notes and voice notes Item Prep holds per unit (for the queue rows)."""
+        keys = tuple({v for u in upcs for v in self._variants(u)})
+        out = {}
+        if not keys:
+            return out
+        counts = {}
+        try:
+            with self.db('bol.db') as conn:
+                cur = conn.cursor()
+                placeholders = ','.join('?' for _ in keys)
+                if self._has_table(cur, 'items_prep_notes'):
+                    cur.execute(f"SELECT upc, COUNT(*) AS n FROM items_prep_notes WHERE upc IN ({placeholders}) GROUP BY upc", keys)
+                    for r in cur.fetchall():
+                        counts.setdefault(_text(r['upc']), {})['written'] = int(r['n'] or 0)
+                if self._has_table(cur, 'items_prep_media'):
+                    cur.execute(f"SELECT upc, COUNT(*) AS n FROM items_prep_media WHERE upc IN ({placeholders}) AND COALESCE(media_type, '') = 'audio' GROUP BY upc", keys)
+                    for r in cur.fetchall():
+                        counts.setdefault(_text(r['upc']), {})['voice'] = int(r['n'] or 0)
+        except sqlite3.Error:
+            return out
+        for upc in upcs:
+            total = {'written': 0, 'voice': 0}
+            for v in self._variants(upc):
+                for k in total:
+                    total[k] += counts.get(v, {}).get(k, 0)
+            if total['written'] or total['voice']:
+                out[upc] = total
+        return out
 
     def _prep_status(self, upc):
         """Item Prep's verdict for this unit: {'status': 'good'|'bad'|..., 'reason', 'updatedAt'} or {}."""
@@ -1455,6 +1563,93 @@ class Lister:
             return {'kind': kind, 'title': text.strip('"\'').splitlines()[0][:80]}
         return {'kind': kind, 'descriptionHtml': text, 'descriptionText': html_to_text(text)}
 
+    # -- can Amazon take this UPC from us? (catalog ASIN + listing restrictions, cached per UPC) ---
+
+    AMAZON_CHECK_TTL_DAYS = 7
+
+    def _call_view(self, view, path, query):
+        """Run one of the app's own JSON views in-process."""
+        if not view or not self.app:
+            return {}
+        with self.app.test_request_context(path, query_string={k: str(v) for k, v in query.items() if v not in (None, '')}):
+            rv = view()
+        if isinstance(rv, tuple):
+            rv = rv[0]
+        data = rv.get_json(silent=True) if hasattr(rv, 'get_json') else rv
+        return data or {}
+
+    def _amazon_checks(self, cur, upcs):
+        bases = tuple({_base_upc(u) for u in upcs if _base_upc(u)})
+        if not bases:
+            return {}
+        self.init_tables(cur)
+        cur.execute(f"SELECT * FROM lister_amazon_checks WHERE base_upc IN ({','.join('?' for _ in bases)})", bases)
+        out = {}
+        for r in cur.fetchall():
+            r = _row(r)
+            out[r['base_upc']] = {'status': r['status'], 'asin': r.get('asin') or '', 'title': r.get('title') or '', 'brand': r.get('brand') or '',
+                                  'reasons': _loads(r.get('reasons'), []), 'error': r.get('error') or '', 'conditionType': r.get('condition_type') or '',
+                                  'checkedAt': r.get('checked_at') or ''}
+        return out
+
+    def amazon_check(self, upc, *, force=False, condition_type=''):
+        """status: listable | restricted | no_asin | unavailable | error. Cached for a week per catalog UPC."""
+        upc = self.format_upc12(upc)
+        base = _base_upc(upc)
+        if not base:
+            raise ListerError('upc is required')
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            cached = self._amazon_checks(cur, [base]).get(base)
+        if cached and not force and cached['status'] in ('listable', 'restricted', 'no_asin'):
+            stamp = _order_key(cached['checkedAt'])
+            fresh = _order_key((datetime.datetime.now() - datetime.timedelta(days=self.AMAZON_CHECK_TTL_DAYS)).isoformat(timespec='seconds'))
+            if stamp >= fresh and (not condition_type or cached['conditionType'] == condition_type):
+                return {**cached, 'cached': True}
+        if not self.amazon_catalog_view or not self.amazon_restriction_view:
+            raise ListerError('The Amazon catalog check is not available on this server.', 501)
+        result = {'asin': '', 'title': '', 'brand': '', 'status': 'error', 'reasons': [], 'error': '', 'conditionType': condition_type}
+        search = self._call_view(self.amazon_catalog_view, '/api/listingagent/amazon/catalog_search', {'upc': base, 'mode': 'upc', 'limit': 3})
+        if not search.get('success'):
+            error = _text(search.get('error'), 300)
+            result['status'] = 'unavailable' if 'not available' in error.lower() else 'error'
+            result['error'] = error or 'catalog search failed'
+        else:
+            hits = [h for h in (search.get('results') or []) if _text(h.get('asin'))]
+            if not hits:
+                result['status'] = 'no_asin'
+            else:
+                best = hits[0]
+                result.update({'asin': _text(best.get('asin')).upper(), 'title': _text(best.get('title'), 200), 'brand': _text(best.get('brand'), 80)})
+                check = self._call_view(self.amazon_restriction_view, '/api/listingagent/amazon/restriction_check',
+                                        {'asin': result['asin'], 'conditionType': condition_type, 'refresh': '1' if force else ''})
+                if not check.get('success'):
+                    error = _text(check.get('error'), 300)
+                    result['status'] = 'unavailable' if 'not available' in error.lower() else 'error'
+                    result['error'] = error or 'restriction check failed'
+                else:
+                    restriction = check.get('restriction') or {}
+                    reasons = [_text(r if isinstance(r, str) else (r.get('message') or r.get('reasonCode') or json.dumps(r)), 300) for r in (restriction.get('reasons') or [])]
+                    result['reasons'] = [r for r in reasons if r]
+                    if not restriction.get('checked'):
+                        result['status'] = 'error'
+                        result['error'] = _text(check.get('warning'), 300) or 'restriction check did not complete'
+                    else:
+                        result['status'] = 'restricted' if restriction.get('restricted') else 'listable'
+        result['checkedAt'] = _now()
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('''INSERT INTO lister_amazon_checks (base_upc, asin, title, brand, status, reasons, error, condition_type, checked_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(base_upc) DO UPDATE SET asin = excluded.asin, title = excluded.title, brand = excluded.brand,
+                               status = excluded.status, reasons = excluded.reasons, error = excluded.error,
+                               condition_type = excluded.condition_type, checked_at = excluded.checked_at''',
+                        (base, result['asin'] or None, result['title'] or None, result['brand'] or None, result['status'],
+                         json.dumps(result['reasons']), result['error'] or None, condition_type or None, result['checkedAt']))
+            conn.commit()
+        return {**result, 'cached': False}
+
     # -- voice notes ---------------------------------------------------------------------------
 
     def analyze_voice(self, media_id, *, reanalyze=False):
@@ -1573,7 +1768,7 @@ class Lister:
             except Exception:
                 pass
         photo_url = base_url.rstrip('/') + '/static/' + rel
-        return {'photo': {'url': photo_url, 'id': photo_id, 'source': 'ai', 'name': filename, 'from': _text(url, 500)},
+        return {'photo': {'url': photo_url, 'id': photo_id, 'source': 'ai', 'name': filename, 'from': name},
                 'prompt': prompt}
 
     # -- ledger ---------------------------------------------------------------------------------
@@ -1829,6 +2024,15 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:mark-existing')
 
+    def api_lister_queue_amazon_check(upc):
+        try:
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            result = lister.amazon_check(upc, force=bool(data.get('force')), condition_type=_text(data.get('conditionType'), 40))
+            return jsonify({'success': True, 'check': result})
+        except Exception as e:
+            return failure(e, 'lister:amazon-check')
+
     def api_lister_queue_generate(upc):
         try:
             guard_mutation()
@@ -1898,6 +2102,7 @@ def register(app, deps):
     app.add_url_rule('/api/lister/queue/<upc>/skip', 'api_lister_queue_skip', api_lister_queue_skip, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/mark-existing', 'api_lister_queue_mark_existing', api_lister_queue_mark_existing, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/generate', 'api_lister_queue_generate', api_lister_queue_generate, methods=['POST'])
+    app.add_url_rule('/api/lister/queue/<upc>/amazon-check', 'api_lister_queue_amazon_check', api_lister_queue_amazon_check, methods=['POST'])
     app.add_url_rule('/api/lister/learn', 'api_lister_learn', api_lister_learn, methods=['POST'])
     app.add_url_rule('/api/lister/voice/<int:media_id>/analyze', 'api_lister_voice_analyze', api_lister_voice_analyze, methods=['POST'])
     app.add_url_rule('/api/lister/photos/ai', 'api_lister_photo_ai', api_lister_photo_ai, methods=['POST'])

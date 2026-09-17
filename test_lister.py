@@ -53,7 +53,23 @@ class ListerTestCase(unittest.TestCase):
                              (upc, json.dumps({'title': 'Built title', 'price': 12.5, 'quantity': 1, 'condition': 'NEW_OTHER'})))
                 conn.commit()
 
+        self.amazon = {'search': {'success': True, 'results': [{'asin': 'B0TESTASIN', 'title': 'Lenox plate', 'brand': 'Lenox'}]},
+                       'restriction': {'success': True, 'restriction': {'checked': True, 'restricted': True, 'reasons': [{'message': 'Approval required for Lenox'}]}}}
+        self.amazon_calls = []
+
+        def fake_amazon_search():
+            from flask import jsonify, request as flask_request
+            self.amazon_calls.append(('search', dict(flask_request.args)))
+            return jsonify(self.amazon['search'])
+
+        def fake_amazon_restriction():
+            from flask import jsonify, request as flask_request
+            self.amazon_calls.append(('restriction', dict(flask_request.args)))
+            return jsonify(self.amazon['restriction'])
+
         self.lister = lister_routes.register(self.app, {
+            'api_listingagent_amazon_catalog_search': fake_amazon_search,
+            'api_listingagent_amazon_restriction_check': fake_amazon_restriction,
             'db_connection': database.db_connection,
             '_safe_error': errors._safe_error,
             '_listagent_mark_listed': listing_queue._listagent_mark_listed,
@@ -640,6 +656,46 @@ class ListerTestCase(unittest.TestCase):
         self.assertIn('Material: Porcelain', calls[1])
         with patch.dict(os.environ, {'ANTHROPIC_API_KEY': ''}):
             self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/generate', json={'kind': 'title', 'values': {'title': 'x'}}).status_code, 503)
+
+    def test_amazon_check_finds_the_asin_checks_restrictions_and_caches_per_catalog_upc(self):
+        res = self.client.post(f'/api/lister/queue/{UPC}-1/amazon-check', json={'conditionType': 'used_good'})
+        self.assertEqual(res.status_code, 200, res.get_json())
+        check = res.get_json()['check']
+        self.assertEqual((check['status'], check['asin'], check['brand'], check['cached']), ('restricted', 'B0TESTASIN', 'Lenox', False))
+        self.assertEqual(check['reasons'], ['Approval required for Lenox'])
+        self.assertEqual(self.amazon_calls[0], ('search', {'upc': UPC, 'mode': 'upc', 'limit': '3'}), 'the catalog is searched by the base UPC')
+        self.assertEqual(self.amazon_calls[1][1]['asin'], 'B0TESTASIN')
+        # Another unit of the same UPC reuses the cached verdict; the queue rows carry it.
+        again = self.client.post(f'/api/lister/queue/{UPC}/amazon-check', json={'conditionType': 'used_good'}).get_json()['check']
+        self.assertTrue(again['cached'])
+        self.assertEqual(len(self.amazon_calls), 2)
+        row = self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]
+        self.assertEqual((row['upc'], row['amazonCheck']['status']), (UPC, 'restricted'))
+        # No ASIN at all -> no_asin; SP-API down -> unavailable, neither cached as a verdict.
+        self.amazon['search'] = {'success': True, 'results': []}
+        self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/amazon-check', json={'force': True}).get_json()['check']['status'], 'no_asin')
+        self.amazon['search'] = {'success': False, 'error': 'Amazon SP-API not available'}
+        self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/amazon-check', json={'force': True}).get_json()['check']['status'], 'unavailable')
+
+    def test_queue_rows_carry_the_prep_status(self):
+        with closing(sqlite3.connect(self.root / 'bol.db')) as conn:
+            conn.execute('CREATE TABLE items_prep_status (id INTEGER PRIMARY KEY, upc TEXT, lot_number TEXT, status TEXT, reason TEXT, note TEXT, updated_at TEXT, quantity INTEGER)')
+            conn.execute("INSERT INTO items_prep_status (upc, lot_number, status, reason, updated_at, quantity) VALUES (?, 'L-1', 'bad', 'missing pieces', '2026-09-15', 1)", (UPC,))
+            conn.execute('CREATE TABLE items_prep_notes (id INTEGER PRIMARY KEY, upc TEXT, note TEXT, created_at TEXT)')
+            conn.execute("INSERT INTO items_prep_notes (upc, note, created_at) VALUES (?, 'LT: x | EN: box opened', '2026-09-15')", (UPC,))
+            conn.execute('CREATE TABLE items_prep_media (id INTEGER PRIMARY KEY, upc TEXT, row_status TEXT, media_type TEXT, file_path TEXT, mime_type TEXT, created_at TEXT)')
+            conn.execute("INSERT INTO items_prep_media (upc, media_type, file_path, created_at) VALUES (?, 'audio', 'items_prep/v.webm', '2026-09-15')", (UPC,))
+            conn.execute("INSERT INTO items_prep_media (upc, media_type, file_path, created_at) VALUES (?, 'video', 'items_prep/v.mp4', '2026-09-15')", (UPC,))
+            conn.commit()
+        row = self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]
+        self.assertEqual(row['prepStatus'], {'status': 'bad', 'reason': 'missing pieces'})
+        self.assertEqual(row['notes'], {'written': 1, 'voice': 1}, 'written and voice note counts, videos not counted')
+        with closing(sqlite3.connect(self.root / 'rawbol.db')) as conn:
+            conn.execute('CREATE TABLE raw_bol_items (id INTEGER PRIMARY KEY, upc TEXT, image_url TEXT, prep_reason TEXT)')
+            conn.execute("INSERT INTO raw_bol_items (upc, prep_reason) VALUES (?, 'Missing pieces')", (UPC.lstrip('0'),))
+            conn.commit()
+        row = self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]
+        self.assertEqual(row['defect'], 'Missing pieces', 'the BOL defect rides along, matched on the catalog UPC')
 
     def test_qr_endpoint_renders_or_explains(self):
         res = self.client.get('/api/lister/qr?text=https://pi.example/items-to-list/mobile-photos?upc=1')
