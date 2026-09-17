@@ -35,6 +35,7 @@ from . import listing_alerts as ss_listing_alerts
 from . import listing_checks as ss_listing_checks
 from . import listing_lifecycle as ss_listing_lifecycle
 from . import listing_log as ss_listing_log
+from . import listing_proposals as ss_listing_proposals
 from . import listing_queue as ss_listing_queue
 from . import listing_settings as ss_listing_settings
 from . import mail_center as ss_mail_center
@@ -582,6 +583,15 @@ def register_routes():
                            ss_fba_shipments._fba_plan_approval_issues,
                            ss_amazon_catalog._amazon_spapi_context)
 
+    # Listing agent proposals: eligibility gate, agent-built drafts, human review before publish.
+    ss_runtime.app.route('/listingagent/review')(ss_listing_proposals.listingagent_review_page)
+    ss_runtime.app.route('/api/listingagent/proposals', methods=['GET'])(ss_listing_proposals.api_listingagent_proposals_list)
+    ss_runtime.app.route('/api/listingagent/proposals/build', methods=['POST'])(ss_listing_proposals.api_listingagent_proposals_build)
+    ss_runtime.app.route('/api/listingagent/proposals/build_status', methods=['GET'])(ss_listing_proposals.api_listingagent_proposals_build_status)
+    ss_runtime.app.route('/api/listingagent/proposals/<int:proposal_id>', methods=['GET'])(ss_listing_proposals.api_listingagent_proposal_detail)
+    ss_runtime.app.route('/api/listingagent/proposals/<int:proposal_id>/save', methods=['POST'])(ss_listing_proposals.api_listingagent_proposal_save)
+    ss_runtime.app.route('/api/listingagent/proposals/<int:proposal_id>/action', methods=['POST'])(ss_listing_proposals.api_listingagent_proposal_action)
+
     from prep_unmatched import register as register_prep_unmatched
     from . import prep_schema as unmatched_prep_schema, normalization as unmatched_normalization
     register_prep_unmatched(ss_runtime.app,
@@ -618,6 +628,8 @@ def register_routes():
         '_listagent_remove_from_queue': ss_listing_queue._listagent_remove_from_queue,
         '_listing_center_mark_bol_listed': ss_listing_lifecycle._listing_center_mark_bol_listed,
         '_listagent_add_photo': ss_listing_queue._listagent_add_photo,
+        'api_listingagent_amazon_catalog_search': ss_amazon_catalog.api_listingagent_amazon_catalog_search,
+        'api_listingagent_amazon_restriction_check': ss_amazon_catalog.api_listingagent_amazon_restriction_check,
         'update_data_version': ss_caching.update_data_version,
         'BASE_DIR': BASE_DIR,
     })

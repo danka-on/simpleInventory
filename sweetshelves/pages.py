@@ -170,7 +170,7 @@ def fb_listings_page():
 
 
 def store_listing_helper_page():
-    return render_template('listing_reconciliation.html')
+    return render_template('store_listing_helper.html')
 
 
 def privacy():

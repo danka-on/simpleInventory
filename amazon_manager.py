@@ -766,37 +766,6 @@ class AmazonManager:
             print(f"   ✅ {orders_with_shipping_costs}/{len(orders)} orders have actual shipping cost data!")
         return synced_count
     
-    @staticmethod
-    def _close_listings_missing_from_report(cur, seen_asins, grace_hours=24):
-        """Mark merchant listings Inactive when Amazon's all-listings report no longer has them.
-
-        GET_MERCHANT_LISTINGS_ALL_DATA includes inactive listings, so absence means the
-        listing was closed or deleted. FBA rows are left to the FBA inventory sync.
-        """
-        cur.execute("""
-            SELECT ASIN, LAST_UPDATED FROM ITEMS
-            WHERE LOWER(TRIM(COALESCE(STATUS, ''))) = 'active'
-              AND UPPER(TRIM(COALESCE(FULFILLMENT_CHANNEL, ''))) NOT LIKE 'AMAZON%'
-        """)
-        active = cur.fetchall()
-        # A truncated report must not close half the store.
-        if not seen_asins or len(seen_asins) < len(active) * 0.5:
-            return 0
-        cutoff = datetime.utcnow() - timedelta(hours=grace_hours)
-        missing = []
-        for asin, last_updated in active:
-            if not asin or asin in seen_asins:
-                continue
-            try:
-                updated = datetime.fromisoformat(str(last_updated or '').rstrip('Z'))
-            except ValueError:
-                updated = None
-            if updated is None or updated < cutoff:
-                missing.append(asin)
-        for asin in missing:
-            cur.execute("UPDATE ITEMS SET STATUS = 'Inactive', QUANTITY = 0 WHERE ASIN = ?", (asin,))
-        return len(missing)
-
     def get_active_listings(self):
         """
         Fetch active listings from Amazon using Reports API with quota protection
@@ -1140,15 +1109,12 @@ class AmazonManager:
             'total': repaired_local + repaired_catalog,
         }
     
-    def sync_listings_to_db(self, force=False):
+    def sync_listings_to_db(self):
         """
         Fetch active listings from Amazon and sync to amazonStore.db
         Similar to eBay's ebayStore.db
         With quota protection and smart syncing
-
-        force: run even if the last sync was recent (a person asked for it);
-        the automatic worker leaves it False to protect the report quota.
-
+        
         Returns:
             Number of listings synced, or -1 if quota exceeded
         """
@@ -1197,10 +1163,9 @@ class AmazonManager:
             cur.execute('SELECT value, updated_at FROM sync_metadata WHERE key = ?', ('last_listings_sync',))
             last_sync_row = cur.fetchone()
 
-            if last_sync_row and not force:
-                # updated_at is stored as UTC, so compare against UTC.
-                last_sync_time = datetime.fromisoformat(str(last_sync_row[1]).rstrip('Z'))
-                time_since_sync = (datetime.utcnow() - last_sync_time).total_seconds() / 3600  # hours
+            if last_sync_row:
+                last_sync_time = datetime.fromisoformat(last_sync_row[1])
+                time_since_sync = (datetime.now() - last_sync_time).total_seconds() / 3600  # hours
 
                 # Only sync if it's been more than 4 hours (reduce quota usage)
                 if time_since_sync < 4:
@@ -1230,7 +1195,6 @@ class AmazonManager:
             updated_count = 0
             skipped_count = 0
             catalog_api_calls = 0  # Track Catalog API usage
-            seen_asins = set()
 
             for listing in listings:
                 try:
@@ -1240,7 +1204,6 @@ class AmazonManager:
 
                     if not asin:
                         continue
-                    seen_asins.add(asin)
 
                     # Parse price and quantity
                     try:
@@ -1366,10 +1329,7 @@ class AmazonManager:
                 except Exception as e:
                     print(f"Error syncing listing {listing.get('asin')}: {e}")
                     continue
-
-            closed_count = self._close_listings_missing_from_report(cur, seen_asins)
-            conn.commit()
-
+        
             # Record successful sync
             cur.execute('''
                 INSERT OR REPLACE INTO sync_metadata (key, value, updated_at)
@@ -1387,7 +1347,6 @@ class AmazonManager:
         print(f"\n✅ Amazon listings sync complete:")
         print(f"   - New: {synced_count} items")
         print(f"   - Updated: {updated_count} items")
-        print(f"   - Closed (no longer on Amazon): {closed_count} items")
         if skipped_count > 0:
             print(f"   - Skipped (unchanged): {skipped_count} items")
         print(f"   - Total: {synced_count + updated_count} items")

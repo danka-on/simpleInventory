@@ -515,6 +515,8 @@
     if (!el) return;
     try {
       if (el.dataset.ssGuidePrev === undefined) el.dataset.ssGuidePrev = el.style.outline || '';
+      // The 2 s refresh restyles every row: a field already done must not flash green again (it blinked).
+      if (state === 'done' && el.dataset.ssGuideDone === '1') return;
       const colour = state === 'notes' ? '#2563eb' : (state === 'done' ? '#16a34a' : (state === 'required' ? '#dc2626' : '#f59e0b'));
       el.style.outline = (state === 'done' ? '2px solid ' : '3px solid ') + colour;
       el.style.outlineOffset = '2px';

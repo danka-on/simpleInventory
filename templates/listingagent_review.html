@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <title>Listing Review - Sweet Shelves</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary: #0984e3; --accent: #00b894; --danger: #e74c3c; --warning: #f39c12;
+            --bg: #f6f7f9; --card: #fff; --border: #e0e4e8; --text: #2c3e50; --muted: #6b7680;
+            --radius: 12px; --shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: var(--bg); margin: 0; color: var(--text); }
+        .container { max-width: 1600px; margin: 0 auto; padding: 18px 20px 40px; }
+        .header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+        .header h1 { margin: 0; font-size: 1.6rem; }
+        .header .sub { color: var(--muted); font-size: 0.9rem; margin-top: 3px; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+        .btn { padding: 8px 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); color: var(--text);
+               font-size: 0.88rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+        .btn:hover { border-color: var(--primary); color: var(--primary); }
+        .btn:disabled { opacity: 0.55; cursor: default; }
+        .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .btn-primary:hover { background: #0770c9; color: #fff; }
+        .btn-good { background: #0a9c6c; color: #fff; border-color: #0a9c6c; }
+        .btn-good:hover { background: #08865d; color: #fff; }
+        .btn-danger { color: var(--danger); }
+        .btn-danger:hover { border-color: var(--danger); }
+        .btn-sm { padding: 4px 9px; font-size: 0.78rem; }
+        .status { padding: 10px 14px; border-radius: 10px; margin-bottom: 12px; font-size: 0.9rem; display: none; }
+        .status.error { display: block; background: #fde8e8; color: #b42318; }
+        .status.info { display: block; background: #e8f1fb; color: #1b5fa8; }
+        .status.ok { display: block; background: #e6f7f0; color: #067647; }
+        .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+        @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+        .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); }
+        .list { padding: 12px; position: sticky; top: 12px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; }
+        .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+        .chip { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 0.78rem; cursor: pointer; background: #fff; }
+        .chip.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .chip b { font-weight: 700; }
+        .reviewer { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; font-size: 0.82rem; color: var(--muted); }
+        .reviewer input { flex: 1; padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem; }
+        .rows { overflow-y: auto; flex: 1; min-height: 200px; }
+        .row { display: grid; grid-template-columns: 54px 1fr; gap: 10px; padding: 9px 8px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; }
+        .row:hover { background: #f1f5f9; }
+        .row.active { background: #e8f1fb; border-color: #bcd7f5; }
+        .row img, .row .noimg { width: 54px; height: 54px; object-fit: cover; border-radius: 8px; background: #edf0f3; border: 1px solid var(--border); }
+        .row .t { font-size: 0.86rem; font-weight: 600; line-height: 1.25; max-height: 2.5em; overflow: hidden; }
+        .row .m { font-size: 0.76rem; color: var(--muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+        .tag { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 0.72rem; font-weight: 600; white-space: nowrap; }
+        .tag-warn { background: #fff4e0; color: #b46200; }
+        .tag-bad { background: #fde8e8; color: #b42318; }
+        .tag-ok { background: #e6f7f0; color: #067647; }
+        .tag-info { background: #e8f1fb; color: #1b5fa8; }
+        .tag-muted { background: #eef0f3; color: #5b6770; }
+        .detail { padding: 18px 20px; min-height: 300px; }
+        .detail .empty { color: var(--muted); text-align: center; padding: 60px 20px; }
+        .dhead { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 12px; }
+        .dhead .ids { display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); margin-top: 6px; align-items: center; }
+        .dhead .ids code { background: #f1f3f6; padding: 2px 6px; border-radius: 6px; color: var(--text); }
+        .title-input { width: 100%; font-size: 1.15rem; font-weight: 700; padding: 8px 10px; border: 1px solid var(--border); border-radius: 9px; }
+        .counter { font-size: 0.75rem; color: var(--muted); text-align: right; margin-top: 3px; }
+        .flags { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 14px; }
+        .flag { font-size: 0.85rem; padding: 7px 10px; border-radius: 8px; display: flex; gap: 8px; align-items: flex-start; }
+        .flag.block { background: #fde8e8; color: #7f1d1d; }
+        .flag.warn { background: #fff4e0; color: #7a4600; }
+        .flag.info { background: #eef4fb; color: #1b3f6b; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+        .section { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+        .section h3 { margin: 0 0 8px; font-size: 0.95rem; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+        .section h3 span.hint { font-weight: 400; color: var(--muted); font-size: 0.78rem; }
+        .gate { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+        .gate .g { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 0.82rem; }
+        .gate .g b { display: block; font-size: 0.78rem; margin-bottom: 2px; }
+        .gate .g.pass { border-left: 4px solid #0a9c6c; }
+        .gate .g.flag { border-left: 4px solid var(--warning); }
+        .gate .g.block { border-left: 4px solid var(--danger); }
+        .gate .g.info { border-left: 4px solid var(--primary); }
+        .photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+        .photo { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fafbfc; font-size: 0.72rem; }
+        .photo img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block; background: #edf0f3; }
+        .photo.off img { opacity: 0.35; }
+        .photo .pm { padding: 5px 6px; display: flex; justify-content: space-between; align-items: center; gap: 4px; }
+        .photo .main { position: absolute; }
+        .photo-wrap { position: relative; }
+        .photo-wrap .badge { position: absolute; top: 5px; left: 5px; background: #1B2321; color: #fff; padding: 2px 6px; border-radius: 6px; font-size: 0.68rem; }
+        .photo-wrap .src { position: absolute; bottom: 5px; right: 5px; background: rgba(255,255,255,0.9); padding: 1px 6px; border-radius: 6px; font-size: 0.66rem; color: #44505a; }
+        .field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+        .field label { font-size: 0.76rem; color: var(--muted); }
+        .field input, .field select, .field textarea { padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; font-family: inherit; }
+        .field textarea { min-height: 140px; font-family: Consolas, monospace; font-size: 0.8rem; }
+        .field-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+        .price-big { font-size: 1.4rem; font-weight: 700; }
+        .pricing { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin: 6px 0 10px; }
+        .pricing .p { background: #f7f9fb; border-radius: 8px; padding: 7px 9px; }
+        .pricing .p .l { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+        .pricing .p .v { font-size: 1rem; font-weight: 700; margin-top: 2px; }
+        .comps { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+        .comp { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; text-decoration: none; color: var(--text); display: flex; flex-direction: column; }
+        .comp:hover { border-color: var(--primary); }
+        .comp img { width: 100%; aspect-ratio: 1 / 1; object-fit: contain; background: #fff; display: block; }
+        .comp .cb { padding: 7px 8px; display: flex; flex-direction: column; gap: 3px; }
+        .comp .ct { font-size: 0.78rem; line-height: 1.25; max-height: 3.75em; overflow: hidden; }
+        .comp .cp { font-size: 1rem; font-weight: 700; }
+        .comp .cs { font-size: 0.72rem; color: var(--muted); }
+        .comp .cc { font-size: 0.72rem; color: #44505a; }
+        table.aspects { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+        table.aspects td { padding: 4px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        table.aspects td.n { width: 34%; color: #44505a; }
+        table.aspects td.n.req::after { content: " *"; color: var(--danger); }
+        table.aspects input { width: 100%; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.85rem; }
+        table.aspects input.missing { border-color: var(--danger); background: #fff6f6; }
+        .desc-preview { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 0.85rem; max-height: 260px; overflow: auto; background: #fff; }
+        .action-bar { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); margin-top: 6px; }
+        .problems { font-size: 0.82rem; color: #b42318; margin: 6px 0; }
+        .events { list-style: none; padding: 0; margin: 0; font-size: 0.8rem; }
+        .events li { padding: 5px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; }
+        .events li:last-child { border-bottom: none; }
+        .events .when { color: var(--muted); white-space: nowrap; }
+        .muted { color: var(--muted); }
+        .small { font-size: 0.8rem; }
+        .policies { font-size: 0.8rem; color: #44505a; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 6px; }
+        .policies code { background: #f1f3f6; padding: 1px 5px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div>
+            <h1><i class="fas fa-clipboard-check"></i> Listing Review</h1>
+            <div class="sub" id="subline">Loading proposals...</div>
+        </div>
+        <div class="actions">
+            <button class="btn btn-primary" id="buildBtn"><i class="fas fa-robot"></i> Build proposals for the queue</button>
+            <button class="btn" id="refreshBtn"><i class="fas fa-rotate"></i> Refresh</button>
+            <a class="btn" href="/listingagent"><i class="fas fa-pen-to-square"></i> Listing Agent</a>
+            <a class="btn" href="/check-items"><i class="fas fa-camera"></i> Check Items</a>
+            <a class="btn" href="/listing-log"><i class="fas fa-list"></i> Listing Log</a>
+            <a class="btn" href="/tools"><i class="fas fa-arrow-left"></i> Tools</a>
+        </div>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="layout">
+        <aside class="panel list">
+            <div class="reviewer"><i class="fas fa-user"></i><input id="reviewer" placeholder="Your name (saved on every action)"></div>
+            <div class="chips" id="chips"></div>
+            <div class="rows" id="rows"><div class="muted small" style="padding:10px">Loading...</div></div>
+        </aside>
+        <main class="panel detail" id="detail">
+            <div class="empty"><i class="fas fa-arrow-left"></i> Pick an item on the left, or build proposals for the queue.</div>
+        </main>
+    </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { filter: 'open', items: [], counts: {}, current: null, conditions: [], shotList: [], queuedWithout: 0, polling: null };
+
+function esc(v) { return String(v ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function money(v) { const n = Number(v); return Number.isFinite(n) ? '$' + n.toFixed(2) : '—'; }
+function when(v) { if (!v) return ''; return String(v).replace('T', ' ').slice(0, 16); }
+function setStatus(kind, text) { const el = $('status'); el.className = 'status' + (kind ? ' ' + kind : ''); el.textContent = text || ''; }
+function reviewer() { return ($('reviewer').value || '').trim() || 'reviewer'; }
+$('reviewer').value = (() => { try { return localStorage.getItem('listingReviewReviewer') || ''; } catch (e) { return ''; } })();
+$('reviewer').addEventListener('change', () => { try { localStorage.setItem('listingReviewReviewer', $('reviewer').value.trim()); } catch (e) {} });
+
+async function api(path, opts) {
+    const res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
+    let data = {};
+    try { data = await res.json(); } catch (e) { data = { success: false, error: 'Bad response (' + res.status + ')' }; }
+    if (!data.success && !data.error) data.error = 'Request failed (' + res.status + ')';
+    return data;
+}
+
+const STATUS_TAG = { proposed: 'tag-info', held: 'tag-warn', needs_photos: 'tag-warn', blocked: 'tag-bad', approved: 'tag-info', listed: 'tag-ok', rejected: 'tag-muted', superseded: 'tag-muted' };
+const STATUS_LABEL = { proposed: 'Proposed', held: 'On hold', needs_photos: 'Needs photos', blocked: 'Blocked', approved: 'Publishing', listed: 'Listed', rejected: 'Rejected', superseded: 'Superseded' };
+function statusTag(s) { return `<span class="tag ${STATUS_TAG[s] || 'tag-muted'}">${esc(STATUS_LABEL[s] || s)}</span>`; }
+
+async function loadList(keepCurrent) {
+    const data = await api('/api/listingagent/proposals?status=' + encodeURIComponent(state.filter) + '&limit=300');
+    if (!data.success) { setStatus('error', data.error); return; }
+    state.items = data.items || [];
+    state.counts = data.counts || {};
+    state.conditions = data.conditions || [];
+    state.shotList = data.shot_list || [];
+    state.queuedWithout = data.queued_without_proposal || 0;
+    renderChips();
+    renderRows();
+    const open = ['proposed', 'held', 'needs_photos', 'blocked'].reduce((n, k) => n + (state.counts[k] || 0), 0);
+    $('subline').textContent = `${open} waiting for review · ${state.counts.listed || 0} listed · ${state.queuedWithout} queued item(s) without a proposal`;
+    $('buildBtn').disabled = false;
+    if (!keepCurrent && state.items.length && !state.current) select(state.items[0].id);
+}
+
+function renderChips() {
+    const defs = [['open', 'Needs review'], ['proposed', 'Proposed'], ['held', 'On hold'], ['needs_photos', 'Needs photos'], ['blocked', 'Blocked'], ['listed', 'Listed'], ['rejected', 'Rejected'], ['all', 'All']];
+    $('chips').innerHTML = defs.map(([k, label]) => {
+        let n = k === 'all' ? Object.values(state.counts).reduce((a, b) => a + b, 0) : k === 'open' ? ['proposed', 'held', 'needs_photos', 'blocked'].reduce((a, s) => a + (state.counts[s] || 0), 0) : (state.counts[k] || 0);
+        return `<span class="chip ${state.filter === k ? 'active' : ''}" data-f="${k}">${label} <b>${n}</b></span>`;
+    }).join('');
+    $('chips').querySelectorAll('.chip').forEach((c) => c.addEventListener('click', () => { state.filter = c.dataset.f; loadList(true); }));
+}
+
+function renderRows() {
+    if (!state.items.length) { $('rows').innerHTML = '<div class="muted small" style="padding:10px">Nothing here.</div>'; return; }
+    $('rows').innerHTML = state.items.map((it) => `
+        <div class="row ${state.current && state.current.id === it.id ? 'active' : ''}" data-id="${it.id}">
+            ${it.thumb ? `<img src="${esc(it.thumb)}" alt="">` : '<div class="noimg"></div>'}
+            <div>
+                <div class="t">${esc(it.title || '(no title yet)')}</div>
+                <div class="m"><code>${esc(it.upc)}</code> ${statusTag(it.status)} ${it.price != null ? '<b>' + money(it.price) + '</b>' : ''} ${it.flag_count ? `<span class="tag tag-warn">${it.flag_count} flag${it.flag_count > 1 ? 's' : ''}</span>` : ''}</div>
+            </div>
+        </div>`).join('');
+    $('rows').querySelectorAll('.row').forEach((r) => r.addEventListener('click', () => select(Number(r.dataset.id))));
+}
+
+async function select(id) {
+    const data = await api('/api/listingagent/proposals/' + id);
+    if (!data.success) { setStatus('error', data.error); return; }
+    state.current = data.item;
+    renderRows();
+    renderDetail();
+}
+
+function gateHtml(e) {
+    const checks = (e && e.checks) || [];
+    if (!checks.length) return '<div class="muted small">No gate data.</div>';
+    return '<div class="gate">' + checks.map((c) => `<div class="g ${c.status}"><b>${esc(c.label)}</b>${esc(c.detail)}<div class="muted" style="font-size:0.7rem;margin-top:2px">${esc(c.source)}</div></div>`).join('') + '</div>';
+}
+
+function compsHtml(comps) {
+    const rows = (comps && comps.results) || [];
+    const p = (comps && comps.pricing) || {};
+    const pricing = `<div class="pricing">
+        <div class="p"><div class="l">Proposed</div><div class="v">${money(p.proposed)}</div></div>
+        <div class="p"><div class="l">Median</div><div class="v">${money(p.median)}</div></div>
+        <div class="p"><div class="l">Low</div><div class="v">${money(p.low)}</div></div>
+        <div class="p"><div class="l">High</div><div class="v">${money(p.high)}</div></div>
+        <div class="p"><div class="l">Comps</div><div class="v">${p.count ?? 0}</div></div>
+        <div class="p"><div class="l">Cost</div><div class="v">${money(p.cost)}</div></div>
+        <div class="p"><div class="l">Floor</div><div class="v">${money(p.floor)}</div></div>
+        <div class="p"><div class="l">Retail</div><div class="v">${money(p.original_retail)}</div></div>
+    </div><div class="small muted">Rule: ${esc(p.rule || 'median of current comps, never below the cost floor')}${p.floor_multiplier ? ` (floor = cost × ${p.floor_multiplier})` : ''}</div>`;
+    if (!rows.length) return pricing + `<div class="muted small" style="margin-top:8px">No current comps on eBay${comps && comps.error ? ': ' + esc(comps.error) : ''}.</div>`;
+    return pricing + '<div class="comps" style="margin-top:10px">' + rows.map((c) => `
+        <a class="comp" href="${esc(c.itemWebUrl || '#')}" target="_blank" rel="noopener">
+            ${c.image ? `<img src="${esc(c.image)}" alt="">` : '<div style="aspect-ratio:1/1;background:#f1f3f6"></div>'}
+            <div class="cb">
+                <div class="ct">${esc(c.title)}</div>
+                <div class="cp">${money(c.price && c.price.value)}</div>
+                <div class="cs">${c.shipping && c.shipping.value != null ? (Number(c.shipping.value) === 0 ? 'Free shipping' : '+' + money(c.shipping.value) + ' shipping') : 'Shipping not shown'}</div>
+                <div class="cc">${esc(c.condition || '')}${c.seller ? ' · ' + esc(c.seller) : ''}${(c.buyingOptions || []).includes('AUCTION') ? ' · Auction' : ''}</div>
+            </div>
+        </a>`).join('') + '</div>';
+}
+
+function photosHtml(images) {
+    if (!images || !images.length) return '<div class="muted small">No photos on file.</div>';
+    let firstEnabled = images.findIndex((im) => im.enabled !== false);
+    return '<div class="photos">' + images.map((im, i) => `
+        <div class="photo ${im.enabled === false ? 'off' : ''}" data-i="${i}">
+            <div class="photo-wrap">
+                <img src="${esc(im.url)}" alt="" loading="lazy">
+                ${i === firstEnabled ? '<span class="badge">MAIN</span>' : ''}
+                <span class="src">${esc(im.source || '')}</span>
+            </div>
+            <div class="pm">
+                <label><input type="checkbox" class="ph-on" ${im.enabled === false ? '' : 'checked'}> use</label>
+                <button class="btn btn-sm ph-main" title="Make this the main photo">main</button>
+            </div>
+        </div>`).join('') + '</div>';
+}
+
+function aspectsHtml(item) {
+    const meta = (item.sources && item.sources.aspects_meta) || [];
+    const values = (item.proposal && item.proposal.aspects) || {};
+    const names = [];
+    meta.forEach((m) => { if (m.name && !names.includes(m.name)) names.push(m.name); });
+    Object.keys(values).forEach((n) => { if (!names.includes(n)) names.push(n); });
+    const inferred = new Set((item.sources && item.sources.aspects_inferred) || []);
+    if (!names.length) return '<div class="muted small">No item specifics for this category.</div>';
+    const rows = names.map((n) => {
+        const m = meta.find((x) => x.name === n) || {};
+        const v = values[n] || '';
+        const listId = 'dl_' + n.replace(/[^a-z0-9]/gi, '_');
+        const dl = (m.values && m.values.length) ? `<datalist id="${listId}">${m.values.slice(0, 40).map((x) => `<option value="${esc(x)}">`).join('')}</datalist>` : '';
+        return `<tr><td class="n ${m.required ? 'req' : ''}">${esc(n)}${inferred.has(n) ? ' <span class="tag tag-info" title="Filled by Claude from the title">AI</span>' : ''}</td>
+            <td><input class="asp ${m.required && !v ? 'missing' : ''}" data-name="${esc(n)}" value="${esc(v)}" ${dl ? `list="${listId}"` : ''} placeholder="${m.required ? 'required' : ''}">${dl}</td></tr>`;
+    });
+    const required = names.filter((n) => (meta.find((x) => x.name === n) || {}).required);
+    const optional = names.filter((n) => !required.includes(n));
+    return `<table class="aspects"><tbody>${rows.filter((_, i) => required.includes(names[i])).join('')}${optional.length ? `<tr><td colspan="2" class="muted small" style="padding-top:8px">Optional</td></tr>` : ''}${rows.filter((_, i) => optional.includes(names[i])).join('')}</tbody></table>`;
+}
+
+function renderDetail() {
+    const it = state.current;
+    if (!it) { $('detail').innerHTML = '<div class="empty">Nothing selected.</div>'; return; }
+    const p = it.proposal || {};
+    const e = it.eligibility || {};
+    const flags = it.flags || [];
+    const s = it.sources || {};
+    const settings = s.settings || {};
+    const lots = ((e.prep || {}).lots || []).join(', ');
+    const racks = ((e.rack || {}).locations || []).join(', ');
+    const terminal = ['listed', 'rejected', 'superseded'].includes(it.status);
+    const catOptions = (s.category_suggestions || []).map((c) => `<option value="${esc(c.categoryId)}" ${String(c.categoryId) === String(p.categoryId || '') ? 'selected' : ''}>${esc(c.path || c.categoryName)} (${esc(c.categoryId)})</option>`).join('');
+    const condOptions = (state.conditions.length ? state.conditions : ['NEW', 'NEW_OTHER', 'USED_GOOD']).map((c) => `<option value="${c}" ${c === p.condition ? 'selected' : ''}>${c.replace(/_/g, ' ')}</option>`).join('');
+
+    $('detail').innerHTML = `
+        <div class="dhead">
+            <div style="flex:1;min-width:280px">
+                <input class="title-input" id="f_title" value="${esc(p.title || '')}" maxlength="80" placeholder="Listing title" ${terminal ? 'disabled' : ''}>
+                <div class="counter"><span id="titleCount">${(p.title || '').length}</span>/80</div>
+                <div class="ids">
+                    <code>UPC ${esc(it.upc)}</code>
+                    ${lots ? `<code>Lot ${esc(lots)}</code>` : ''}
+                    ${racks ? `<code>Rack ${esc(racks)}</code>` : ''}
+                    ${statusTag(it.status)}
+                    ${it.listed_listing_id ? `<a href="https://www.ebay.com/itm/${esc(it.listed_listing_id)}" target="_blank" rel="noopener">eBay listing ${esc(it.listed_listing_id)}</a>` : ''}
+                    <span class="muted">built ${when(it.created_at)} · ${esc(it.agent_version || '')}</span>
+                </div>
+            </div>
+            <div class="actions">
+                <a class="btn btn-sm" href="/listingagent?upc=${encodeURIComponent(it.upc)}" target="_blank" rel="noopener"><i class="fas fa-up-right-from-square"></i> Open in Listing Agent</a>
+                <button class="btn btn-sm" id="rebuildBtn"><i class="fas fa-rotate"></i> Rebuild</button>
+            </div>
+        </div>
+
+        ${flags.length ? '<div class="flags">' + flags.map((f) => `<div class="flag ${f.level}"><i class="fas ${f.level === 'block' ? 'fa-ban' : f.level === 'warn' ? 'fa-triangle-exclamation' : 'fa-circle-info'}"></i><span>${esc(f.message)}</span></div>`).join('') + '</div>' : ''}
+        ${it.error ? `<div class="flag block" style="margin-bottom:12px"><i class="fas fa-bug"></i><span>Last error: ${esc(it.error)}</span></div>` : ''}
+
+        <div class="section">
+            <h3><span><i class="fas fa-shield-halved"></i> Eligibility gate</span><span class="hint">checked ${when(e.checked_at)} · listable quantity <b>${e.listable_quantity ?? '?'}</b></span></h3>
+            ${gateHtml(e)}
+        </div>
+
+        <div class="section">
+            <h3><span><i class="fas fa-images"></i> Photos</span><span class="hint">first enabled photo is the main image · shot list: ${esc((state.shotList || []).join(', '))}</span></h3>
+            <div id="photos">${photosHtml(p.images || [])}</div>
+        </div>
+
+        <div class="grid">
+            <div class="section" style="margin:0">
+                <h3><span><i class="fas fa-tag"></i> Price and quantity</span></h3>
+                <div class="field-row">
+                    <div class="field"><label>Price (USD)</label><input id="f_price" type="number" step="0.01" min="0" value="${p.price ?? ''}" ${terminal ? 'disabled' : ''}></div>
+                    <div class="field"><label>Quantity (max ${e.listable_quantity ?? '?'})</label><input id="f_quantity" type="number" step="1" min="1" value="${p.quantity ?? ''}" ${terminal ? 'disabled' : ''}></div>
+                    <div class="field"><label>SKU</label><input id="f_sku" value="${esc(p.sku || '')}" ${terminal ? 'disabled' : ''}></div>
+                </div>
+            </div>
+            <div class="section" style="margin:0">
+                <h3><span><i class="fas fa-box-open"></i> Condition</span><span class="hint">${esc(p.condition_reason || '')}</span></h3>
+                <div class="field"><label>Condition</label><select id="f_condition" ${terminal ? 'disabled' : ''}>${condOptions}</select></div>
+                <div class="field"><label>Condition description (shown to buyers)</label><input id="f_conditionDescription" value="${esc(p.conditionDescription || '')}" ${terminal ? 'disabled' : ''}></div>
+            </div>
+        </div>
+
+        <div class="section" style="margin-top:14px">
+            <h3><span><i class="fab fa-ebay"></i> Current comps on eBay</span><span class="hint">what buyers see right now for this UPC</span></h3>
+            ${compsHtml(it.comps)}
+        </div>
+
+        <div class="grid">
+            <div class="section" style="margin:0">
+                <h3><span><i class="fas fa-sitemap"></i> Category</span></h3>
+                <div class="field"><label>Suggested categories</label><select id="f_categorySelect" ${terminal ? 'disabled' : ''}><option value="">— keep the id below —</option>${catOptions}</select></div>
+                <div class="field-row">
+                    <div class="field"><label>Category id</label><input id="f_categoryId" value="${esc(p.categoryId || '')}" ${terminal ? 'disabled' : ''}></div>
+                    <div class="field"><label>Path</label><input id="f_categoryPath" value="${esc(p.categoryPath || '')}" ${terminal ? 'disabled' : ''}></div>
+                </div>
+                ${s.catalog && s.catalog.best && s.catalog.best.title ? `<div class="small muted">Catalog match: ${esc(s.catalog.best.title)}${s.catalog.best.epid ? ' · ePID ' + esc(s.catalog.best.epid) : ''}</div>` : '<div class="small muted">No catalog match.</div>'}
+            </div>
+            <div class="section" style="margin:0">
+                <h3><span><i class="fas fa-file-invoice"></i> Policies and marketplace</span></h3>
+                <div class="policies">
+                    <div>Marketplace <code>${esc(p.marketplaceId || settings.marketplaceId || '')}</code></div>
+                    <div>Duration <code>${esc(p.listingDuration || '')}</code></div>
+                    <div>Location <code>${esc(p.merchantLocationKey || '(auto)')}</code></div>
+                    <div>Shipping policy <code>${esc(p.fulfillmentPolicyId || 'missing')}</code></div>
+                    <div>Payment policy <code>${esc(p.paymentPolicyId || 'missing')}</code></div>
+                    <div>Return policy <code>${esc(p.returnPolicyId || 'missing')}</code></div>
+                </div>
+                <div class="small muted" style="margin-top:6px">Defaults come from Listing Agent settings.</div>
+            </div>
+        </div>
+
+        <div class="section" style="margin-top:14px">
+            <h3><span><i class="fas fa-list-check"></i> Item specifics</span><span class="hint">* required by eBay for this category</span></h3>
+            <div id="aspects">${aspectsHtml(it)}</div>
+        </div>
+
+        <div class="section">
+            <h3><span><i class="fas fa-align-left"></i> Description</span><button class="btn btn-sm" id="descToggle">Preview</button></h3>
+            <div class="field"><textarea id="f_listingDescription" ${terminal ? 'disabled' : ''}>${esc(p.listingDescription || '')}</textarea></div>
+            <div class="desc-preview" id="descPreview" style="display:none"></div>
+        </div>
+
+        <div class="section">
+            <h3><span><i class="fas fa-note-sticky"></i> Reviewer note</span></h3>
+            <div class="field"><textarea id="f_note" style="min-height:64px;font-family:inherit;font-size:0.9rem" placeholder="Anything for the next person, or for the agent">${esc(it.reviewer_note || '')}</textarea></div>
+            ${it.reviewed_by ? `<div class="small muted">Last reviewed by ${esc(it.reviewed_by)} at ${when(it.reviewed_at)}</div>` : ''}
+        </div>
+
+        <div class="problems" id="problems">${(it.problems || []).length ? 'Not ready: ' + esc(it.problems.join('; ')) : ''}</div>
+        <div class="action-bar">
+            <button class="btn btn-good" id="approveBtn" ${terminal ? 'disabled' : ''}><i class="fas fa-check"></i> Approve and list</button>
+            <button class="btn" id="saveBtn" ${terminal ? 'disabled' : ''}><i class="fas fa-floppy-disk"></i> Save changes</button>
+            ${it.status === 'held' ? `<button class="btn" id="releaseBtn"><i class="fas fa-play"></i> Release hold</button>` : `<button class="btn" id="holdBtn" ${terminal ? 'disabled' : ''}><i class="fas fa-pause"></i> Hold</button>`}
+            <button class="btn" id="photosBtn" ${terminal ? 'disabled' : ''}><i class="fas fa-camera"></i> Request photos</button>
+            <button class="btn btn-danger" id="rejectBtn" ${terminal ? 'disabled' : ''}><i class="fas fa-xmark"></i> Reject</button>
+        </div>
+
+        <div class="section" style="margin-top:16px">
+            <h3><span><i class="fas fa-clock-rotate-left"></i> History</span></h3>
+            <ul class="events">${(it.events || []).map((ev) => `<li><span class="when">${when(ev.created_at)}</span><span><b>${esc(ev.event)}</b> by ${esc(ev.actor || '')}${ev.note ? ' — ' + esc(ev.note) : ''}</span></li>`).join('') || '<li class="muted">No events.</li>'}</ul>
+        </div>`;
+
+    wireDetail(terminal);
+}
+
+function wireDetail(terminal) {
+    const it = state.current;
+    $('f_title').addEventListener('input', () => { $('titleCount').textContent = $('f_title').value.length; });
+    $('f_categorySelect').addEventListener('change', () => {
+        const opt = $('f_categorySelect').selectedOptions[0];
+        if (!opt || !opt.value) return;
+        $('f_categoryId').value = opt.value;
+        $('f_categoryPath').value = opt.textContent.replace(/\s*\(\d+\)\s*$/, '');
+    });
+    $('descToggle').addEventListener('click', () => {
+        const pv = $('descPreview');
+        const show = pv.style.display === 'none';
+        pv.style.display = show ? 'block' : 'none';
+        pv.innerHTML = show ? $('f_listingDescription').value : '';
+        $('descToggle').textContent = show ? 'Hide preview' : 'Preview';
+    });
+    $('photos').querySelectorAll('.photo').forEach((ph) => {
+        const i = Number(ph.dataset.i);
+        ph.querySelector('.ph-on').addEventListener('change', (ev) => { it.proposal.images[i].enabled = ev.target.checked; $('photos').innerHTML = photosHtml(it.proposal.images); wirePhotosOnly(); });
+        ph.querySelector('.ph-main').addEventListener('click', () => { const im = it.proposal.images.splice(i, 1)[0]; im.enabled = true; it.proposal.images.unshift(im); $('photos').innerHTML = photosHtml(it.proposal.images); wirePhotosOnly(); });
+    });
+    $('rebuildBtn').addEventListener('click', () => act('rebuild', 'Rebuild this proposal from scratch? Your edits on it will be replaced.'));
+    if (terminal) return;
+    $('saveBtn').addEventListener('click', save);
+    $('approveBtn').addEventListener('click', approve);
+    if ($('holdBtn')) $('holdBtn').addEventListener('click', () => act('hold'));
+    if ($('releaseBtn')) $('releaseBtn').addEventListener('click', () => act('release'));
+    $('photosBtn').addEventListener('click', () => act('request_photos', 'Send a photo request to the floor for: ' + (state.shotList || []).join(', ') + '?'));
+    $('rejectBtn').addEventListener('click', () => act('reject', 'Reject this item and remove it from the listing queue?'));
+}
+
+function wirePhotosOnly() {
+    const it = state.current;
+    $('photos').querySelectorAll('.photo').forEach((ph) => {
+        const i = Number(ph.dataset.i);
+        ph.querySelector('.ph-on').addEventListener('change', (ev) => { it.proposal.images[i].enabled = ev.target.checked; $('photos').innerHTML = photosHtml(it.proposal.images); wirePhotosOnly(); });
+        ph.querySelector('.ph-main').addEventListener('click', () => { const im = it.proposal.images.splice(i, 1)[0]; im.enabled = true; it.proposal.images.unshift(im); $('photos').innerHTML = photosHtml(it.proposal.images); wirePhotosOnly(); });
+    });
+}
+
+function collectEdits() {
+    const aspects = {};
+    document.querySelectorAll('#aspects input.asp').forEach((inp) => { const v = inp.value.trim(); if (v) aspects[inp.dataset.name] = v; });
+    return {
+        title: $('f_title').value.trim(),
+        price: $('f_price').value,
+        quantity: $('f_quantity').value,
+        sku: $('f_sku').value.trim(),
+        condition: $('f_condition').value,
+        conditionDescription: $('f_conditionDescription').value.trim(),
+        categoryId: $('f_categoryId').value.trim(),
+        categoryPath: $('f_categoryPath').value.trim(),
+        listingDescription: $('f_listingDescription').value,
+        aspects,
+        images: (state.current.proposal.images || []).map((im) => ({ url: im.url, source: im.source, kind: im.kind, enabled: im.enabled !== false })),
+    };
+}
+
+function applyResult(data, okText) {
+    if (!data.success) { setStatus('error', data.error + (data.problems ? ' — ' + data.problems.join('; ') : '')); return false; }
+    state.current = data.item;
+    renderDetail();
+    loadList(true);
+    if (okText) setStatus('ok', okText);
+    return true;
+}
+
+async function save() {
+    setStatus('info', 'Saving...');
+    const data = await api('/api/listingagent/proposals/' + state.current.id + '/save', { method: 'POST', body: JSON.stringify({ edits: collectEdits(), note: $('f_note').value.trim(), reviewed_by: reviewer() }) });
+    applyResult(data, 'Saved.');
+}
+
+async function approve() {
+    const edits = collectEdits();
+    const msg = `List on eBay now?\n\n${edits.title}\nPrice ${money(edits.price)} · Qty ${edits.quantity} · ${edits.condition}\nCategory ${edits.categoryId}\n\nThis creates a live listing and eBay fees apply.`;
+    if (!confirm(msg)) return;
+    $('approveBtn').disabled = true;
+    setStatus('info', 'Dry run, then publishing to eBay...');
+    const data = await api('/api/listingagent/proposals/' + state.current.id + '/action', { method: 'POST', body: JSON.stringify({ action: 'approve', edits, note: $('f_note').value.trim(), reviewed_by: reviewer() }) });
+    if (!applyResult(data, data.item && data.item.listed_listing_id ? 'Listed on eBay as ' + data.item.listed_listing_id + '.' : 'Published.')) { $('approveBtn').disabled = false; await select(state.current.id); }
+}
+
+async function act(action, confirmText) {
+    if (confirmText && !confirm(confirmText)) return;
+    setStatus('info', 'Working...');
+    const body = { action, note: $('f_note') ? $('f_note').value.trim() : '', reviewed_by: reviewer() };
+    if (['hold', 'request_photos'].includes(action)) body.edits = collectEdits();
+    const data = await api('/api/listingagent/proposals/' + state.current.id + '/action', { method: 'POST', body: JSON.stringify(body) });
+    applyResult(data, 'Done.');
+}
+
+async function buildAll() {
+    $('buildBtn').disabled = true;
+    setStatus('info', 'Starting the agent on every queued item without a proposal...');
+    const data = await api('/api/listingagent/proposals/build', { method: 'POST', body: JSON.stringify({ reviewed_by: reviewer(), limit: 25 }) });
+    if (!data.success) { setStatus('error', data.error); $('buildBtn').disabled = false; return; }
+    if (!data.started) { setStatus('info', data.message || 'Nothing to build.'); $('buildBtn').disabled = false; return; }
+    pollBuild();
+}
+
+async function pollBuild() {
+    const data = await api('/api/listingagent/proposals/build_status');
+    const job = (data && data.job) || {};
+    if (job.running) {
+        setStatus('info', `Building ${job.done}/${job.total}${job.current ? ' · working on ' + job.current : ''}...`);
+        state.polling = setTimeout(pollBuild, 2500);
+        return;
+    }
+    const failed = (job.results || []).filter((r) => r.status === 'error').length;
+    setStatus(failed ? 'error' : 'ok', `Built ${job.done} proposal(s)${failed ? ', ' + failed + ' failed' : ''}.` + (job.error ? ' ' + job.error : ''));
+    $('buildBtn').disabled = false;
+    loadList(true);
+}
+
+$('refreshBtn').addEventListener('click', () => { loadList(true); if (state.current) select(state.current.id); });
+$('buildBtn').addEventListener('click', buildAll);
+loadList(false).then(() => api('/api/listingagent/proposals/build_status').then((d) => { if (d.job && d.job.running) pollBuild(); }));
+</script>
+</body>
+</html>

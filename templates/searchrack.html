@@ -451,7 +451,6 @@
                     <button id="rack-history-btn">📋 Rack History</button>
                     <button id="automatic-cleanup-btn">🧹 Inventory Cleanup Decisions</button>
                     <button id="no-name-items-btn">🏷️ No-Name Items</button>
-                    <button id="listing-reconciliation-btn">🧾 Listings &amp; Stock</button>
                     <button id="reset-cache-btn" style="color:#ff6b00;">🔄 Reset Cache</button>
                 </div>
             </div>
@@ -4397,13 +4396,6 @@ document.getElementById('no-name-items-btn').addEventListener('click', () => {
     document.getElementById('inventory-dropdown').classList.remove('active');
     // Warehouse rows that hold nothing but a barcode
     window.location.href = '/no-name-items';
-});
-
-// Listings & Stock button
-document.getElementById('listing-reconciliation-btn').addEventListener('click', () => {
-    document.getElementById('inventory-dropdown').classList.remove('active');
-    // Every active store listing checked against the rack
-    window.location.href = '/store-listing-helper';
 });
 
 // History modal event handlers

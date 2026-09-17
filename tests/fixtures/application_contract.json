@@ -5678,6 +5678,87 @@
       "subdomain": ""
     },
     {
+      "rule": "/listingagent/review",
+      "endpoint": "listingagent_review_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/proposals",
+      "endpoint": "api_listingagent_proposals_list",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/proposals/build",
+      "endpoint": "api_listingagent_proposals_build",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/proposals/build_status",
+      "endpoint": "api_listingagent_proposals_build_status",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/proposals/<int:proposal_id>",
+      "endpoint": "api_listingagent_proposal_detail",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/proposals/<int:proposal_id>/save",
+      "endpoint": "api_listingagent_proposal_save",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/listingagent/proposals/<int:proposal_id>/action",
+      "endpoint": "api_listingagent_proposal_action",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/items-prep/unmatched/lookup",
       "endpoint": "prep_unmatched_lookup",
       "methods": [
@@ -5854,32 +5935,6 @@
       "rule": "/api/lister/queue/<upc>/generate",
       "endpoint": "api_lister_queue_generate",
       "methods": [
-        "OPTIONS",
-        "POST"
-      ],
-      "defaults": null,
-      "strict_slashes": true,
-      "subdomain": ""
-    },
-    {
-      "rule": "/api/lister/queue/<upc>/preload",
-      "endpoint": "api_lister_queue_preload",
-      "methods": [
-        "GET",
-        "HEAD",
-        "OPTIONS",
-        "POST"
-      ],
-      "defaults": null,
-      "strict_slashes": true,
-      "subdomain": ""
-    },
-    {
-      "rule": "/api/lister/preload",
-      "endpoint": "api_lister_preload_all",
-      "methods": [
-        "GET",
-        "HEAD",
         "OPTIONS",
         "POST"
       ],
