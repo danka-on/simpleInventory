@@ -12,6 +12,7 @@
   <div class="stores" role="tablist">
     <button id="storeEbay" class="store ebay" type="button" role="tab" aria-selected="true">eBay <span id="countEbay" class="n"></span></button>
     <button id="storeAmazon" class="store amazon" type="button" role="tab" aria-selected="false">Amazon <span id="countAmazon" class="n"></span></button>
+    <button id="storeNew" class="store new" type="button" role="tab" aria-selected="false" title="Describe an item that is on no BOL yet">+ NEW</button>
   </div>
   <div class="sys">
     <button id="connStatus" class="conn" type="button" title="Connection" aria-label="Connection"></button>
@@ -22,7 +23,7 @@
 
 <!-- The way back out of an item, and the only place that says you are on a listing form. -->
 <div id="crumb" class="crumb" hidden>
-  <button id="backToQueue" class="back" type="button">‹ Queue</button>
+  <button id="backToQueue" class="back" type="button"><span aria-hidden="true">←</span> Back</button>
   <span id="crumbNow" class="now"></span>
   <span id="crumbLock" class="lockmark" hidden>● on the form</span>
 </div>
@@ -98,6 +99,15 @@
   <div id="itemList" class="list"></div>
   <button id="listedBtn" class="listedlink" type="button" title="What the Lister has recorded">✓ <b><span id="countListedToday">0</span> listed today</b> through the Lister<span class="chev">›</span></button>
 </section>
+
+<!-- "+ NEW": the barcode and the photo marking happen here, the naming happens on the phone. -->
+<section id="newCard" class="newitem" hidden>
+  <div id="newHead"></div>
+  <div id="newPhone"></div>
+  <div id="newPhotos"></div>
+</section>
+
+<div id="editor" class="editor" hidden></div>
 
 <section id="detail" class="detail" hidden></section>
 

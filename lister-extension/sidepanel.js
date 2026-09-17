@@ -17,6 +17,7 @@
   const PLATFORM_KEY = 'ssListerPlatform';
   const PROMPT_KEY = 'ssListerAiPrompt';
   const TITLE_PROMPT_KEY = 'ssListerTitlePrompt';
+  const NEW_KEY = 'ssListerNewDraft';
   const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
   // The automatic switches, shown in the folding menu on the store card (all of them) and by the photos (the photo ones).
   const AUTO_TOGGLES = [
@@ -48,6 +49,8 @@
     voiceBusy: new Set(), qrOpen: false, advOpen: false, photoLinkBusy: false, toastAction: null, autoText: new Set(), autoPhotos: new Set(),
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
+    // "+ NEW": the draft the phone is filling from the other end.
+    newItem: { id: null, draft: null, barcodeDraft: '', timer: null },
   };
 
   const $ = id => document.getElementById(id);
@@ -126,12 +129,13 @@
   // -- storage ------------------------------------------------------------------------
 
   async function loadStorage() {
-    const stored = await chrome.storage.local.get([SETTINGS_KEY, LEARNED_KEY, CURRENT_KEY, PLATFORM_KEY, PROMPT_KEY, TITLE_PROMPT_KEY]);
+    const stored = await chrome.storage.local.get([SETTINGS_KEY, LEARNED_KEY, CURRENT_KEY, PLATFORM_KEY, PROMPT_KEY, TITLE_PROMPT_KEY, NEW_KEY]);
     state.settings = { ...DEFAULTS, ...(stored[SETTINGS_KEY] || {}) };
     state.learned = stored[LEARNED_KEY] || {};
     state.currentUpc = stored[CURRENT_KEY] || null;
     state.platform = stored[PLATFORM_KEY] === 'amazon' ? 'amazon' : 'ebay';
     state.aiPrompt = stored[PROMPT_KEY] || '';
+    state.newItem.id = stored[NEW_KEY] || null;
     // The saved title prompt is the starting point of every session; editing it only changes this
     // session until "Save for all sessions" writes it back.
     state.savedTitlePrompt = stored[TITLE_PROMPT_KEY] || '';
@@ -158,7 +162,8 @@
   }
 
   function remember() {
-    void chrome.storage.local.set({ [CURRENT_KEY]: state.currentUpc, [PLATFORM_KEY]: state.platform, [PROMPT_KEY]: state.aiPrompt });
+    void chrome.storage.local.set({ [CURRENT_KEY]: state.currentUpc, [PLATFORM_KEY]: state.platform, [PROMPT_KEY]: state.aiPrompt,
+      [NEW_KEY]: state.newItem.id });
   }
 
   // -- server -------------------------------------------------------------------------
@@ -1357,7 +1362,7 @@
   // -- rendering ---------------------------------------------------------------------------
 
   function renderAll() {
-    renderHeader(); renderStoreBar(); renderPage(); renderItems(); renderDetail(); renderConfirm(); renderActionBar();
+    renderHeader(); renderStoreBar(); renderPage(); renderItems(); renderDetail(); renderConfirm(); renderNew(); renderActionBar();
   }
 
   // The server is a dot: green when it answers, red when it does not. The detail is its tooltip.
@@ -1377,14 +1382,17 @@
       const c = state.counts[p] || {};
       $(p === 'ebay' ? 'countEbay' : 'countAmazon').textContent = c.queued != null ? c.queued : '';
     }
+    $('storeNew').setAttribute('aria-selected', String(state.view === 'new'));
     const item = current();
     const onItem = state.view === 'item' && Boolean(item);
+    const onNew = state.view === 'new';
     const locked = state.locked ? state.items.find(it => it.upc === state.locked) : null;
     document.body.classList.toggle('locked', Boolean(state.locked));
-    $('crumb').hidden = !onItem;
-    if (onItem) $('crumbNow').textContent = locked?.title || item.title || item.upc;
-    $('crumbLock').hidden = !state.locked;
-    $('listCard').hidden = onItem;
+    $('crumb').hidden = !onItem && !onNew;
+    if (onNew) $('crumbNow').textContent = 'New item';
+    else if (onItem) $('crumbNow').textContent = locked?.title || item.title || item.upc;
+    $('crumbLock').hidden = !state.locked || onNew;
+    $('listCard').hidden = onItem || onNew;
     renderActionBar();
   }
 
@@ -1468,6 +1476,16 @@
     const item = current();
     const page = state.page || {};
     const g = state.guide;
+    if (state.view === 'new') {
+      const draft = state.newItem.draft;
+      if (!draft) return { label: 'Start a new item', run: () => newStart() };
+      if (draft.status !== 'draft') return { label: 'Submitted ✓', disabled: true };
+      const missing = draft.missing || [];
+      if (missing.length) return { label: 'Needs a ' + missing.join(' and a '), disabled: true,
+                                   hint: 'Scan the barcode here; the phone sends the name' };
+      return { label: 'Submit to Items to List', run: () => newSubmit(),
+               hint: 'Writes the name, the photos and the notes onto ' + draft.upc + ', then queues it' };
+    }
     if (state.connected === false) return { label: state.signIn ? 'Sign in to Sweet Shelves' : 'Try the server again', run: () => { state.connected = null; renderHeader(); return connect().then(() => loadQueue()); } };
     if (!item) return { label: `Nothing queued for ${storeName(state.platform)}`, disabled: true };
     const start = { label: `Start on ${storeName(state.platform)}`, run: () => startOn(state.platform), hint: 'Opens the store and types the UPC' };
@@ -1514,6 +1532,11 @@
     const page = state.page || {};
     const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
     const list = [];
+    if (state.view === 'new' && state.newItem.draft) {
+      return [{ label: '↻ Look for new photos now', run: () => newLoad(state.newItem.draft.id) },
+              { label: '↗ Open the phone page here', run: () => chrome.tabs.create({ url: state.newItem.draft.phoneUrl }) },
+              { label: '✕ Throw this new item away', run: () => newCancel(), danger: true }];
+    }
     if (state.view === 'list') list.push({ label: '\u26a1 Preload every queued item', run: () => preloadAll(), off: Boolean(state.preload.all?.running) });
     if (info && state.view === 'item') list.push({ label: '\u2b05 Send photos to the page', run: () => sendPhotos(), off: !page.store || Boolean(state.busy) });
     if (info && state.view === 'item') list.push({ label: '\u2728 AI photoshop the photos', run: () => aiPhotoshop(), off: Boolean(state.aiBusy) || !(info.photos || []).length });
@@ -1766,7 +1789,7 @@
       const [cls, text] = linked ? ['good', 'Listed'] : onStore ? ['good', 'On store'] : skipped ? ['idle', 'Skipped'] : ['idle', 'Not listed'];
       const url = (linked || onStore) ? storeUrlFor(platform) : '';
       const live = platform === 'ebay' ? gate.liveEbay : gate.liveAmazon;
-      return `<div class="cell ${cls}"><div class="k">${storeName(platform)}</div>
+      return `<div class="cell ${platform} ${cls}"><div class="k">${storeName(platform)}</div>
         <div class="v">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" title="Open the ${storeName(platform)} listing">${text} \u2197</a>` : text}</div>
         <div class="s">${esc(live ?? 0)} live</div></div>`;
     };
@@ -1798,13 +1821,13 @@
         </div></div>
       ${alerts.join('')}
       <div class="strip">
-        <div class="cell ${rackQty ? 'good' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Rack</div>
+        <div class="cell rack ${rackQty ? 'good' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Rack</div>
           <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search"><span class="num">${esc(listable)}</span> to list</a>${gate.mismatch ? ' <span class="neq">\u2260</span>' : ''}</div>
           <div class="s">${where}</div></div>
         ${storeCell('ebay')}${storeCell('amazon')}
       </div>
 
-      <div class="sect">
+      <div class="sect notes">
         <div class="sect-h"><span class="lbl">Notes</span><span class="n">${notes.length || voice.length || info.defect ? 'LT \u00b7 EN' : 'none'}</span><span class="sp"></span></div>
         ${voice.map(n => noteRow('\ud83c\udfa4', n.lithuanian, n.english, `<div class="acts">
           ${n.status === 'complete' || n.english ? '' : (state.voiceBusy.has(info.upc + ':' + n.id) || n.status === 'processing' ? '<span class="spin"></span>' : `<button class="tiny" data-transcribe="${n.id}" type="button" title="Transcribe and translate">text</button>`)}
@@ -2051,6 +2074,385 @@
     catch { toast('Clipboard blocked; select the text under "Text for manual paste"', true); }
   }
 
+  // -- "+ NEW": an item that is on no BOL yet -------------------------------------------------
+  // Two people fill one draft. The phone says what the thing is and photographs it; the panel gives
+  // it a barcode, circles what is wrong with it and submits. Submitting is an Item Prep pass: the
+  // name, the picture, the photos and the notes land on the barcode, and the unit joins Items to
+  // List, so from the next render it is an ordinary queued item.
+
+  const newDraft = () => state.newItem.draft;
+
+  async function newLoad(id, { quiet = false } = {}) {
+    const done = quiet ? null : busy('Loading the new item…');
+    try {
+      const data = await api('/api/lister/new/' + id);
+      state.newItem.draft = data.draft;
+      state.newItem.id = data.draft.id;
+      remember();
+    } catch (error) {
+      if (error.status === 404) { state.newItem.draft = null; state.newItem.id = null; remember(); }
+      else if (!quiet) toast(error.message, true);
+    }
+    if (done) done();
+    renderNew();
+  }
+
+  async function newStart() {
+    setView('new');
+    if (newDraft() && newDraft().status === 'draft') { renderNew(); newPoll(); return; }
+    const done = busy('Opening a new item…');
+    try {
+      const data = await api('/api/lister/new', { method: 'POST', body: {} });
+      state.newItem.draft = data.draft;
+      state.newItem.id = data.draft.id;
+      state.newItem.barcodeDraft = '';
+      remember();
+      if (data.linkError) toast('The phone was not sent a link: ' + data.linkError, true);
+      else if (data.link) toast('Photo link sent to ' + (data.link.sent || []).join(', '));
+    } catch (error) {
+      toast(error.message, true);
+    }
+    done();
+    renderNew();
+    newPoll();
+  }
+
+  // The phone fills the same draft from the other end, so the card has to keep looking.
+  function newPoll() {
+    clearTimeout(state.newItem.timer);
+    state.newItem.timer = setTimeout(async () => {
+      const draft = newDraft();
+      if (state.view !== 'new' || !draft || draft.status !== 'draft') return;
+      await newLoad(draft.id, { quiet: true });
+      newPoll();
+    }, 4000);
+  }
+
+  async function newPost(path, body, label) {
+    const draft = newDraft();
+    if (!draft) return null;
+    const done = busy(label);
+    try {
+      const data = await api('/api/lister/new/' + draft.id + path, { method: 'POST', body: body || {} });
+      if (data.draft) state.newItem.draft = data.draft;
+      return data;
+    } catch (error) {
+      toast(error.message, true);
+      return null;
+    } finally {
+      done();
+      renderNew();
+    }
+  }
+
+  async function newSetBarcode(barcode, kind) {
+    const data = await newPost('/barcode', { barcode, kind: kind || 'scanned' }, 'Saving the barcode…');
+    if (!data) return false;
+    state.newItem.barcodeDraft = '';
+    if (data.systemTitle) toast('We already know this code: ' + data.systemTitle);
+    if (data.link && data.link.kind === 'photos') toast('Name found — the phone was re-sent a photos-only link');
+    if (data.linkError) toast('The new link did not send: ' + data.linkError, true);
+    return true;
+  }
+
+  async function newPrintLabel(code, description) {
+    const done = busy('Sending the label…');
+    try {
+      await api('/api/printer/print-barcode', { method: 'POST', body: { upc: code, item_description: description || '', quantity: 1 } });
+      toast('Label sent to the printer');
+      return true;
+    } catch (error) {
+      toast(error.message, true);
+      return false;
+    } finally {
+      done();
+    }
+  }
+
+  async function newSubmit() {
+    const data = await newPost('/submit', {}, 'Submitting…');
+    if (!data) return;
+    clearTimeout(state.newItem.timer);
+    state.newItem.draft = null;
+    state.newItem.id = null;
+    state.currentUpc = data.upc;
+    remember();
+    toast('"' + (data.title || data.upc) + '" is on Items to List');
+    setView('list');
+    await loadQueue();
+  }
+
+  async function newCancel() {
+    if (!newDraft()) return;
+    const ok = await confirmModal({ title: 'Throw this new item away?', text: 'The photos the phone already sent go with it. The barcode stays reserved, so it is never handed out twice.', okLabel: 'Throw away' });
+    if (!ok) return;
+    await newPost('/cancel', {}, 'Closing the draft…');
+    clearTimeout(state.newItem.timer);
+    state.newItem.draft = null;
+    state.newItem.id = null;
+    remember();
+    setView('list');
+  }
+
+  // The same three choices the "No barcode" modal on /barcode gives you: type the code that is on
+  // the item, take the next one of ours, print either.
+  function newNoBarcodeModal() {
+    const box = $('modal');
+    box.hidden = false;
+    box.innerHTML = '<div class="box" role="dialog" aria-modal="true"><strong>No barcode</strong>' +
+      '<p class="muted small">Type the code that is on the item, or take the next one of ours.</p>' +
+      '<input id="nbCode" class="wide" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Barcode">' +
+      '<div class="row"><button id="nbGen" type="button">Generate one</button><button id="nbPrint" type="button">Print</button>' +
+      '<button id="nbUse" class="primary" type="button">Use it</button><button id="nbCancel" type="button">Cancel</button></div>' +
+      '<p class="small muted" id="nbStatus"></p></div>';
+    const close = () => { box.hidden = true; box.innerHTML = ''; box.onclick = null; };
+    const say = (message, bad) => { $('nbStatus').textContent = message; $('nbStatus').className = 'small ' + (bad ? 'bad' : 'muted'); };
+    $('nbCode').focus();
+    $('nbGen').onclick = async () => {
+      $('nbGen').disabled = true;
+      say('Taking the next code…');
+      try {
+        const data = await api('/api/items-prep/generate-barcode', { method: 'POST', body: {} });
+        $('nbCode').value = data.barcode || '';
+        say('Reserved ' + data.barcode + '. Print it, then use it.');
+      } catch (error) { say(error.message, true); }
+      $('nbGen').disabled = false;
+    };
+    $('nbPrint').onclick = async () => {
+      const code = $('nbCode').value.trim();
+      if (!code) { say('Type or generate a code first.', true); return; }
+      if (await newPrintLabel(code, (newDraft() || {}).title)) say('Label sent to the printer.');
+    };
+    $('nbUse').onclick = async () => {
+      const code = $('nbCode').value.trim();
+      if (!code) { say('Type or generate a code first.', true); return; }
+      // Typed by hand it is still the item's own code; a 777 one is ours.
+      if (await newSetBarcode(code, /^777\d{9}$/.test(code) ? 'generated' : 'scanned')) close();
+    };
+    $('nbCancel').onclick = close;
+    box.onclick = event => { if (event.target === box) close(); };
+    $('nbCode').onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); $('nbUse').click(); } };
+  }
+
+  // -- marking a photo ------------------------------------------------------------------------
+  // Circle the damage and say what it is. The photo the phone took is kept: the circled one is an
+  // extra photo beside it, and the words become a prep note, which is where the listing reads its
+  // condition and condition description from.
+
+  function openEditor(photo) {
+    const draft = newDraft();
+    if (!draft) return;
+    const box = $('editor');
+    box.hidden = false;
+    box.innerHTML = '<div class="edbox" role="dialog" aria-modal="true">' +
+      '<div class="edhead"><strong class="grow">Mark this photo</strong>' +
+      '<button id="edClose" class="icon" type="button" aria-label="Close">×</button></div>' +
+      '<div class="edstage"><canvas id="edCanvas"></canvas></div>' +
+      '<div class="edtools"><button id="edUndo" class="tiny" type="button">↶ Undo</button>' +
+      '<button id="edClear" class="tiny" type="button">Clear</button>' +
+      '<span class="muted small grow">Drag across the damage</span></div>' +
+      '<label class="fieldlabel" for="edNote">What is wrong with it?</label>' +
+      '<textarea id="edNote" rows="2" placeholder="e.g. Cracked corner, lid is scratched"></textarea>' +
+      '<div class="row"><button id="edSave" class="primary grow" type="button">Save</button>' +
+      '<button id="edDelete" class="danger" type="button">Delete photo</button></div></div>';
+    $('edNote').value = photo.note || '';
+
+    const canvas = $('edCanvas');
+    const context = canvas.getContext('2d');
+    const image = new Image();
+    const shapes = [];
+    let drawing = null;
+
+    const paint = () => {
+      if (!image.naturalWidth) return;
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      const width = Math.max(3, Math.round(canvas.width / 110));
+      context.lineWidth = width;
+      context.strokeStyle = '#e11d48';
+      context.shadowColor = 'rgba(0, 0, 0, .35)';
+      context.shadowBlur = width;
+      for (const shape of drawing ? shapes.concat([drawing]) : shapes) {
+        context.beginPath();
+        context.ellipse(shape.x, shape.y, Math.max(shape.rx, 4), Math.max(shape.ry, 4), 0, 0, Math.PI * 2);
+        context.stroke();
+      }
+      context.shadowBlur = 0;
+    };
+
+    image.onload = () => {
+      // The saved file is this canvas, so cap it here rather than push a twelve megapixel JPEG
+      // back out through the side panel.
+      const cap = 1400;
+      const scale = Math.min(1, cap / Math.max(image.naturalWidth, image.naturalHeight));
+      canvas.width = Math.round(image.naturalWidth * scale);
+      canvas.height = Math.round(image.naturalHeight * scale);
+      paint();
+    };
+    image.onerror = () => toast('That photo could not be opened for marking', true);
+    // The bytes come through the API rather than off the <img> URL: a picture loaded straight from
+    // another origin taints the canvas, and a tainted canvas cannot hand back the marked copy.
+    photoFile(photo.url)
+      .then(data => { image.src = 'data:' + (data.type || 'image/jpeg') + ';base64,' + data.base64; })
+      .catch(error => toast('That photo could not be opened for marking: ' + error.message, true));
+
+    const at = event => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: (event.clientX - rect.left) * (canvas.width / rect.width),
+               y: (event.clientY - rect.top) * (canvas.height / rect.height) };
+    };
+    canvas.onpointerdown = event => {
+      event.preventDefault();
+      try { canvas.setPointerCapture(event.pointerId); } catch (error) { /* mouse without capture */ }
+      const start = at(event);
+      drawing = { x: start.x, y: start.y, rx: 0, ry: 0, from: start };
+      paint();
+    };
+    canvas.onpointermove = event => {
+      if (!drawing) return;
+      const now = at(event);
+      drawing.x = (drawing.from.x + now.x) / 2;
+      drawing.y = (drawing.from.y + now.y) / 2;
+      drawing.rx = Math.abs(now.x - drawing.from.x) / 2;
+      drawing.ry = Math.abs(now.y - drawing.from.y) / 2;
+      paint();
+    };
+    const finish = () => {
+      // A tap is not a circle. The threshold is in screen pixels, not image ones, because what
+      // decides whether it was a slip is how far the finger actually moved.
+      const rect = canvas.getBoundingClientRect();
+      const least = 4 * (canvas.width / (rect.width || canvas.width));
+      if (drawing && drawing.rx > least && drawing.ry > least) shapes.push(drawing);
+      drawing = null;
+      paint();
+    };
+    canvas.onpointerup = finish;
+    canvas.onpointercancel = finish;
+
+    const close = () => { box.hidden = true; box.innerHTML = ''; };
+    $('edClose').onclick = close;
+    $('edUndo').onclick = () => { shapes.pop(); paint(); };
+    $('edClear').onclick = () => { shapes.length = 0; paint(); };
+    $('edDelete').onclick = async () => {
+      const ok = await confirmModal({ title: 'Delete this photo?', text: 'It goes with the draft, and the phone can send another.' });
+      if (!ok) return;
+      close();
+      const done = busy('Deleting the photo…');
+      try {
+        const data = await api('/api/lister/new/' + draft.id + '/photos/' + photo.id, { method: 'DELETE' });
+        state.newItem.draft = data.draft;
+      } catch (error) { toast(error.message, true); }
+      done();
+      renderNew();
+    };
+    $('edSave').onclick = async () => {
+      $('edSave').disabled = true;
+      // No circles means no marked copy: an empty image tells the server to drop the old one.
+      const marked = shapes.length && image.naturalWidth ? canvas.toDataURL('image/jpeg', 0.92) : '';
+      const data = await newPost('/photos/' + photo.id, { image: marked, note: $('edNote').value }, 'Saving the marks…');
+      $('edSave').disabled = false;
+      if (data) close();
+    };
+  }
+
+  // -- the "+ NEW" card -----------------------------------------------------------------------
+
+  const STAGE_WORDS = { title: 'naming it', details: 'saying what it is like', photos: 'taking photos', done: 'finished' };
+  const TITLE_SOURCE = { system: 'from our own records', voice: 'dictated on the phone', typed: 'typed here' };
+
+  function renderNew() {
+    $('newCard').hidden = state.view !== 'new';
+    if (state.view !== 'new') return;
+    const draft = newDraft();
+    if (!draft) {
+      setHtml($('newHead'), '<div class="card"><strong>No new item open</strong><p class="muted small">Press + NEW again to start one.</p></div>');
+      setHtml($('newPhone'), '');
+      setHtml($('newPhotos'), '');
+      renderActionBar();
+      return;
+    }
+    renderNewHead(draft);
+    renderNewPhone(draft);
+    renderNewPhotos(draft);
+    renderActionBar();
+  }
+
+  function renderNewHead(draft) {
+    const code = draft.upc
+      ? '<div class="row tight"><b class="mono grow">' + esc(draft.upc) + '</b>' +
+        '<span class="muted small">' + (draft.upcKind === 'generated' ? 'ours' : 'the item’s own') + '</span>' +
+        '<button id="newPrint" class="tiny" type="button">Print label</button>' +
+        '<button id="newRecode" class="tiny" type="button">Change</button></div>'
+      : '<div class="row tight"><div class="search grow"><span aria-hidden="true">⌷</span>' +
+        '<input id="newBarcode" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Scan the barcode"></div>' +
+        '<button id="newNoCode" type="button">No barcode</button></div>';
+    const source = TITLE_SOURCE[draft.titleSource];
+    const html = '<div class="card">' +
+      '<label class="fieldlabel">Barcode</label>' + code +
+      '<label class="fieldlabel" for="newTitle">Name' + (source ? ' <span class="muted small">· ' + esc(source) + '</span>' : '') + '</label>' +
+      '<input id="newTitle" class="wide" type="text" placeholder="The phone fills this in" value="' + esc(draft.title) + '">' +
+      '<label class="fieldlabel" for="newDesc">Details</label>' +
+      '<textarea id="newDesc" rows="3" placeholder="What the phone dictates lands here">' + esc(draft.description) + '</textarea>' +
+      '</div>';
+    if (!setHtml($('newHead'), html)) return;
+    const field = $('newBarcode');
+    if (field) {
+      field.value = state.newItem.barcodeDraft || '';
+      field.oninput = () => { state.newItem.barcodeDraft = field.value; };
+      // A scanner types the code and presses Enter for you; a person can too.
+      field.onkeydown = event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        const code2 = field.value.trim();
+        if (code2) void newSetBarcode(code2, 'scanned');
+      };
+      field.focus();
+    }
+    if ($('newNoCode')) $('newNoCode').onclick = () => newNoBarcodeModal();
+    if ($('newPrint')) $('newPrint').onclick = () => void newPrintLabel(draft.upc, draft.title);
+    if ($('newRecode')) $('newRecode').onclick = () => newNoBarcodeModal();
+    for (const [id, key, label] of [['newTitle', 'title', 'Saving the name…'], ['newDesc', 'description', 'Saving the details…']]) {
+      const box = $(id);
+      box.onchange = () => { void newPost('/fields', { [key]: box.value, source: 'typed' }, label); };
+    }
+  }
+
+  function renderNewPhone(draft) {
+    const doing = draft.status === 'draft' ? STAGE_WORDS[draft.stage] || '' : '';
+    const html = '<div class="card">' +
+      '<div class="row tight"><span class="grow">' +
+      (draft.linkSent
+        ? '📲 The phone has the link' + (doing ? ' · <b>' + esc(doing) + '</b>' : '')
+        : '📲 The phone has no link yet') +
+      '</span><button id="newResend" class="tiny" type="button">' + (draft.linkSent ? 'Send again' : 'Send the link') + '</button></div>' +
+      '<div class="muted small ellip" title="' + esc(draft.phoneUrl) + '">' + esc(draft.phoneUrl) + '</div></div>';
+    if (!setHtml($('newPhone'), html)) return;
+    $('newResend').onclick = async () => {
+      const data = await newPost('/link', {}, 'Sending the link…');
+      if (data) toast('Link sent to ' + (data.sent || []).join(', '));
+    };
+  }
+
+  function renderNewPhotos(draft) {
+    const photos = draft.photos || [];
+    const tiles = photos.map(photo =>
+      '<figure class="ptile' + (photo.markedUrl ? ' marked' : '') + '" data-photo="' + photo.id + '" title="' + esc(photo.note || 'Mark this photo') + '">' +
+      '<img src="' + esc(serverBase() + (photo.markedUrl || photo.url)) + '" alt="" loading="lazy">' +
+      '<figcaption>' + (photo.note ? esc(photo.note) : '<span class="muted">✎ mark</span>') + '</figcaption></figure>').join('');
+    const html = '<div class="card">' +
+      '<label class="fieldlabel">Photos' + (photos.length ? ' <span class="muted small">· ' + photos.length + '</span>' : '') + '</label>' +
+      (photos.length ? '<div class="ptiles">' + tiles + '</div>'
+        : '<p class="muted small">Nothing from the phone yet. They arrive here on their own.</p>') +
+      '</div>';
+    if (!setHtml($('newPhotos'), html)) return;
+    $('newPhotos').onclick = event => {
+      const tile = event.target.closest('[data-photo]');
+      if (!tile) return;
+      const photo = ((newDraft() || {}).photos || []).find(p => String(p.id) === tile.dataset.photo);
+      if (photo) openEditor(photo);
+    };
+  }
+
   // -- wiring --------------------------------------------------------------------------------
 
   function setPlatform(platform) {
@@ -2060,7 +2462,8 @@
   }
 
   function setView(view) {
-    state.view = view; renderStoreBar(); renderDetail(); renderConfirm();
+    state.view = view; renderStoreBar(); renderDetail(); renderConfirm(); renderNew();
+    if (view !== 'new') clearTimeout(state.newItem.timer);
     if (view === 'item' && state.currentUpc) void loadDetail(state.currentUpc);
   }
 
@@ -2091,6 +2494,7 @@
     $('connStatus').onclick = () => { state.connected = null; renderHeader(); void connect().then(() => loadQueue()); };
     $('storeEbay').onclick = () => setPlatform('ebay');
     $('storeAmazon').onclick = () => setPlatform('amazon');
+    $('storeNew').onclick = () => void newStart();
     $('backToQueue').onclick = () => { state.locked = null; setView('list'); };
     $('goBtn').onclick = () => { const action = nextAction(); if (!action.disabled && action.run) void action.run(); };
     $('moreBtn').onclick = () => openMore();
@@ -2102,6 +2506,7 @@
     document.addEventListener('keydown', event => {
       if (event.key !== 'Escape') return;
       if (!$('listedDrawer').hidden) openListed(false);
+      else if (!$('editor').hidden) { $('editor').hidden = true; $('editor').innerHTML = ''; }
       else if (!$('modal').hidden) $('modal').hidden = true;
     });
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
@@ -2132,6 +2537,8 @@
     await loadQueue();
     await refreshTab();
     watchPhonePhotos();
+    // A draft left open in an earlier session is still being filled by somebody's phone.
+    if (state.newItem.id) await newLoad(state.newItem.id, { quiet: true });
   }
 
   void main();

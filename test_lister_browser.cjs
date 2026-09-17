@@ -318,6 +318,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('.item[data-upc="883049370897-1"]');
     await panel.waitForSelector('.strip');
     assert.ok(!(await panel.$eval('#crumb', el => el.hidden)), 'the crumb is the way back to the queue');
+    assert.equal((await panel.textContent('#backToQueue')).replace(/\s+/g, ' ').trim(), '\u2190 Back', 'the way out is a button that says Back');
     assert.ok(await panel.$eval('#listCard', el => el.hidden), 'one place at a time: the queue steps aside');
     const detailText = await panel.textContent('#detail');
     for (const expected of ['unit 1', '@ B-1', '1 to list', 'Small chip on the rim', 'chip']) {
@@ -436,6 +437,18 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     const rows = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(row => ({ text: row.textContent.replace(/\s+/g, ' ').trim(), dot: row.querySelector('span').style.background })));
     const cpColours = await store.$$eval('#ss-lister-guide [data-ss-cp] span', els => els.map(s => s.style.background));
     assert.equal(cpColours.length, rows.length, 'one checkpoint per step');
+    // Hovering a checkpoint reads that step out below it. The card is a fixed height so the overlay
+    // cannot grow, shift out from under the cursor and bounce hover on and off - which it used to.
+    await store.click('#ss-lister-guide [data-ss="steps"]');  // focus card, where the preview lands
+    const hudBox = () => store.$eval('#ss-lister-guide', el => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), height: Math.round(r.height) }; });
+    const restingBox = await hudBox();
+    for (const i of [0, rows.length - 1, Math.floor(rows.length / 2)]) {
+      await store.hover(`#ss-lister-guide [data-ss-cp="${i}"]`);
+      assert.deepEqual(await hudBox(), restingBox, `hovering checkpoint ${i} must not move or resize the overlay`);
+    }
+    await store.hover('#ss-lister-guide [data-ss="title"]');
+    assert.deepEqual(await hudBox(), restingBox, 'and it is back where it started');
+    await openSteps();
     const rowFor = name => rows.find(r => r.text.startsWith(name));
     assert.ok(rowFor('Photos') && rowFor('Photos').dot.includes('220, 38, 38'), 'photos (0/25) are a required, open (red) row: ' + JSON.stringify(rows));
     assert.ok(rowFor('Color').dot.includes('220, 38, 38'), 'the empty required Color field is red');

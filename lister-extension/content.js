@@ -801,8 +801,12 @@
     const body = panel.querySelector('[data-ss="body"]');
     const previewing = guide.preview != null && guide.preview !== guide.index;
     const row = guide.rows[guide.preview != null ? guide.preview : guide.index];
+    // Every focus card is the same height. It used to grow and shrink with whatever step was under
+    // the cursor, and because the overlay is pinned by its bottom edge that moved the rail out from
+    // under the pointer, which bounced hover on and off.
+    const CARD = 'padding:9px 12px 12px;height:112px;box-sizing:border-box;display:flex;flex-direction:column';
     if (!row) {
-      body.innerHTML = `<div style="padding:10px 12px 14px;color:${t.muted};font-size:12px">${guide.rows.length ? 'Pick a checkpoint above, or press Tab for the first one that needs a value.' : 'No listing fields found on this page yet.'}</div>`;
+      body.innerHTML = `<div style="${CARD};justify-content:center;color:${t.muted};font-size:12px">${guide.rows.length ? 'Pick a checkpoint above, or press Tab for the first one that needs a value.' : 'No listing fields found on this page yet.'}</div>`;
       return;
     }
     const colour = rowColour(row);
@@ -812,16 +816,16 @@
       ? (row.value ? escapeHtml(row.value) : '<span style="opacity:.75">already on the page</span>') + (ai ? ` <span style="color:${t.good}">\u00b7 written by AI${ai === 'auto' ? ' automatically' : ''}</span>` : '')
       : (row.suggestion ? escapeHtml(row.suggestion) : `<span style="color:${t.muted}">Nothing prepared for this one \u2014 fill it on the page.</span>`);
     const canAi = row.target === 'title' || row.target === 'description';
-    body.innerHTML = `<div style="padding:9px 12px 12px">
-        <div style="display:flex;align-items:center;gap:8px">
+    body.innerHTML = `<div style="${CARD}">
+        <div style="display:flex;align-items:center;gap:8px;flex:none">
           <span style="width:8px;height:8px;border-radius:50%;background:${colour};flex:none"></span>
           <b style="font-size:13.5px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(row.label)}</b>
           <span style="font:700 9px system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:${colour};flex:none">${flag}</span>
         </div>
-        <div style="margin-top:6px;color:${row.done ? t.value : t.muted};font-size:12px;max-height:50px;overflow:hidden">${said}</div>
-        ${previewing
-          ? `<div style="margin-top:7px;color:${t.muted};font-size:11px">Click the dot to go here</div>`
-          : (canAi ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="margin-top:8px;background:${t.chip};color:${t.text};border:0;border-radius:6px;padding:5px 9px;cursor:pointer;font:600 11px system-ui,sans-serif">Write it with AI</button>` : '')}
+        <div style="margin-top:6px;color:${row.done ? t.value : t.muted};font-size:12px;height:34px;overflow:hidden;flex:none">${said}</div>
+        <div style="margin-top:auto;height:26px;display:flex;align-items:center;flex:none">${previewing
+          ? `<span style="color:${t.muted};font-size:11px">Click the dot to go here</span>`
+          : (canAi ? `<button data-ss-ai="${row.target}" title="Write the ${row.target} with AI from the item and its notes" style="background:${t.chip};color:${t.text};border:0;border-radius:6px;padding:5px 9px;cursor:pointer;font:600 11px system-ui,sans-serif">Write it with AI</button>` : '')}</div>
       </div>`;
     const aiBtn = body.querySelector('[data-ss-ai]');
     if (aiBtn) aiBtn.onclick = event => { event.stopPropagation(); aiBtn.textContent = '\u2026'; panelAction('generate', { kind: aiBtn.dataset.ssAi }); };
