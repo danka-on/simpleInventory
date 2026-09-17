@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import DBmanager
 from sweetshelves import (runtime as ss_runtime, sales as ss_sales, sales_actions as ss_sales_actions,
-                          shipping_orders as ss_shipping_orders)
+                          shipping_orders as ss_shipping_orders, warehouse_locations as ss_warehouse_locations)
 import test_lister
 
 UPC = '761323062839'
@@ -53,6 +53,7 @@ class ListerToReadyToShipTest(unittest.TestCase):
         self.app.add_url_rule('/mark-order-handled', 'mark_order_handled', ss_sales_actions.mark_order_handled, methods=['POST'])
         self.app.add_url_rule('/api/ready-to-ship/location-options/<int:order_id>', 'location_options',
                               ss_shipping_orders.ready_to_ship_location_options)
+        self.app.add_url_rule('/api/move_location', 'move_location', ss_warehouse_locations.api_move_location, methods=['POST'])
         # Confirming an order opens sold.db by a relative path, so the test runs from the temp folder.
         cwd = os.getcwd()
         os.chdir(self.root)
@@ -186,6 +187,22 @@ class ListerToReadyToShipTest(unittest.TestCase):
         order = self.ready_to_ship()[0]
         self.assertEqual(order['barcode'], UNIT)
         self.assertEqual((order['location'], order['finder_searchrack_id']), (SHELF, 101))
+        options, data, status = self.confirm(order)
+        self.assertEqual((status, data.get('success')), (200, True), data)
+        self.assertEqual(self.rack(), {101: 0, 102: 1, 103: 4})
+
+    def test_the_unit_can_change_shelves_after_it_is_listed(self):
+        """The barcode is the identity; the shelf is only where it sits today."""
+        self.setUpFixture()
+        self.store_listing()
+        self.list_it()
+        moved = self.client.post('/api/move_location', json={'from_location': SHELF, 'to_location': 'or4s2b2',
+                                                             'item_ids': [101]}).get_json()
+        self.assertEqual(moved.get('moved'), 1, moved)
+        self.sell_it()
+        order = self.ready_to_ship()[0]
+        self.assertEqual((order['barcode'], order['location']), (UNIT, 'or4s2b2'), 'the sale follows the unit')
+        self.assertEqual(order['finder_searchrack_id'], 101, 'a whole move keeps the row, it only changes shelf')
         options, data, status = self.confirm(order)
         self.assertEqual((status, data.get('success')), (200, True), data)
         self.assertEqual(self.rack(), {101: 0, 102: 1, 103: 4})
