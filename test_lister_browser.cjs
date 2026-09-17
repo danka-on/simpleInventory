@@ -83,6 +83,15 @@ const ebayForm = `<!doctype html><title>Create your listing | eBay</title>
 <script>window.events = []; for (const el of document.querySelectorAll('input,textarea,select,[contenteditable]')) el.addEventListener('input', e => window.events.push(e.target.id));
 document.getElementById('photos').addEventListener('change', e => { window.photoNames = Array.from(e.target.files).map(f => f.name); });</script>`;
 
+// Seller Central "List Your Products": option tiles (a "Search" tile BEFORE the box), then the box and its Search button.
+const amazonStart = `<!doctype html><title>List Your Products</title><h1>List Your Products</h1>
+<div role="tablist"><button type="button">Search</button><button type="button">Product image</button><button type="button">Product IDs</button></div>
+<section><p>Search your catalog or Amazon's catalog for a listing (or a variation) to sell or copy.</p>
+<input id="kw" placeholder="Enter product title, description, or keywords"><button id="go" type="button" disabled>Search</button></section>
+<script>const kw = document.getElementById('kw'), go = document.getElementById('go');
+kw.addEventListener('input', () => { go.disabled = !kw.value; });
+go.addEventListener('click', () => { location.href = 'https://sellercentral.amazon.com/listing/results?q=' + encodeURIComponent(kw.value); });</script>`;
+
 const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1>Congratulations! Your item is listed.</h1>
 <p>Item number: 335566778899</p><a href="https://www.ebay.com/itm/335566778899">View listing</a>`;
 
@@ -155,6 +164,14 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
         return json({ success: true, duplicate: false, link: { id: 1, upc: UPC + '-1', platform: 'ebay', listing_id: '335566778899', effects: { steps: ['listing queue marked listed on ebay', 'Items to List marked listed on ebay', 'warehouse match -> B-1 (883049370897-1)'] } } }, 201);
       }
       return json({ success: false, error: 'nope' }, 404);
+    });
+    await context.route('https://sellercentral.amazon.com/**', route => {
+      const url = new URL(route.request().url());
+      const html = body => route.fulfill({ status: 200, contentType: 'text/html', body });
+      calls.amazonPages = (calls.amazonPages || []).concat(url.pathname + url.search);
+      if (url.pathname === '/abis/listing/syh' && !url.search) return html('<title>Add price and inventory</title><h1>We encountered an unexpected error</h1>');
+      if (url.pathname === '/abis/listing/syh') return html(amazonStart);
+      return html('<title>Seller Central</title><h1>Inventory</h1>');
     });
     await context.route('https://www.ebay.com/**', route => {
       const url = new URL(route.request().url());
@@ -527,6 +544,23 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
     await panel.dblclick('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
+    // Amazon works the same: a double-click opens "List Your Products" the way the Add Products menu does
+    // (the bare /abis/listing/syh resumes a draft and errors), types the UPC and presses Search.
+    await store.goto('https://sellercentral.amazon.com/inventory');
+    await panel.click('#storeAmazon');
+    await panel.waitForSelector('#itemList .item[data-upc="012345678905"]', { timeout: 15000 });
+    await panel.waitForTimeout(600);
+    await panel.dblclick('.item[data-upc="012345678905"]');
+    await store.waitForURL(/\/listing\/results\?q=012345678905/, { timeout: 20000 });
+    assert.ok(calls.amazonPages.includes('/abis/listing/syh?ref_=xx_addprod_dnav_xx'), 'opened with the menu ref: ' + calls.amazonPages);
+    assert.ok(!calls.amazonPages.includes('/abis/listing/syh'), 'never the bare draft URL');
+    // Already on that page: the double-click searches right there, no reload.
+    await store.goto('https://sellercentral.amazon.com/abis/listing/syh?ref_=xx_addprod_dnav_xx');
+    const opened = calls.amazonPages.length;
+    await panel.waitForTimeout(1500);
+    await panel.dblclick('.item[data-upc="883049370897-1"]');
+    await store.waitForURL(/\/listing\/results\?q=883049370897$/, { timeout: 20000 });
+    assert.deepEqual(calls.amazonPages.slice(opened), ['/listing/results?q=883049370897'], 'searched in place: ' + calls.amazonPages.slice(opened));
     console.log('lister browser test passed');
   } finally {
     await context.close();

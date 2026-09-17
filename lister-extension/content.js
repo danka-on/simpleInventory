@@ -1022,9 +1022,12 @@
     page.upc = upcField && upcField.value ? clip(upcField.value) : '';
 
     // The URL alone cannot tell a search page from the form on some flows; the fields can.
-    const assigned = M.assign(descriptors, ['title', 'price', 'sku', 'quantity']);
-    const formish = Boolean(assigned.title || (assigned.price && (assigned.sku || assigned.quantity)));
     const searchBox = findSearchBox(page.store);
+    // The store's own search box can read like a title field (Seller Central's "List Your Products" box says
+    // "Enter product title, description, or keywords"): on its own it must never make a page look like the form.
+    const boxIndex = searchBox ? fields.indexOf(searchBox) : -1;
+    const assigned = M.assign(descriptors.map((d, i) => (i === boxIndex ? { tag: 'input', type: 'hidden' } : d)), ['title', 'price', 'sku', 'quantity']);
+    const formish = Boolean(assigned.title || (assigned.price && (assigned.sku || assigned.quantity)));
     if (page.store && page.kind === 'listing-start' && formish) page.kind = page.store === 'amazon' ? 'offer-form' : 'listing-form';
     else if (page.store && (page.kind === 'listing-form' || page.kind === 'offer-form') && !formish && searchBox) page.kind = 'listing-start';
     page.hasSearchBox = Boolean(searchBox);

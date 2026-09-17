@@ -31,7 +31,9 @@
   };
   const START_URLS = {
     ebay: () => 'https://www.ebay.com/sl/prelist/suggest?sr=wn',
-    amazon: () => 'https://sellercentral.amazon.com/abis/listing/syh',  // "List Your Products": the panel types the UPC there
+    // "List Your Products" as the Catalog > Add Products menu opens it; the bare /abis/listing/syh resumes the
+    // last draft ("Add price and inventory" -> "We encountered an unexpected error").
+    amazon: () => 'https://sellercentral.amazon.com/abis/listing/syh?ref_=xx_addprod_dnav_xx',
   };
 
   const state = {
@@ -939,8 +941,16 @@
     const item = current();
     if (!item) return;
     state.pendingSearch = { upc: item.upc, platform };
-    const url = START_URLS[platform](item.baseUpc || item.upc);
     const onStore = state.page?.store === platform && state.tab?.id;
+    // Already on the store's first page: type the UPC and search right here (no reload).
+    if (onStore && state.page.kind === 'listing-start') {
+      bindTab(item.upc, platform);
+      // The first click of the double-click has usually searched already.
+      if (state.searched.has(tabKey('search|' + item.upc))) { state.pendingSearch = null; return; }
+      await maybeAutoSearch();
+      return;
+    }
+    const url = START_URLS[platform](item.baseUpc || item.upc);
     if (onStore) { await chrome.tabs.update(state.tab.id, { url }); bindTab(item.upc, platform); }
     else { const created = await chrome.tabs.create({ url, active: true }); bindTab(item.upc, platform, created?.id); }
   }
