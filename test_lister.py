@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -454,6 +455,62 @@ class ListerTestCase(unittest.TestCase):
         self.client.post(f'/api/lister/queue/{UPC}/skip', json={'platform': 'amazon', 'undo': True})
         self.assertEqual(self.sql('listagent.db', 'SELECT status FROM listing_queue WHERE upc = ?', (UPC,))[0]['status'], 'queued')
         self.assertEqual(self.client.post(f'/api/lister/queue/{UPC}/skip', json={'platform': 'x'}).status_code, 400)
+
+    def test_panel_reports_its_open_store_to_the_same_person_only(self):
+        dan = {'Cf-Access-Authenticated-User-Email': 'dan@example.com'}
+        self.assertFalse(self.client.get('/api/lister/panel', headers=dan).get_json()['active'], 'no panel yet')
+        res = self.client.post('/api/lister/panel', json={'platform': 'ebay'}, headers=dan)
+        self.assertEqual(res.status_code, 200, res.get_json())
+        state = self.client.get('/api/lister/panel', headers=dan).get_json()
+        self.assertEqual((state['active'], state['platform']), (True, 'ebay'))
+        self.assertEqual(self.client.get('/api/lister/panel', headers=dan).headers['Cache-Control'], 'no-store')
+        self.assertFalse(self.client.get('/api/lister/panel', headers={'Cf-Access-Authenticated-User-Email': 'x@example.com'}).get_json()['active'],
+                         'a panel of another person says nothing about mine')
+        self.client.post('/api/lister/panel', json={'platform': 'amazon'}, headers=dan)
+        self.assertEqual(self.client.get('/api/lister/panel', headers=dan).get_json()['platform'], 'amazon')
+        # The setting switched off, or the panel closed, and the "+" is the plain one again.
+        self.client.post('/api/lister/panel', json={'platform': 'amazon', 'follow': False}, headers=dan)
+        self.assertFalse(self.client.get('/api/lister/panel', headers=dan).get_json()['active'])
+        self.client.post('/api/lister/panel', json={'platform': 'amazon', 'open': False}, headers=dan)
+        self.assertFalse(self.client.get('/api/lister/panel', headers=dan).get_json()['active'])
+        # A heartbeat that stopped coming means the panel went away without saying so.
+        self.client.post('/api/lister/panel', json={'platform': 'ebay'}, headers=dan)
+        with patch.object(lister_routes.time, 'time', return_value=time.time() + 120):
+            self.assertFalse(self.client.get('/api/lister/panel', headers=dan).get_json()['active'])
+        self.assertEqual(self.client.post('/api/lister/panel', json={'platform': 'etsy'}, headers=dan).status_code, 400)
+
+    def test_plus_for_the_open_store_adds_to_that_store_only(self):
+        new = '012345678905'
+        stores = lambda: self.client.post('/api/lister/queue-stores', json={'upcs': [new]}).get_json()['items'][new]
+        on = lambda p, **kw: self.client.post(f'/api/lister/queue/{new}/store', json={'platform': p, 'on': True, 'only': True, **kw}).get_json()['state']
+        off = lambda p: self.client.post(f'/api/lister/queue/{new}/store', json={'platform': p, 'on': False}).get_json()['state']
+        listed_on = lambda p: [it['upc'] for it in self.client.get(f'/api/lister/queue?platform={p}').get_json()['items'] if it['status'] == 'queued']
+        self.assertEqual(stores(), {'queue': '', 'ebay': 'off', 'amazon': 'off'})
+        # The eBay list is open: "+" queues it (the Items to List add) and keeps it off Amazon.
+        self.queue_add(new, 'Other item', '2026-09-18T08:00:00')
+        self.assertEqual(on('ebay', fresh=True), {'queue': 'queued', 'ebay': 'on', 'amazon': 'off'})
+        self.assertIn(new, listed_on('ebay'))
+        self.assertNotIn(new, listed_on('amazon'))
+        # The panel moves to Amazon: the same "+" now puts it on the Amazon list as well.
+        self.assertEqual(on('amazon'), {'queue': 'queued', 'ebay': 'on', 'amazon': 'on'})
+        self.assertIn(new, listed_on('amazon'))
+        # Pressed again it comes off that store only; off both, it leaves the queue.
+        self.assertEqual(off('ebay'), {'queue': 'queued', 'ebay': 'off', 'amazon': 'on'})
+        self.assertEqual(off('amazon'), {'queue': 'removed', 'ebay': 'off', 'amazon': 'off'})
+        # Back for Amazon only: the old row comes back without the eBay side.
+        self.assertEqual(on('amazon'), {'queue': 'queued', 'ebay': 'off', 'amazon': 'on'})
+        self.assertEqual(self.client.post(f'/api/lister/queue/{new}/store', json={'platform': 'etsy', 'on': True}).status_code, 400)
+
+    def test_listed_on_both_stores_shows_both_even_after_the_queue_row_was_cleared(self):
+        with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
+            conn.execute("""INSERT INTO listing_queue (upc, title, status, added_at, listed_platform, listed_ebay_at, listed_amazon_at)
+                            VALUES ('840115641220', 'Both', 'removed', '2026-03-18', 'amazon', '2026-03-18T16:10', '2026-03-27T13:58')""")
+            conn.execute("INSERT INTO listing_queue (upc, title, status, added_at) VALUES ('042648477752', 'eBay only', 'queued', '2026-03-18')")
+            conn.commit()
+        self.client.post('/api/lister/links', json={'upc': '042648477752', 'platform': 'ebay', 'listing_id': '335566778899', 'sku': '042648477752'})
+        items = self.client.post('/api/lister/queue-stores', json={'upcs': ['840115641220', '042648477752']}).get_json()['items']
+        self.assertEqual((items['840115641220']['ebay'], items['840115641220']['amazon']), ('listed', 'listed'))
+        self.assertEqual((items['042648477752']['ebay'], items['042648477752']['amazon']), ('listed', 'on'))
 
     def test_link_marks_items_to_list_and_finishes_the_queue_when_the_other_store_was_skipped(self):
         self.client.post(f'/api/lister/queue/{UPC}/skip', json={'platform': 'amazon'})

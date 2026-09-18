@@ -371,6 +371,12 @@
     .btn-sm{padding:6px 10px;font-size:0.9rem}
     .btn-copy{background:rgba(32,201,151,0.3) !important;color:#00875a !important;border:1px solid rgba(32,201,151,0.5) !important}
     .btn-copied{background:rgba(46,204,113,0.85) !important;color:#fff !important;font-weight:600 !important}
+    /* Listing Agent column: one line per store the item is listed on, then the "+" for the store the Lister panel shows. */
+    .agent-cell{display:flex;flex-direction:column;align-items:center;gap:3px}
+    .agent-listed{font-size:11.5px;font-weight:600;color:#15803d;white-space:nowrap}
+    .agent-store{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle}
+    .agent-store.ebay{background:#2563eb}
+    .agent-store.amazon{background:#d97706}
     /* Filter dropdown panel */
     .dropdown-panel{display:none;position:fixed;z-index:10000;min-width:280px;max-width:92vw;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px}
     .dropdown-section{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
@@ -1112,6 +1118,11 @@ let fullColumnSortResults = [];
 let fullColumnSortStats = null;
 let listingAgentQueueState = Object.create(null);
 let listingAgentQueueLookupToken = 0;
+// Where each UPC stands on the Lister's eBay and Amazon lists ('listed' | 'on' | 'off'), and the store
+// list the Lister side panel has open. While the panel is open (and its setting is on) "+" adds to
+// that store only; switching the panel to the other store makes "+" add there.
+let agentStoreState = Object.create(null);
+let agentPanel = { active: false, platform: '' };
 const FULL_COLUMN_SORT_LIMIT = 50000;
 const PENDING_MARKETPLACE_OPS_KEY = 'items_to_list_pending_marketplace_ops_v1';
 const PENDING_MARKETPLACE_OP_MAX_AGE_MS = 10 * 60 * 1000;
@@ -1191,6 +1202,117 @@ function _listagentQueueUiState(queueItem){
   };
 }
 
+const AGENT_STORE_NAMES = { ebay: 'eBay', amazon: 'Amazon' };
+
+function agentHeadHtml(){
+  if(!agentPanel.active) return '+ Listing Agent';
+  const p = agentPanel.platform;
+  return `+ Listing Agent<span class="agent-store ${p}" title="The Lister side panel is on ${AGENT_STORE_NAMES[p]}: + adds to ${AGENT_STORE_NAMES[p]} only">${AGENT_STORE_NAMES[p]}</span>`;
+}
+
+function agentListedStores(upc){
+  const st = agentStoreState[upc];
+  const q = listingAgentQueueState[upc] || null;
+  const fromQueue = p => !!(q && (q[`listed_${p}_at`] || String(q.listed_platform || '').toLowerCase().includes(p)));
+  return ['ebay', 'amazon'].filter(p => (st ? st[p] === 'listed' : false) || fromQueue(p));
+}
+
+// The Listing Agent cell: "Listed on eBay ✓" / "Listed on Amazon ✓" (both when both), then the button.
+function agentCellInner(upc, titleEnc = '', itemStatus = ''){
+  const listed = agentListedStores(upc);
+  const lines = listed.map(p => `<div class="agent-listed">Listed on ${AGENT_STORE_NAMES[p]} \u2713</div>`).join('');
+  const st = agentStoreState[upc] || null;
+  let label = '', title = '', active = false;
+  if(agentPanel.active){
+    const p = agentPanel.platform, name = AGENT_STORE_NAMES[p];
+    if(listed.includes(p)) return lines;
+    if(st && st[p] === 'on'){ label = `On ${name} list`; title = `On the ${name} list in the Lister (click to take it off ${name})`; active = true; }
+    else { label = `+ ${name}`; title = `Add to the ${name} list in the Lister (the side panel is on ${name})`; }
+  } else {
+    if(listed.length === 2) return lines;
+    const ui = _listagentQueueUiState(listingAgentQueueState[upc] || null);
+    if(ui.disabled && listed.length) return lines;
+    label = ui.label; title = ui.title; active = ui.active;
+    // Queued for one store only: say which.
+    if(ui.removable && st){
+      const on = ['ebay', 'amazon'].filter(p => st[p] === 'on');
+      if(on.length === 1) label += ' \u00b7 ' + AGENT_STORE_NAMES[on[0]];
+    }
+  }
+  return lines + `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${active ? ' btn-copied' : ''}" data-upc="${esc(upc)}" data-title="${titleEnc}" data-item-status="${esc(itemStatus)}" title="${esc(title)}">${esc(label)}</button>`;
+}
+
+function refreshAgentCells(){
+  const head = document.getElementById('agentHead');
+  if(head) head.innerHTML = agentHeadHtml();
+  document.querySelectorAll('.agent-cell').forEach(cell => {
+    cell.innerHTML = agentCellInner(cell.dataset.upc || '', cell.dataset.title || '', cell.dataset.itemStatus || '');
+    const btn = cell.querySelector('.btn-listagent-queue');
+    if(btn) btn.addEventListener('click', onAddToListingAgentQueue);
+  });
+}
+
+async function hydrateAgentStores(upcs){
+  if(!upcs.length) return;
+  try{
+    const resp = await fetch('/api/lister/queue-stores', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({upcs}), cache: 'no-store'
+    });
+    const j = await resp.json().catch(() => ({}));
+    if(resp.ok && j && j.success && j.items) upcs.forEach(upc => { agentStoreState[upc] = j.items[upc] || null; });
+  }catch(err){
+    console.error('Error loading Lister store lists:', err);
+  }
+}
+
+// Which store list the Lister side panel has open (it reports it every 15 s while open).
+async function pollAgentPanel(){
+  if(document.visibilityState !== 'visible') return;
+  try{
+    const resp = await fetch('/api/lister/panel', { cache: 'no-store' });
+    const j = await resp.json().catch(() => ({}));
+    if(!resp.ok || !j || !j.success) return;
+    const next = { active: !!j.active, platform: j.active ? String(j.platform || '') : '' };
+    if(next.active === agentPanel.active && next.platform === agentPanel.platform) return;
+    agentPanel = next;
+    refreshAgentCells();
+  }catch(err){ /* offline: keep the last answer */ }
+}
+setInterval(pollAgentPanel, 5000);
+window.addEventListener('focus', pollAgentPanel);
+document.addEventListener('visibilitychange', pollAgentPanel);
+pollAgentPanel();
+
+async function onAgentStorePlus(btn, upc){
+  const p = agentPanel.platform;
+  const st = agentStoreState[upc] || { queue: '' };
+  const post = (url, body) => fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    .then(r => r.json().catch(() => ({})).then(j => { if(!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status)); return j; }));
+  btn.disabled = true;
+  btn.textContent = '...';
+  try{
+    let fresh = false;
+    if(st[p] !== 'on' && !st.queue){
+      // Never queued before: the usual Listing Agent add, then keep it to this store.
+      const title = btn.dataset.title ? decodeURIComponent(btn.dataset.title) : '';
+      const added = await post('/api/listingagent/queue/add', {upc, title, source: 'list_manager', item_status: (btn.dataset.itemStatus || '').trim(), added_mode: 'my'});
+      listingAgentQueueState[upc] = added.item || { upc, status: 'queued', added_mode: 'my' };
+      fresh = true;
+    }
+    const j = await post('/api/lister/queue/' + encodeURIComponent(upc) + '/store', {platform: p, on: st[p] !== 'on', only: true, fresh});
+    agentStoreState[upc] = j.state;
+    if(j.state.queue === 'queued'){
+      const q = listingAgentQueueState[upc];
+      listingAgentQueueState[upc] = q && q.status === 'queued' ? q : { upc, status: 'queued', added_mode: 'my' };
+    } else if(j.state.queue !== 'done'){
+      listingAgentQueueState[upc] = null;
+    }
+  }catch(err){
+    alert('Error: ' + (err && err.message ? err.message : err));
+  }
+  refreshAgentCells();
+}
+
 async function hydrateListingAgentQueueState(rows){
   const upcs = Array.from(new Set(
     (Array.isArray(rows) ? rows : [])
@@ -1198,6 +1320,7 @@ async function hydrateListingAgentQueueState(rows){
       .filter(Boolean)
   ));
   if(!upcs.length) return;
+  const storesLoaded = hydrateAgentStores(upcs);
 
   const token = ++listingAgentQueueLookupToken;
   try{
@@ -1221,6 +1344,7 @@ async function hydrateListingAgentQueueState(rows){
     if(token !== listingAgentQueueLookupToken) return;
     console.error('Error hydrating Listing Agent queue state:', err);
   }
+  await storesLoaded;
 }
 
 function _buildBolItemsQueryContext(){
@@ -2152,7 +2276,7 @@ function onOpenAutoListings(e){
 function render(results){
   let html = '<table><thead><tr>';
   if (selectMode) html += '<th>Select</th>';
-  html += `<th>Info</th><th>Status</th><th>Notes and Media</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th><th>+ Listing Agent</th></tr></thead><tbody>`;
+  html += `<th>Info</th><th>Status</th><th>Notes and Media</th><th>Defect</th><th class="th-sortable" data-sort-key="quantity" title="Sort by quantity" role="button" tabindex="0">PREP <span class="sort-ind">${_sortIndicator('quantity')}</span></th><th class="th-sortable" data-sort-key="warehouse_available" title="Sort by warehouse quantity" role="button" tabindex="0">Warehouse <span class="sort-ind">${_sortIndicator('warehouse_available')}</span></th><th>Title</th><th>UPC</th><th>Marketplaces</th><th>Last Edited</th><th id="agentHead">${agentHeadHtml()}</th></tr></thead><tbody>`;
   let rowIndex = 0;
   const viewResults = _sortedRenderResults(results);
   for (const r of viewResults) {
@@ -2181,8 +2305,7 @@ function render(results){
     const queueTitleEnc = encodeURIComponent((r.title || '').toString());
     const last_edited = esc(r.last_edited||'');
     const status = (r.status||'').toLowerCase();
-    const queueUi = _listagentQueueUiState(listingAgentQueueState[queueUpc] || null);
-    const queueBtn = `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${queueUi.active ? ' btn-copied' : ''}" data-upc="${queueUpc}" data-title="${queueTitleEnc}" data-item-status="${esc(status)}" title="${esc(queueUi.title)}" ${queueUi.disabled ? 'disabled' : ''}>${esc(queueUi.label)}</button>`;
+    const queueBtn = `<div class="agent-cell" data-upc="${esc(queueUpc)}" data-title="${queueTitleEnc}" data-item-status="${esc(status)}">${agentCellInner(queueUpc, queueTitleEnc, status)}</div>`;
     let pill = '<span class="status-box" style="background:#64748b" title="Status">status</span>';
     if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
     if(status==='bad') pill = '<span class="status-box" style="background:#e74c3c" title="Bad">bad</span>';
@@ -3080,6 +3203,7 @@ async function onAddToListingAgentQueue(e){
   const btn = e.currentTarget;
   const upc = (btn.dataset.upc || '').toString().trim();
   if(!upc) return;
+  if(agentPanel.active){ await onAgentStorePlus(btn, upc); return; }
 
   const oldText = btn.textContent;
   btn.disabled = true;

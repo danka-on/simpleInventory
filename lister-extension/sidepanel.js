@@ -21,7 +21,7 @@
   // A listing walked away from half done: the store form it was on, kept so it can be clicked open again.
   const SESSIONS_KEY = 'ssListerSessions';
   const SESSION_MAX = 6, SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, followPlus: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
   // The automatic switches, shown in the folding menu on the store card (all of them) and by the photos (the photo ones).
   const AUTO_TOGGLES = [
     { key: 'autoAiTitle', group: 'Listing text', icon: '✍️', label: 'AI title', short: 'AI title', hint: 'Written into the form as the page loads' },
@@ -168,7 +168,22 @@
   function remember() {
     void chrome.storage.local.set({ [CURRENT_KEY]: state.currentUpc, [PLATFORM_KEY]: state.platform, [PROMPT_KEY]: state.aiPrompt,
       [NEW_KEY]: state.newItem.id });
+    if (state.platform !== reported.platform) reportPanel();
   }
+
+  // Items to List asks the server which store list is open here, so its "+" adds to that store only.
+  // A heartbeat while the panel is open; the page treats silence as a closed panel.
+  const reported = { platform: '', at: 0 };
+  function reportPanel(open = true) {
+    if (state.connected === false || !state.platform) return;
+    reported.platform = state.platform; reported.at = Date.now();
+    const body = JSON.stringify({ platform: state.platform, follow: state.settings.followPlus !== false, open });
+    fetch(serverBase() + '/api/lister/panel', { method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'manual', keepalive: true,
+      headers: { 'Content-Type': 'application/json', 'X-Sweet-Shelves-Lister': '1' }, body }).catch(() => {});
+  }
+  setInterval(() => { if (document.visibilityState === 'visible') reportPanel(); }, 15000);
+  document.addEventListener('visibilitychange', () => reportPanel(document.visibilityState === 'visible'));
+  window.addEventListener('pagehide', () => reportPanel(false));
 
   // -- unfinished listings -------------------------------------------------------------------
   // Walking away from a half-filled store form used to cost the whole way back: find the item,
@@ -361,6 +376,7 @@
     try {
       const ping = await api('/api/lister/ping');
       state.connected = true; state.signIn = false; state.user = ping.user || ''; state.serverVersion = ping.version || '';
+      reportPanel();
     } catch (error) {
       state.connected = false; state.signIn = Boolean(error.signIn); state.user = '';
       if (!error.signIn) toast(error.message, true);
@@ -2828,7 +2844,7 @@
     $('settingsBtn').onclick = () => {
       const s = $('settings'); s.hidden = !s.hidden;
       $('setServer').value = state.settings.server; $('setActor').value = state.settings.actor;
-      for (const key of ['autoFill', 'autoGuide', 'autoLink', 'autoPrepare']) $('set' + key[0].toUpperCase() + key.slice(1)).checked = state.settings[key] !== false;
+      for (const key of ['autoFill', 'autoGuide', 'autoLink', 'autoPrepare', 'followPlus']) $('set' + key[0].toUpperCase() + key.slice(1)).checked = state.settings[key] !== false;
       renderAutoMenu();
     };
     $('saveSettings').onclick = async () => {
@@ -2839,7 +2855,8 @@
         if (!granted) { toast('Site access to that server was not granted', true); return; }
       } catch { /* permission API unavailable for this origin pattern; fetch will report */ }
       await saveSettings({ server, actor: $('setActor').value.trim(), autoFill: $('setAutoFill').checked,
-        autoGuide: $('setAutoGuide').checked, autoLink: $('setAutoLink').checked, autoPrepare: $('setAutoPrepare').checked });
+        autoGuide: $('setAutoGuide').checked, autoLink: $('setAutoLink').checked, autoPrepare: $('setAutoPrepare').checked,
+        followPlus: $('setFollowPlus').checked });
       $('settings').hidden = true; state.connected = null; renderHeader();
       await connect(); await loadQueue();
     };

@@ -191,6 +191,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
         return json({ success: true, photo: { url: `https://pi.nexuscentralhq.org/static/listingagent_uploads/big-ai-${name}.png`, source: 'ai', id: 50 + calls.aiPhotos.length, name: `big-ai-${name}.png`, from: name } });
       }
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
+      if (url.pathname === '/api/lister/panel') { calls.panel = (calls.panel || []).concat(request.postDataJSON()); return json({ success: true, active: true }); }
       if (url.pathname.endsWith('/skip')) { calls.skip.push(request.postDataJSON()); return json({ success: true, queue: 'queued' }); }
       if (url.pathname === '/api/lister/learn') { calls.learn.push(request.postDataJSON()); return json({ success: true, agreed: false, learned: { ebay: {} } }, 201); }
       if (url.pathname.endsWith('/amazon-check')) {
@@ -264,6 +265,10 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.waitForFunction(() => !document.getElementById('busy').classList.contains('on'), null, { timeout: 15000 });
     assert.ok(!(await panel.$('.item.blocked')), 'the eBay list does not carry Amazon verdicts');
     await panel.click('#storeAmazon');
+    // Items to List follows the store list open here: the panel says which one it is.
+    for (let i = 0; i < 50 && !(calls.panel || []).some(r => r.platform === 'amazon'); i += 1) await panel.waitForTimeout(100);
+    assert.ok(calls.panel.some(r => r.platform === 'ebay' && r.follow === true && r.open === true), 'the panel reported eBay: ' + JSON.stringify(calls.panel));
+    assert.ok(calls.panel.some(r => r.platform === 'amazon'), 'and Amazon after the switch: ' + JSON.stringify(calls.panel));
     await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]')?.classList.contains('blocked'), null, { timeout: 15000 });
     assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('restricted'));
     assert.ok(!(await panel.$('.item[data-upc="883049370897-1"] .sig.block')), 'a listable UPC says nothing: a clean row is the good row');

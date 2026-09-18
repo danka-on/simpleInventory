@@ -781,6 +781,17 @@ class Lister:
                 PRIMARY KEY (upc, platform)
             )
         ''')
+        # Which store list the side panel has open, per signed-in person, so Items to List can
+        # make its "+" add to that store only. A heartbeat: an old row means the panel is closed.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS lister_panel_state (
+                email TEXT PRIMARY KEY,
+                platform TEXT NOT NULL,
+                follow INTEGER NOT NULL DEFAULT 1,
+                open INTEGER NOT NULL DEFAULT 1,
+                updated_at REAL NOT NULL
+            )
+        ''')
 
     @staticmethod
     def _has_table(cur, name):
@@ -2003,6 +2014,91 @@ class Lister:
             conn.commit()
             return 'removed'
 
+    # -- Items to List "+" that follows the side panel's open store ---------------------------
+
+    PANEL_FRESH_SECONDS = 45
+
+    def panel_report(self, email, *, platform, follow=True, open_=True):
+        if platform not in PLATFORMS:
+            raise ListerError('platform must be ebay or amazon')
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('''INSERT INTO lister_panel_state (email, platform, follow, open, updated_at) VALUES (?, ?, ?, ?, ?)
+                           ON CONFLICT(email) DO UPDATE SET platform = excluded.platform, follow = excluded.follow,
+                           open = excluded.open, updated_at = excluded.updated_at''',
+                        (email or '', platform, 1 if follow else 0, 1 if open_ else 0, time.time()))
+            conn.commit()
+        return self.panel_state(email)
+
+    def panel_state(self, email):
+        """The store the side panel shows for this person, when it is open and the setting is on."""
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('SELECT * FROM lister_panel_state WHERE email = ?', (email or '',))
+            row = _row(cur.fetchone())
+        if not row:
+            return {'active': False, 'platform': ''}
+        age = max(0.0, time.time() - float(row['updated_at'] or 0))
+        active = bool(row['open']) and bool(row['follow']) and age <= self.PANEL_FRESH_SECONDS
+        return {'active': active, 'platform': row['platform'] if active else '', 'follow': bool(row['follow']),
+                'open': bool(row['open']) and age <= self.PANEL_FRESH_SECONDS}
+
+    def store_states(self, upcs):
+        """Per requested UPC, where it stands on each store's list: listed, on the list, or off it.
+
+        Listed is read from every queue row, whatever its status, and from the Lister's links:
+        clearing a queue row does not unlist anything on a store.
+        """
+        out = {}
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            self.init_listagent(cur)
+            cur.execute("SELECT upc, platform FROM lister_queue_state WHERE state = 'skipped'")
+            skipped = {(r['upc'], r['platform']) for r in cur.fetchall()}
+            for raw in list(dict.fromkeys(_text(u) for u in (upcs or []) if _text(u)))[:250]:
+                variants = self._variants(raw)
+                marks = ','.join('?' for _ in variants)
+                cur.execute(f'SELECT * FROM listing_queue WHERE upc IN ({marks}) ORDER BY id DESC', tuple(variants))
+                rows = [_row(r) for r in cur.fetchall()]
+                cur.execute(f'SELECT DISTINCT platform FROM listing_links WHERE upc IN ({marks})', tuple(variants))
+                linked = {r['platform'] for r in cur.fetchall()}
+                latest = rows[0] if rows else {}
+                key = self.format_upc12(raw) or raw
+                entry = {'queue': latest.get('status') or ''}
+                for p in PLATFORMS:
+                    listed = p in linked or any(r.get(f'listed_{p}_at') for r in rows)
+                    off = any((v, p) in skipped for v in {key, raw, *variants})
+                    if listed:
+                        entry[p] = 'listed'
+                    elif latest.get('status') == 'queued' and not off:
+                        entry[p] = 'on'
+                    else:
+                        entry[p] = 'off'
+                out[raw] = entry
+        return out
+
+    def set_store(self, upc, *, platform, on, only=False, fresh=False, actor=''):
+        """Put an item on one store's list (and, with only, keep it off the other) or take it off."""
+        if platform not in PLATFORMS:
+            raise ListerError('platform must be ebay or amazon')
+        raw = _text(upc)
+        if not raw:
+            raise ListerError('upc is required')
+        before = self.store_states([raw])[raw]
+        other = 'amazon' if platform == 'ebay' else 'ebay'
+        if on:
+            self.unskip(raw, platform=platform)
+            # A new entry, or one coming back from done/removed, is for this store only. One that is
+            # already waiting on the other store stays there: that was asked for on its own.
+            if only and (fresh or before['queue'] != 'queued') and before[other] != 'listed':
+                self.skip(raw, platform=other, actor=actor)
+        else:
+            self.skip(raw, platform=platform, actor=actor)
+        return self.store_states([raw])[raw]
+
     def mark_existing(self, upc, *, platform, entry, actor='', base_url='http://localhost/'):
         """The store already carries this UPC: record that listing as the link without touching the page."""
         entry = entry or {}
@@ -2832,6 +2928,41 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:skip')
 
+    def api_lister_panel():
+        try:
+            email = signed_in_email()
+            if request.method == 'POST':
+                guard_mutation()
+                data = request.get_json(silent=True) or {}
+                return jsonify({'success': True, **lister.panel_report(
+                    email, platform=_text(data.get('platform')).lower(), follow=data.get('follow', True) is not False,
+                    open_=data.get('open', True) is not False)})
+            response = jsonify({'success': True, **lister.panel_state(email)})
+            response.headers['Cache-Control'] = 'no-store'
+            return response
+        except Exception as e:
+            return failure(e, 'lister:panel')
+
+    def api_lister_queue_stores():
+        try:
+            data = request.get_json(silent=True) or {}
+            upcs = data.get('upcs') or []
+            if not isinstance(upcs, list):
+                raise ListerError('upcs must be a list')
+            return jsonify({'success': True, 'items': lister.store_states(upcs)})
+        except Exception as e:
+            return failure(e, 'lister:stores')
+
+    def api_lister_queue_store(upc):
+        try:
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            state = lister.set_store(upc, platform=_text(data.get('platform')).lower(), on=bool(data.get('on')),
+                                     only=bool(data.get('only')), fresh=bool(data.get('fresh')), actor=actor())
+            return jsonify({'success': True, 'upc': _text(upc), 'state': state})
+        except Exception as e:
+            return failure(e, 'lister:store')
+
     def api_lister_queue_mark_existing(upc):
         try:
             guard_mutation()
@@ -2955,6 +3086,9 @@ def register(app, deps):
     app.add_url_rule('/api/lister/queue/<upc>', 'api_lister_queue_detail', api_lister_queue_detail)
     app.add_url_rule('/api/lister/queue/<upc>/prepare', 'api_lister_queue_prepare', api_lister_queue_prepare, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/skip', 'api_lister_queue_skip', api_lister_queue_skip, methods=['POST'])
+    app.add_url_rule('/api/lister/panel', 'api_lister_panel', api_lister_panel, methods=['GET', 'POST'])
+    app.add_url_rule('/api/lister/queue-stores', 'api_lister_queue_stores', api_lister_queue_stores, methods=['POST'])
+    app.add_url_rule('/api/lister/queue/<upc>/store', 'api_lister_queue_store', api_lister_queue_store, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/mark-existing', 'api_lister_queue_mark_existing', api_lister_queue_mark_existing, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/generate', 'api_lister_queue_generate', api_lister_queue_generate, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/preload', 'api_lister_queue_preload', api_lister_queue_preload, methods=['GET', 'POST'])
