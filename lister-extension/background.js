@@ -121,6 +121,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (type === 'website-update-reload') setTimeout(() => chrome.runtime.reload(), 350);
     return false;
   }
+  if (type === 'ss-lister-open-panel') {
+    // Items to List "+" with the panel closed. open() must run now, inside the click's gesture.
+    const tab = sender.tab;
+    if (!tab?.id || sender.frameId !== 0 || !/^https:\/\/pi\.nexuscentralhq\.org\/items-to-list/.test(sender.url || '')) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    chrome.sidePanel.open({ tabId: tab.id, windowId: tab.windowId })
+      .then(() => sendResponse({ ok: true }), error => sendResponse({ ok: false, error: String(error?.message || error) }));
+    return true;
+  }
   if (type === 'fb-inbox-capture') {
     if (!isFbMarketplace(sender.url) || sender.frameId !== 0 || !message.payload) {
       sendResponse({ ok: false });

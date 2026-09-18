@@ -76,6 +76,23 @@ const BOTH = '840115641220';
     // No panel open: the plain "+".
     assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+');
 
+    // Panel closed but the Lister is installed: "+" opens the side panel and adds nothing.
+    await page.evaluate(() => {
+      window.__openAsks = 0;
+      window.__fakeBridge = ev => {
+        if (ev.data?.source !== 'sweetshelves-items-to-list' || ev.data.type !== 'open-panel') return;
+        window.__openAsks++;
+        window.postMessage({ source: 'sweetshelves-lister', type: 'panel-opened', id: ev.data.id }, location.origin);
+      };
+      window.addEventListener('message', window.__fakeBridge);
+    });
+    await cell(NEW).locator('button').click();
+    await page.waitForFunction(() => window.__openAsks === 1, null, { timeout: 5000 });
+    await page.waitForTimeout(300);
+    assert.equal(calls.add.length, 0, 'opening the panel adds nothing');
+    assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+');
+    await page.evaluate(() => window.removeEventListener('message', window.__fakeBridge));
+
     // The side panel opens on eBay: the column says so and "+" adds to eBay only.
     panel.active = true; panel.platform = 'ebay';
     await page.waitForFunction(() => document.getElementById('agentHead').textContent.includes('eBay'), null, { timeout: 10000 });

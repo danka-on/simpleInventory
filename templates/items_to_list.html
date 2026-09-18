@@ -1211,6 +1211,21 @@ function notifyListerQueue(){
   try{ window.postMessage({ source: 'sweetshelves-items-to-list', type: 'queue-changed' }, location.origin); }catch(err){ /* no extension */ }
 }
 
+// Ask the Lister (queue-bridge.js) to open its side panel. Must be called straight from a click.
+// Resolves true once the panel is open, false when no extension answers.
+function openListerPanel(){
+  const id = Math.random().toString(36).slice(2);
+  return new Promise(resolve => {
+    const done = ok => { clearTimeout(timer); window.removeEventListener('message', onReply); resolve(ok); };
+    const onReply = ev => {
+      if(ev.source === window && ev.data && ev.data.source === 'sweetshelves-lister' && ev.data.type === 'panel-opened' && ev.data.id === id) done(true);
+    };
+    const timer = setTimeout(() => done(false), 1200);
+    window.addEventListener('message', onReply);
+    try{ window.postMessage({ source: 'sweetshelves-items-to-list', type: 'open-panel', id }, location.origin); }catch(err){ done(false); }
+  });
+}
+
 function agentHeadHtml(){
   if(!agentPanel.active) return '+ Listing Agent';
   const p = agentPanel.platform;
@@ -3215,6 +3230,12 @@ async function onAddToListingAgentQueue(e){
   const upc = (btn.dataset.upc || '').toString().trim();
   if(!upc) return;
   if(agentPanel.active){ await onAgentStorePlus(btn, upc); return; }
+  // Panel closed: "+" opens the Lister side panel instead of adding to every store list.
+  // Without the extension (no answer), it adds to the queue as before.
+  if(!_listagentQueueUiState(listingAgentQueueState[upc] || null).removable && await openListerPanel()){
+    [1500, 4000].forEach(ms => setTimeout(pollAgentPanel, ms));
+    return;
+  }
 
   const oldText = btn.textContent;
   btn.disabled = true;
