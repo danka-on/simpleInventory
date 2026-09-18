@@ -258,13 +258,7 @@ def _agent_rack_rows(upc):
     try:
         with ss_database.db_connection('searchRack.db') as conn:
             cur = conn.cursor()
-            rows = ss_warehouse_matching._searchrack_matches_for_barcode(cur, upc)
-            if not rows:
-                # The shelf row can carry the unit suffix while the queue holds the base UPC
-                # ("076440150179" queued, "076440150179-1" scanned onto the shelf). The matcher
-                # only walks the other way (suffixed target -> base row), so ask for the units.
-                rows = ss_warehouse_matching._ready_to_ship_suffix_inventory_matches(cur, upc)
-            return rows
+            return ss_warehouse_matching._searchrack_matches_for_barcode(cur, upc)
     except Exception:
         return []
 
@@ -665,9 +659,8 @@ def _agent_fill_aspects(aspects_meta, candidate_aspects, *, title='', upc='', br
     return filled, missing, inferred
 
 
-def _agent_condition(detail, prep_rows, *, default_condition='NEW_OTHER', upc=''):
-    """Condition from prep evidence: defect text or damage words mean used, a clean pass in Item Prep
-    means new, otherwise the default."""
+def _agent_condition(detail, prep_rows, *, default_condition='NEW_OTHER'):
+    """Condition from prep evidence: defect text or damage words mean used, otherwise the default."""
     notes = []
     defect = str((detail or {}).get('defect') or '').strip()
     if defect:
@@ -687,10 +680,6 @@ def _agent_condition(detail, prep_rows, *, default_condition='NEW_OTHER', upc=''
     damaged = any(word in lowered for word in DAMAGE_WORDS)
     if damaged:
         return {'condition': 'USED_GOOD', 'conditionDescription': joined[:1000], 'reason': 'prep notes mention a flaw', 'assumed': False}
-    # Same rule the Lister panel uses: prep passed the unit good and wrote nothing about it, so it is new.
-    prepped_good = bool(prep_rows) and all(str(r.get('status') or '').lower() == 'good' for r in prep_rows)
-    if not joined and prepped_good and '-' not in str(upc or ''):
-        return {'condition': 'NEW', 'conditionDescription': '', 'reason': 'Item Prep passed it good with no notes', 'assumed': False}
     return {'condition': default_condition or 'NEW_OTHER', 'conditionDescription': '', 'reason': 'no flaw recorded; default condition assumed', 'assumed': True}
 
 
@@ -867,11 +856,9 @@ def _agent_build_proposal(upc, *, actor='agent', base_url=None):
         elif not comps:
             _agent_flag(flags, 'warn', 'no_comps', 'No current comps; price is the cost floor.')
 
-        condition = _agent_condition(detail, eligibility['prep']['rows'], default_condition=settings['default_condition'], upc=upc12)
+        condition = _agent_condition(detail, eligibility['prep']['rows'], default_condition=settings['default_condition'])
         if condition.get('assumed'):
             _agent_flag(flags, 'info', 'condition_assumed', f"Condition {condition['condition']} assumed; confirm it.")
-        elif condition['condition'] == 'NEW':
-            _agent_flag(flags, 'info', 'condition_new', 'Item Prep passed it good with no notes, so the condition is New.')
         else:
             _agent_flag(flags, 'warn', 'damage_noted', 'Prep notes mention a flaw. Check the condition description.')
 

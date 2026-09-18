@@ -499,10 +499,11 @@
       const listingAlertsCount = Math.max(0, Number(noWarehouseAlerts.length + quantityAlerts.length + syncOverdueCount || 0));
       const ebayUnreadCount = Math.max(0, Number(state.ebayUnread || 0));
       const amazonUnreadCount = Math.max(0, Number(state.amazonUnread || 0));
-      const totalActiveCount = listingAlertsCount + ebayUnreadCount + amazonUnreadCount;
+      // eBay unread messages still get a card but stay out of the badge count for now.
+      const totalActiveCount = listingAlertsCount + amazonUnreadCount;
       updateBadge('badgeActive', totalActiveCount);
 
-      if (!totalActiveCount) {
+      if (!totalActiveCount && !ebayUnreadCount) {
         listEl.style.display = 'none';
         emptyEl.style.display = 'block';
         return;

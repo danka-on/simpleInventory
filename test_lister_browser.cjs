@@ -83,63 +83,14 @@ const ebayForm = `<!doctype html><title>Create your listing | eBay</title>
 <script>window.events = []; for (const el of document.querySelectorAll('input,textarea,select,[contenteditable]')) el.addEventListener('input', e => window.events.push(e.target.id));
 document.getElementById('photos').addEventListener('change', e => { window.photoNames = Array.from(e.target.files).map(f => f.name); });</script>`;
 
-// Seller Central /product-search: option tiles (a "Search" tile BEFORE the box), then the box and its Next button.
-const amazonStart = `<!doctype html><title>Search products</title><h1>Search products</h1>
+// Seller Central "List Your Products": option tiles (a "Search" tile BEFORE the box), then the box and its Search button.
+const amazonStart = `<!doctype html><title>List Your Products</title><h1>List Your Products</h1>
 <div role="tablist"><button type="button">Search</button><button type="button">Product image</button><button type="button">Product IDs</button></div>
 <section><p>Search your catalog or Amazon's catalog for a listing (or a variation) to sell or copy.</p>
-<kat-input id="kw" placeholder="Product name, UPC, EAN, ISBN or ASIN"></kat-input><kat-button id="go" label="Next" disabled></kat-button></section>
-<script>
-// Katal keeps the real input/button inside an open shadow root, and only the host carries the
-// placeholder / label / disabled state - the same shape Seller Central serves.
-class KatInput extends HTMLElement {
-  connectedCallback() {
-    if (this.shadowRoot) return;
-    const shadow = this.attachShadow({ mode: 'open' });
-    shadow.innerHTML = '<input part="input">';
-    this.input = shadow.querySelector('input');
-    this.input.addEventListener('input', () => {
-      const go = document.getElementById('go');
-      setTimeout(() => { if (this.input.value) go.removeAttribute('disabled'); else go.setAttribute('disabled', ''); }, 700);
-    });
-  }
-  get value() { return this.input ? this.input.value : ''; }
-}
-class KatButton extends HTMLElement {
-  connectedCallback() {
-    if (this.shadowRoot) return;
-    const shadow = this.attachShadow({ mode: 'open' });
-    shadow.innerHTML = '<button type="button">' + (this.getAttribute('label') || '') + '</button>';
-    shadow.querySelector('button').addEventListener('click', () => {
-      if (this.hasAttribute('disabled')) return;  // the host gates the click, as Katal does
-      location.href = 'https://sellercentral.amazon.com/listing/results?q=' + encodeURIComponent(document.getElementById('kw').value);
-    });
-  }
-}
-customElements.define('kat-input', KatInput);
-customElements.define('kat-button', KatButton);
-</script>`;
-
-// Seller Central's "Add offer" page as it really is: two look-alike fulfilment radios, a clickable
-// "Match lowest price", the item condition, and a quantity box that only exists once the radio is
-// answered. See the amazon-add-offer-form note.
-const amazonOffer = `<!doctype html><title>Add offer</title><h1>Add offer</h1>
-<label for="sku">SKU</label><input id="sku" name="sku">
-<fieldset><legend>Fulfillment Channel Code</legend>
-<label><input type="radio" name="fc" id="fba"> I want to use Fulfilled by Amazon (FBA) to ship my items and provide customer service if it sells. (Fulfilled by Amazon)</label>
-<label><input type="radio" name="fc" id="mfn"> I want to ship this item myself or use Amazon Easy Ship if it sells. (Merchant Fulfilled)</label></fieldset>
-<div id="qtyBox" hidden><label for="qty">Quantity</label><input id="qty" name="fulfillment_availability#1.quantity" type="number"></div>
-<label for="price">Your Price</label><span>USD$</span><input id="price" name="price">
-<div><a id="match" href="#">Match lowest price: USD$29.40</a></div>
-<label for="cond">Item Condition</label><select id="cond"><option>Select</option><option>New</option><option>Used - Like New</option><option>Used - Good</option></select>
-<script>
-for (const id of ['mfn', 'fba']) document.getElementById(id).addEventListener('change', () => { document.getElementById('qtyBox').hidden = false; });
-document.getElementById('match').addEventListener('click', event => {
-  event.preventDefault();
-  const price = document.getElementById('price');
-  price.value = '29.40';
-  price.dispatchEvent(new Event('input', { bubbles: true }));
-});
-</script>`;
+<input id="kw" placeholder="Enter product title, description, or keywords"><button id="go" type="button" disabled>Search</button></section>
+<script>const kw = document.getElementById('kw'), go = document.getElementById('go');
+kw.addEventListener('input', () => { go.disabled = !kw.value; });
+go.addEventListener('click', () => { location.href = 'https://sellercentral.amazon.com/listing/results?q=' + encodeURIComponent(kw.value); });</script>`;
 
 const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1>Congratulations! Your item is listed.</h1>
 <p>Item number: 335566778899</p><a href="https://www.ebay.com/itm/335566778899">View listing</a>`;
@@ -219,10 +170,8 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const url = new URL(route.request().url());
       const html = body => route.fulfill({ status: 200, contentType: 'text/html', body });
       calls.amazonPages = (calls.amazonPages || []).concat(url.pathname + url.search);
-      if (url.pathname === '/product-search') return html(amazonStart);
-      if (url.pathname.startsWith('/abis/listing/syh') && url.searchParams.get('asin')) return html(amazonOffer);
-      // /abis/listing/syh resumes the last draft: it redirects to the offer step and errors.
-      if (url.pathname.startsWith('/abis/listing/syh')) return html('<title>Add price and inventory</title><h1>We encountered an unexpected error</h1>');
+      if (url.pathname === '/abis/listing/syh' && !url.search) return html('<title>Add price and inventory</title><h1>We encountered an unexpected error</h1>');
+      if (url.pathname === '/abis/listing/syh') return html(amazonStart);
       return html('<title>Seller Central</title><h1>Inventory</h1>');
     });
     await context.route('https://www.ebay.com/**', route => {
@@ -241,10 +190,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
 
     const panel = await context.newPage();
     await panel.goto(`chrome-extension://${extensionId}/sidepanel.html`);
-    // The queue and one item are two places now, not two tabs: only leave the item when you are in it.
-    const toQueue = async () => { if (!(await panel.$eval("#crumb", el => el.hidden))) await panel.click("#backToQueue"); };
-    await panel.waitForFunction(() => document.getElementById('connStatus').classList.contains('ok'));
-    assert.ok((await panel.$eval('#connStatus', el => el.title)).includes('dan'), 'the connection dot names who is signed in');
+    await panel.waitForFunction(() => document.getElementById('connStatus').textContent.trim() === 'dan');
     await panel.waitForSelector('.item.current');
     // The oldest queued item is picked automatically and shown first.
     assert.equal(await panel.$eval('.item.current', el => el.dataset.upc), UPC + '-1');
@@ -254,31 +200,28 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     const firstRow = await panel.textContent('.item[data-upc="883049370897-1"]');
     assert.ok(!(await panel.$$eval('.item[data-upc="883049370897-1"] .chip', els => els.some(e => /^unit \d/.test(e.textContent.trim())))), 'no "unit 1" chip');
     assert.equal(await panel.$eval('.item[data-upc="883049370897-1"] .suffix', el => el.textContent), '1');
-    assert.ok(firstRow.includes('chip'), 'what is wrong with it is on the row, in words: ' + firstRow);
-    assert.equal(await panel.$eval('.item[data-upc="883049370897-1"] .sig.flag', el => el.textContent), 'chip', 'one flag per row, whatever raised it');
-    assert.ok((await panel.$eval('.item[data-upc="883049370897-1"] .sig.flag', el => el.title)).includes('Missing pieces'), 'the BOL defect rides along in the tooltip');
+    assert.ok(firstRow.includes('bad · chip'), 'the Item Prep status and reason are on the row: ' + firstRow);
+    assert.equal(await panel.$eval('.item[data-upc="883049370897-1"] .chip.defect', el => el.textContent), 'Missing pieces', 'the BOL defect is its own bubble');
     // Every queued item is checked against Amazon in the background; the verdict shows on the Amazon list only.
-    // The busy row is always in the layout now, so that nothing moves when work starts; "lit" is the class.
-    await panel.waitForFunction(() => !document.getElementById('busy').classList.contains('on'), null, { timeout: 15000 });
-    assert.ok(!(await panel.$('.item.blocked')), 'the eBay list does not carry Amazon verdicts');
+    await panel.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 15000 });
+    assert.ok(!(await panel.$('.item.restricted')), 'the eBay list does not carry Amazon verdicts');
     await panel.click('#storeAmazon');
-    await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]')?.classList.contains('blocked'), null, { timeout: 15000 });
-    assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('Amazon restricted'));
-    assert.ok(!(await panel.$('.item[data-upc="883049370897-1"] .sig.block')), 'a listable UPC says nothing: a clean row is the good row');
+    await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]')?.classList.contains('restricted'), null, { timeout: 15000 });
+    assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('Amazon ✕ restricted'));
+    assert.ok((await panel.textContent('.item[data-upc="883049370897-1"]')).includes('Amazon ✓'));
     await panel.click('#storeEbay');
     await panel.waitForFunction(() => document.getElementById('countEbay').textContent.includes('2') && document.querySelector('.item.current')?.dataset.upc === '883049370897-1', null, { timeout: 15000 });
-    await panel.waitForFunction(() => !document.getElementById('busy').classList.contains('on'), null, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('busy').hidden, null, { timeout: 15000 });
     // Note marker, store-coloured badge, and the status / listed filters.
     assert.ok(firstRow.includes('📝 1') && firstRow.includes('🎤 1'), 'the row shows its note counts: ' + firstRow);
-    assert.ok((await panel.textContent('.item[data-upc="012345678905"] .sig.quiet')).includes('on eBay'), 'a UPC the store already carries says so, quietly');
-    await panel.click('#statusFlagged');
-    assert.deepEqual(await panel.$$eval('.item', els => els.map(e => e.dataset.upc)), ['883049370897-1'], 'Flagged shows only the one with something wrong');
-    assert.equal(await panel.$eval('#statusFlagged .n', el => el.textContent), '1', 'the filters carry their counts');
+    assert.ok(await panel.$('.item[data-upc="012345678905"] .chip.store.ebay'), 'a UPC the store carries gets an eBay-coloured badge');
+    await panel.click('#statusBad');
+    assert.deepEqual(await panel.$$eval('.item', els => els.map(e => e.dataset.upc)), ['883049370897-1'], 'Bad shows only the bad unit');
     await panel.click('#statusListed');
     assert.deepEqual(await panel.$$eval('.item', els => els.map(e => e.dataset.upc)), ['012345678905'], 'Listed shows what a store already carries');
     await panel.click('#statusAll');
     assert.equal((await panel.$$('.item')).length, 2);
-    assert.ok(!(await panel.$('#autoSendPhotos')), 'the automatic switches are not on the work surface');
+    assert.ok(await panel.$('#autoSendPhotos'), 'the auto send-to-page switch is on the store card');
     // Preload all: the whole queue is prepared in the background; the bar shows the percentage, the rows their state.
     assert.ok(await panel.$eval('#preloadBar', el => el.hidden), 'no preload bar before a preload');
     await panel.click('#preloadAll');
@@ -288,8 +231,8 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(await panel.$eval('#preloadAll', el => el.disabled), 'the button waits while it runs');
     await panel.waitForFunction(() => document.querySelector('#preloadBar').textContent.includes('100%'), null, { timeout: 15000 });
     assert.ok((await panel.textContent('#preloadBar')).includes('All 2 preloaded'), await panel.textContent('#preloadBar'));
-    assert.ok(await panel.$('.item[data-upc="883049370897-1"] .bolt.on'), 'each row lights its bolt when it is done');
-    assert.ok(await panel.$('.item[data-upc="012345678905"] .bolt.on'));
+    assert.ok(await panel.$('.item[data-upc="883049370897-1"] .chip.preload.done'), 'each row gets its ✓ when it is done');
+    assert.ok(await panel.$('.item[data-upc="012345678905"] .chip.preload.done'));
     assert.ok(!(await panel.$eval('#preloadAll', el => el.disabled)), 'the button is back');
     await panel.click('#preloadHide');
     assert.ok(await panel.$eval('#preloadBar', el => el.hidden), 'the finished bar can be dismissed');
@@ -300,17 +243,15 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.equal(await panel.$eval('#themeBtn', el => el.textContent), '☀');
     await panel.click('#themeBtn');
     await panel.waitForFunction(() => document.documentElement.dataset.theme === 'light');
-    assert.ok(await panel.$eval('#pageCard', el => el.hidden), 'nothing is wrong, so the notice card is not there');
-    assert.equal(await panel.textContent('#goBtn'), 'Start on eBay', 'the action bar names the next thing to do');
+    assert.ok((await panel.textContent('#pageCard')).includes('no store page'));
     // No Start button (double-clicking a queue item starts it, checked at the end). The automatic switches fold into one line.
     assert.ok(!(await panel.$('#startBtn')), 'the Start button is gone');
-    await panel.click('#settingsBtn');
     assert.ok(await panel.$eval('.toggles-body', el => el.hidden), 'the automatic switches start minimized');
     const togglesHead = await panel.textContent('#togglesBtn');
     assert.ok(togglesHead.includes('Automatic') && togglesHead.includes('all off'), togglesHead);
     await panel.click('#togglesBtn');
     await panel.waitForFunction(() => !document.querySelector('.toggles-body').hidden);
-    assert.deepEqual(await panel.$$eval('.toggles .tg-title', els => els.map(e => e.textContent)), ['Listing text', 'Photos'], 'the menu is grouped');
+    assert.deepEqual(await panel.$$eval('.toggles.auto-top .tg-title', els => els.map(e => e.textContent)), ['Listing text', 'Photos'], 'the menu is grouped');
     assert.ok(await panel.$eval('#autoSendAiOnly', el => el.checked), '"by default only send AI generated" starts on');
     await panel.click('label.sw:has(#autoSendPhotos)');
     await panel.waitForFunction(() => document.getElementById('togglesBtn').textContent.includes('send photos (AI only)'));
@@ -318,17 +259,13 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.waitForFunction(() => document.getElementById('togglesBtn').textContent.includes('all off'));
     await panel.click('#togglesBtn');
     await panel.waitForFunction(() => document.querySelector('.toggles-body').hidden);
-    await panel.click('#settingsBtn');
-    await panel.waitForFunction(() => document.getElementById('settings').hidden);
 
     // The X asks first, then tells the server which store list to leave.
-    await toQueue();
     await panel.click('.item[data-upc="012345678905"] button[data-skip]');
     await panel.waitForSelector('#modalOk');
     assert.ok((await panel.textContent('#modal')).includes('Amazon'), 'the confirmation explains the other store');
     await panel.click('#modalCancel');
     assert.equal(calls.skip.length, 0, 'cancel removes nothing');
-    await toQueue();
     await panel.click('.item[data-upc="012345678905"] button[data-skip]');
     await panel.waitForSelector('#modalOk');
     await panel.click('#modalOk');
@@ -337,16 +274,12 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.equal(await panel.$eval('.item.current', el => el.dataset.upc), UPC + '-1', 'the current item is untouched');
 
     // Item view: unit, prep status, stock, store status, the condition note flagged as coming from prep, the QR code.
-    await toQueue();
-    await panel.click('.item[data-upc="883049370897-1"]');
-    await panel.waitForSelector('.strip');
-    assert.ok(!(await panel.$eval('#crumb', el => el.hidden)), 'the crumb is the way back to the queue');
-    assert.equal((await panel.textContent('#backToQueue')).replace(/\s+/g, ' ').trim(), '\u2190 Back', 'the way out is a button that says Back');
-    assert.ok(await panel.$eval('#listCard', el => el.hidden), 'one place at a time: the queue steps aside');
+    await panel.click('#viewItem');
+    await panel.waitForSelector('.tiles');
     const detailText = await panel.textContent('#detail');
-    for (const expected of ['unit 1', '@ B-1', '1 to list', 'Small chip on the rim', 'chip']) {
+    for (const expected of ['unit 1', 'status: BAD', '1 on the rack', '@ B-1', '1 to list', 'prep 1', 'Small chip on the rim']) {
       assert.ok(!(await panel.textContent('#detail')).includes('On the listing'), 'no "On the listing" label');
-      assert.ok(await panel.$('.sect .note2'), 'notes sit in their own section');
+      assert.ok(await panel.$('.sticky .note2'), 'notes sit on the yellow sticky');
       assert.ok(detailText.includes(expected), 'item view shows "' + expected + '"');
     }
     for (const gone of ['Prepped:', 'basic values', 'Prepare', 'Location matches', 'Copy all values', 'Open in Listing Agent', 'Items to List']) assert.ok(!detailText.includes(gone), 'item view no longer shows "' + gone + '"');
@@ -357,20 +290,24 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     const writtenRow = await panel.$$eval('.note2', rows => rows.map(row => ({ lt: row.querySelector('.lt').textContent, en: row.querySelector('.en').textContent })).pop());
     assert.deepEqual(writtenRow, { lt: 'nuotrauka', en: 'Small chip on the rim' }, 'a "LT: … | EN: …" note is split into its halves');
     assert.equal(await panel.$eval('.photo .tag.prep', t => t.textContent), 'prep', 'prep photos carry a small bubble');
-    // No second copy of the switches by the photos, and no switch at all on the work surface.
-    assert.ok(!(await panel.$('#photo_autoAiPhotos')), 'the duplicate photo switch menu is gone');
-    assert.ok(await panel.$$eval('label.sw', els => els.length > 0 && els.every(e => e.closest('#settings') !== null)), 'every automatic switch lives in Settings');
-    assert.ok(await panel.$eval('#settings', el => el.hidden), 'and Settings is shut while you work');
-    assert.ok((await panel.textContent('.autoline')).includes('By itself'), 'the item view reports what runs by itself, in one line');
-    // Stock and the two stores: one strip, three cells, colour only where it means something.
-    const cells = await panel.$$eval('.strip .cell', els => els.map(c => ({ k: c.querySelector('.k').textContent, v: c.querySelector('.v').textContent.trim(), cls: c.className })));
-    assert.deepEqual(cells.map(c => c.k), ['Rack', 'eBay', 'Amazon']);
+    assert.ok(await panel.$('#photo_autoAiPhotos') && await panel.$('#photo_autoSendPhotos') && await panel.$('#photo_autoSendAiOnly'), 'the photo switches sit with the photos');
+    assert.ok(!(await panel.$('#photo_autoAiTitle')), 'the photo menu carries only the photo switches');
+    assert.ok(await panel.$eval('.toggles.auto-photos .toggles-body', el => el.hidden), 'the photo switches start minimized');
+    await panel.click('#photoTogglesBtn');
+    await panel.waitForFunction(() => !document.querySelector('.toggles.auto-photos .toggles-body').hidden);
+    await panel.click('label.sw:has(#photo_autoSendAiOnly)');
+    await panel.waitForFunction(() => document.getElementById('autoSendAiOnly') && !document.getElementById('autoSendAiOnly').checked && !document.getElementById('photo_autoSendAiOnly').checked);
+    await panel.click('label.sw:has(#photo_autoSendAiOnly)');
+    await panel.waitForFunction(() => document.getElementById('autoSendAiOnly').checked);
+    await panel.click('#photoTogglesBtn');
+    await panel.waitForFunction(() => document.querySelector('.toggles.auto-photos .toggles-body').hidden);
+    assert.ok(await panel.$('#autoAiTitle') && await panel.$('#autoAiDescription'), 'the automatic AI text switches sit on the store card');
+    const tiles = await panel.$$eval('.tiles .tile', els => els.map(t => ({ k: t.querySelector('.k').textContent, v: t.querySelector('.v').textContent, cls: t.className })));
+    assert.deepEqual(tiles.map(t => t.k), ['Warehouse stock', 'eBay', 'Amazon']);
     assert.ok(!detailText.includes('prep and rack differ'), 'the mismatch is shown visually, not as a sentence');
-    assert.equal(await panel.$eval('.strip .cell a', a => a.getAttribute('href')), 'https://pi.nexuscentralhq.org/unified-search?q=883049370897-1', 'the rack count links to the warehouse search');
-    assert.ok(!detailText.includes('/item-prep?upc='), 'the old Item Prep link is gone');
-    assert.ok(cells[0].cls.includes('good') && cells[1].v === 'Not listed' && cells[1].cls.includes('idle') && cells[2].v === 'Not listed', JSON.stringify(cells));
-    // The thing you must act on is said once, in words, above the strip.
-    assert.ok((await panel.textContent('.alert')).includes('chip'), 'what is wrong is spelled out above the strip, not left as a chip');
+    assert.equal(await panel.$eval('.tile.stock .v a', a => a.getAttribute('href')), 'https://pi.nexuscentralhq.org/unified-search?q=883049370897-1', 'the rack count links to the warehouse search');
+    assert.equal(await panel.$eval('.tile.stock a.prep', a => a.getAttribute('href')), 'https://pi.nexuscentralhq.org/item-prep?upc=883049370897-1', 'the prep count links to Item Prep');
+    assert.ok(tiles[0].cls.includes('ok') && tiles[1].v === 'NOT LISTED' && tiles[1].cls.includes('todo') && tiles[2].v === 'NOT LISTED', JSON.stringify(tiles));
     assert.ok(!(await panel.$('.qr img')), 'the QR code starts minimized');
     await panel.click('#addPhoto');
     await panel.waitForSelector('.qr img');
@@ -389,20 +326,19 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
     await store.bringToFront();
     // Nothing happens by itself on the search page; clicking the item in the queue searches its UPC.
-    await panel.waitForFunction(() => document.body.dataset.pageKind === 'listing-start', null, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('search for the product'), null, { timeout: 15000 });
     await store.waitForTimeout(1500);
     assert.ok(store.url().includes('/sl/prelist/suggest'), 'no search without a click');
-    await toQueue();
-    await toQueue();
+    await panel.click('#viewList');
     await panel.click('.item[data-upc="883049370897-1"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=883049370897/, { timeout: 20000 });
     assert.ok(!store.url().includes('%2D1'), 'the store search uses the catalog UPC without the -suffix');
 
     // "Find a match": the panel highlights the listing that looks like ours; the user's click is learned,
     // and the other seller's item id in the next URL must never be recorded as our listing.
-    await panel.waitForFunction(() => document.body.dataset.pageKind === 'listing-match', null, { timeout: 15000 });
-    await store.waitForFunction(() => Array.from(document.querySelectorAll('li')).some(li => li.style.boxShadow.includes('rgba(10, 156, 108')), null, { timeout: 15000 });
-    const picked = await store.evaluate(() => Array.from(document.querySelectorAll('li')).find(li => li.style.boxShadow.includes('rgba(10, 156, 108')).textContent.trim());
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('find a catalog match'), null, { timeout: 15000 });
+    await store.waitForFunction(() => Array.from(document.querySelectorAll('li')).some(li => li.style.outline.includes('rgb(10, 156, 108)')), null, { timeout: 15000 });
+    const picked = await store.evaluate(() => Array.from(document.querySelectorAll('li')).find(li => li.style.outline.includes('rgb(10, 156, 108)')).textContent.trim());
     assert.ok(picked.startsWith('Lenox Butterfly Meadow'), 'the Lenox listing is the suggested match, got: ' + picked);
     assert.ok((await panel.textContent('#pageCard')).includes('Suggested:'));
     await store.click('li:nth-child(1) a');  // the user disagrees and picks the other listing
@@ -415,16 +351,16 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.equal(calls.learn[0].upc, UPC + '-1');
 
     // "Confirm details": our condition (USED_GOOD) is pre-selected; still nothing is recorded as listed.
-    await panel.waitForFunction(() => document.body.dataset.pageKind === 'listing-confirm', null, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('confirm details'), null, { timeout: 15000 });
     await store.waitForFunction(() => document.querySelector('input[value="used"]').checked, null, { timeout: 15000 });
     assert.equal(calls.links.length, 0, 'the SellLikeItem item id is another seller\'s listing, not ours');
-    assert.notEqual(await panel.$eval('body', el => el.dataset.pageKind), 'listing-success');
+    assert.ok(!(await panel.textContent('#pageCard')).includes('listing confirmed'));
     await store.click('a[href*="/sl/list?mode=AddItem"]');
 
     // The listing form is filled from the prepared values, then the guide points at what is left.
-    await panel.waitForFunction(() => document.body.dataset.pageKind === 'listing-form', null, { timeout: 20000 });
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 20000 });
     await store.waitForFunction(() => document.getElementById('title').value.length > 0, null, { timeout: 20000 });
-    await store.waitForFunction(() => document.getElementById('color').style.boxShadow.includes('rgba(220, 38, 38'), null, { timeout: 10000 }).catch(() => {});  // the guide starts right after the fill
+    await store.waitForFunction(() => document.getElementById('color').style.outline.includes('rgb(220, 38, 38)'), null, { timeout: 10000 }).catch(() => {});  // the guide starts right after the fill
     const filled = await store.evaluate(() => ({
       title: document.getElementById('title').value, subtitle: document.getElementById('subtitle').value,
       upc: document.getElementById('upc').value, sku: document.getElementById('cl').value,
@@ -433,7 +369,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       price: document.getElementById('price').value, ship: document.getElementById('ship').value,
       qty: document.getElementById('qty').value, desc: document.getElementById('desc').innerHTML,
       search: document.querySelector('input[type=search]').value, events: window.events,
-      colorOutline: document.getElementById('color').style.boxShadow,
+      colorOutline: document.getElementById('color').style.outline,
     }));
     assert.equal(filled.title, detail.fields.title);
     assert.equal(filled.subtitle, '', 'subtitle stays empty');
@@ -449,112 +385,48 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(filled.desc.includes('Butterfly Meadow'), 'description editor received the HTML');
     assert.equal(filled.search, '', 'the site search box is untouched');
     assert.ok(filled.events.includes('title') && filled.events.includes('price'), 'React-style input events fired');
-    assert.ok(filled.colorOutline.includes('rgba(220, 38, 38'), 'the empty required Color field glows red by the guide, got: ' + filled.colorOutline);
+    assert.ok(filled.colorOutline.includes('rgb(220, 38, 38)'), 'the empty required Color field is outlined red by the guide, got: ' + filled.colorOutline);
     // The checklist overlay on the page: red = required and empty, green = filled, blue = from the prep notes.
-    // The overlay leads with the step you are on; every step is a checkpoint on the rail, and the
-    // whole list is behind the chevron.
-    await store.waitForFunction(() => document.querySelectorAll('#ss-lister-guide [data-ss-cp]').length >= 1, null, { timeout: 15000 });
-    assert.ok(await store.$('#ss-lister-guide [data-ss="focus"], #ss-lister-guide [data-ss="body"] b'), 'the focus card names the current field');
-    const openSteps = async () => { if (!(await store.$('#ss-lister-guide [data-ss-row]'))) await store.click('#ss-lister-guide [data-ss="steps"]'); await store.waitForSelector('#ss-lister-guide [data-ss-row]'); };
-    await openSteps();
+    await store.waitForFunction(() => document.querySelectorAll('#ss-lister-guide [data-ss-row]').length >= 1, null, { timeout: 15000 });
     const rows = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(row => ({ text: row.textContent.replace(/\s+/g, ' ').trim(), dot: row.querySelector('span').style.background })));
-    const cpColours = await store.$$eval('#ss-lister-guide [data-ss-cp] span', els => els.map(s => s.style.background));
-    assert.equal(cpColours.length, rows.length, 'one checkpoint per step');
-    // Hovering a checkpoint reads that step out below it. The card is a fixed height so the overlay
-    // cannot grow, shift out from under the cursor and bounce hover on and off - which it used to.
-    await store.click('#ss-lister-guide [data-ss="steps"]');  // focus card, where the preview lands
-    const hudBox = () => store.$eval('#ss-lister-guide', el => { const r = el.getBoundingClientRect(); return { top: Math.round(r.top), height: Math.round(r.height) }; });
-    const restingBox = await hudBox();
-    for (const i of [0, rows.length - 1, Math.floor(rows.length / 2)]) {
-      await store.hover(`#ss-lister-guide [data-ss-cp="${i}"]`);
-      assert.deepEqual(await hudBox(), restingBox, `hovering checkpoint ${i} must not move or resize the overlay`);
-    }
-    await store.hover('#ss-lister-guide [data-ss="title"]');
-    assert.deepEqual(await hudBox(), restingBox, 'and it is back where it started');
-    await openSteps();
     const rowFor = name => rows.find(r => r.text.startsWith(name));
     assert.ok(rowFor('Photos') && rowFor('Photos').dot.includes('220, 38, 38'), 'photos (0/25) are a required, open (red) row: ' + JSON.stringify(rows));
     assert.ok(rowFor('Color').dot.includes('220, 38, 38'), 'the empty required Color field is red');
     assert.ok(rowFor('Title').dot.includes('22, 163, 74'), 'the filled title is green');
     assert.ok(rowFor('Quantity').text.includes('· 1'), 'the quantity row shows the entered quantity: ' + rowFor('Quantity').text);
     assert.ok(!rowFor('UPC'), 'the UPC is not on the checklist');
-    // The warehouse count sits under the store's own quantity box while the listing is being set up.
-    const qtyTag = await store.$eval('[data-ss-qty]', el => ({ text: el.textContent, bg: el.style.background, shown: el.style.display }));
-    assert.ok(qtyTag.text.includes('1 on the rack') && qtyTag.text.includes('B-1'), 'the quantity badge shows the rack count and position: ' + qtyTag.text);
-    assert.ok(qtyTag.shown !== 'none' && qtyTag.bg.includes('10, 156, 108'), 'the badge is visible and green while the quantity fits the rack');
-    await store.fill('#qty', '4');
-    await store.waitForFunction(() => document.querySelector('[data-ss-qty]')?.textContent.includes('you typed 4'), null, { timeout: 15000 });
-    assert.ok((await store.$eval('[data-ss-qty]', el => el.style.background)).includes('220, 38, 38'), 'typing more than the rack holds turns the badge red');
-    await store.fill('#qty', '1');
-    await store.waitForFunction(() => !document.querySelector('[data-ss-qty]')?.textContent.includes('you typed'), null, { timeout: 15000 });
     assert.ok(rows.at(-1).text.startsWith('Quantity') && rows.at(-2).text.startsWith('Price'), 'price then quantity close the checklist: ' + rows.map(r => r.text.split(' ')[0]).join(','));
-    assert.ok(rowFor('Condition description').dot.includes('37, 99, 235'), 'the note-sourced condition description is blue');
-    assert.ok(await store.$eval('#ss-lister-guide [data-ss-row] sup[title*="prep notes"]', el => el.textContent === 'NOTE'), 'where it came from is one mark, not a paragraph');
-    assert.ok((await panel.textContent('#goBtn')).includes('left'), 'the action bar counts what is left: ' + await panel.textContent('#goBtn'));
+    assert.ok(rowFor('Condition description').dot.includes('37, 99, 235') && rowFor('Condition description').text.includes('prep notes'), 'the note-sourced condition description is blue with a disclaimer');
+    assert.ok((await panel.textContent('#pageCard')).includes('of'), 'the store card shows the checklist progress');
     // The actions live on the overlay now, not on the store card.
     assert.ok(!(await panel.$('#fillBtn')) && !(await panel.$('#pickBtn')), 'no Fill / Pick buttons on the store card');
-    // The HUD wears the panel's day theme and follows its moon/sun switch.
-    assert.equal(await store.$eval('#ss-lister-guide', el => el.style.background), 'rgb(255, 255, 255)', 'the HUD is light like the panel');
-    await panel.click('#themeBtn');
-    await store.waitForFunction(() => document.querySelector('#ss-lister-guide')?.style.background === 'rgb(15, 23, 42)', null, { timeout: 10000 });
-    await panel.click('#themeBtn');
-    await store.waitForFunction(() => document.querySelector('#ss-lister-guide')?.style.background === 'rgb(255, 255, 255)', null, { timeout: 10000 });
-    await store.click('#ss-lister-guide [data-ss="steps"]');  // back to the step you are on
-    const footButtons = await store.$$eval('#ss-lister-guide [data-ss="foot"] button', els => els.filter(b => b.style.display !== 'none').map(b => b.textContent.trim()));
-    assert.ok(footButtons.some(b => b.startsWith('Skip')), 'the overlay footer can skip a step: ' + footButtons);
-    assert.ok(footButtons.some(b => /Use this|Go to it|Next field/.test(b)), 'the green button names what it does here: ' + footButtons);
-    await openSteps();
+    const footButtons = await store.$$eval('#ss-lister-guide [data-ss="foot"] button', els => els.map(b => b.textContent.trim()));
+    assert.ok(footButtons.includes('Next (Tab)'), 'overlay footer has Next (Tab): ' + footButtons);
     assert.ok(!footButtons.includes('Fill page'), 'the overlay has no Fill page button: ' + footButtons);
     assert.ok(!footButtons.includes('Pick a field…') && !footButtons.includes('Hide'), 'no Pick a field / Hide on the overlay footer');
     // The AI button beside the Title row writes the title through the panel and puts it on the page.
-    await openSteps();
     await store.click(`#ss-lister-guide [data-ss-row="${rows.findIndex(r => r.text.startsWith('Title'))}"] [data-ss-ai="title"]`);
     await store.waitForFunction(() => document.getElementById('title').value === 'AI Lenox Butterfly Meadow Plate', null, { timeout: 15000 });
     assert.equal(calls.generate[0].kind, 'title');
     assert.ok(calls.generate[0].values.notes.includes('scratched on the back'), 'the voice note text feeds the AI prompt');
-    await store.waitForFunction(() => Array.from(document.querySelectorAll('#ss-lister-guide [data-ss-row] sup')).some(s => s.title.includes('generated with AI')), null, { timeout: 10000 });
-    const titleRowText = await store.$$eval('#ss-lister-guide [data-ss-row]', els => { const row = els.find(e => e.textContent.trim().startsWith('Title')); return (row?.querySelector('sup')?.title || '') + ' | ' + row?.textContent.replace(/\s+/g, ' ').trim(); });
+    await store.waitForFunction(() => Array.from(document.querySelectorAll('#ss-lister-guide [data-ss-row]')).some(r => r.textContent.includes('generated with AI')), null, { timeout: 10000 });
+    const titleRowText = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(r => r.textContent.replace(/\s+/g, ' ').trim()).find(t => t.startsWith('Title')));
     assert.ok(await store.$eval('#ss-lister-guide', el => el.style.left === '16px' && el.style.right === ''), 'the overlay starts on the left');
-    // Dragging the HUD by its header remembers the spot for this browser (localStorage + chrome.storage.local).
-    const head = await store.$('#ss-lister-guide [data-ss="head"]');
-    const box = await head.boundingBox();
-    await store.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await store.mouse.down();
-    await store.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 - 90, { steps: 6 });
-    await store.mouse.up();
-    const dragged = await store.$eval('#ss-lister-guide', el => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top), bottom: el.style.bottom }));
-    assert.ok(dragged.left > 16 && dragged.bottom === 'auto', 'the HUD moved with the pointer: ' + JSON.stringify(dragged));
-    const savedPos = await store.evaluate(() => JSON.parse(localStorage.getItem('ss-lister-guide-pos') || 'null'));
-    assert.ok(savedPos && Math.round(savedPos.left) === Math.round(dragged.left) && Math.round(savedPos.top) === Math.round(dragged.top),
-      'the dragged position is saved for this browser: ' + JSON.stringify(savedPos));
-    // Put it back where it was so the HUD does not sit over the fields the rest of this test clicks.
-    await store.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 - 90);
-    await store.mouse.down();
-    await store.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
-    await store.mouse.up();
     assert.ok(titleRowText.includes('generated with AI') && !titleRowText.includes('automatically'), 'a manual AI run is marked, without "(automatically)": ' + titleRowText);
-    assert.ok(titleRowText.split(' | ')[1].includes('AI'), 'the mark is one superscript on the row, not a line of its own: ' + titleRowText);
     // Re-reading the page while the guide is up must not throw (0.2.2 did: "reading 'length'").
-    await panel.click('#moreBtn');
-    await panel.click('.menu-item:has-text("Re-read the page")');
-    await panel.waitForFunction(() => document.body.dataset.pageKind === 'listing-form', null, { timeout: 10000 });
+    await panel.click('#pageRefresh');
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('listing form'), null, { timeout: 10000 });
     assert.ok(!(await panel.textContent('#pageCard')).includes('Page script:'), await panel.textContent('#pageCard'));
     // Clicking a green (filled) row still jumps to that field; the condition description row goes to its own field.
     const titleIndex = rows.findIndex(r => r.text.startsWith('Title'));
-    await openSteps();
     await store.click(`#ss-lister-guide [data-ss-row="${titleIndex}"]`);
     await store.waitForFunction(() => document.activeElement && document.activeElement.id === 'title', null, { timeout: 10000 });
     const cdIndex = rows.findIndex(r => r.text.startsWith('Condition description'));
-    await openSteps();
     await store.click(`#ss-lister-guide [data-ss-row="${cdIndex}"]`);
-    await store.waitForFunction(() => !document.querySelector('#ss-lister-guide [data-ss-row]'), null, { timeout: 10000 });
     await store.waitForFunction(() => document.activeElement && document.activeElement.id === 'cd', null, { timeout: 10000 });
     assert.equal(await store.evaluate(() => document.activeElement.id), 'cd');
-    // A checkpoint on the rail takes you straight back to a step you already filled.
-    await store.click(`#ss-lister-guide [data-ss-cp="${titleIndex}"]`);
-    await store.waitForFunction(() => document.activeElement && document.activeElement.id === 'title', null, { timeout: 10000 });
     // The item is locked in on the listing page: the queue is hidden and the item view is up.
-    assert.ok(!(await panel.$eval('#crumbLock', el => el.hidden)), 'the crumb says you are on the form');
+    assert.ok(await panel.$eval('#lock', el => el.classList.contains('on')));
     assert.ok(await panel.$eval('#listCard', el => el.hidden));
     assert.ok(!(await panel.$eval('#detail', el => el.hidden)));
     assert.ok(calls.events.length >= 1 && calls.events[0].event === 'helper_filled' && calls.events[0].proposal_id === 7, 'fill reported to the proposal timeline');
@@ -569,10 +441,6 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#sendPhotos');
     await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 15000 });
     assert.deepEqual(await store.evaluate(() => window.photoNames), ['own.jpg']);
-    // A photo that went to the page is greyed out on its tile, so it is not sent twice by hand.
-    await panel.waitForFunction(() => document.querySelector('.photo.listing.used'), null, { timeout: 10000 });
-    assert.equal(await panel.$eval('.photo.listing .tag.used', t => t.textContent), 'used', 'the used tile carries a used bubble');
-    assert.ok(!(await panel.$('.photo.prep.used')), 'a photo that never went to the page stays normal');
 
     // A photo dragged from the panel arrives on the page as our JSON drag type (a File cannot cross
     // from an extension page); the page script turns it into a real file for the uploader it landed on.
@@ -593,20 +461,8 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     });
     await store.waitForFunction(() => window.photoNames && window.photoNames.length === 1 && window.photoNames[0] === 'own.jpg', null, { timeout: 15000 });
 
-    // The AI photoshop prompt: typing in it stays on this item, "Save for all" makes it the default.
-    await panel.click('details:has(#aiPrompt) summary');
-    await panel.$eval('#aiPrompt', el => { el.value = 'Just this one.'; el.dispatchEvent(new Event('input', { bubbles: true })); });
-    assert.equal(await panel.$eval('#aiPromptWhere', el => el.textContent), 'this item only');
-    await panel.click('#aiPromptSave');
-    await panel.waitForFunction(() => document.getElementById('aiPromptWhere').textContent === 'saved for all items', null, { timeout: 10000 });
-    assert.equal(await panel.$eval('#aiPrompt', el => el.value), 'Just this one.', 'the saved prompt stays in the box');
-    await panel.click('#aiPromptReset');
-    await panel.waitForFunction(() => document.getElementById('aiPromptWhere').textContent === 'the default prompt', null, { timeout: 10000 });
-    assert.equal(await panel.$eval('#aiPrompt', el => el.value), 'Clean up this product photo.', 'reset goes back to the default prompt');
-
     // Nothing ticked: by default only AI generated photos go, and never a too-small one.
-    // clear every tick (each photo has its own checkbox)
-    for (const box of await panel.$$('.photo.selected input[data-select]')) await box.click();
+    await panel.click('#photoSelectAll');  // clears the tick
     await panel.waitForFunction(() => !document.querySelector('.photo.selected'));
     await panel.click('#sendPhotos');
     await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('No AI photos yet'), null, { timeout: 10000 });
@@ -626,13 +482,11 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
 
     // Photos taken on the phone (QR) while the listing form is open: with auto AI photoshop + auto send on,
     // the panel notices them by itself, cleans up only the new one and sends only its AI version.
-    await panel.click('#settingsBtn');  // the automatic switches live in Settings now
     await panel.click('#togglesBtn');
     await panel.waitForFunction(() => !document.querySelector('.toggles-body').hidden);
     await panel.click('label.sw:has(#autoSendPhotos)');
     await panel.click('label.sw:has(#autoAiPhotos)');
-    await panel.click('#settingsBtn');  // and back to the item while they run
-    await store.waitForFunction(() => Array.isArray(window.photoNames) && window.photoNames.some(n => n.startsWith("big-ai-")), null, { timeout: 20000 });
+    await store.waitForFunction(() => Array.isArray(window.photoNames) && window.photoNames.some(n => n.startsWith('big-ai-')), null, { timeout: 20000 });
     await panel.waitForFunction(() => !document.getElementById('busy') || !document.body.textContent.includes('AI photoshop 1'), null, { timeout: 10000 });
     const aiBefore = calls.aiPhotos.length;
     await store.evaluate(() => { window.photoNames = null; });
@@ -641,11 +495,9 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 20000 });
     assert.deepEqual(await store.evaluate(() => window.photoNames), ['big-ai-phone.jpg.png'], 'only the new phone photo (its AI version) went to the page');
     assert.deepEqual(calls.aiPhotos.slice(aiBefore), ['phone.jpg'], 'only the new photo was AI photoshopped');
-    await panel.click('#settingsBtn');
     await panel.click('label.sw:has(#autoSendPhotos)');
     await panel.click('label.sw:has(#autoAiPhotos)');
     await panel.click('#togglesBtn');
-    await panel.click('#settingsBtn');
     detail.photos = detail.photos.filter(p => p.name !== 'phone.jpg');
     await panel.click('#photoRefresh');
     await panel.waitForFunction(() => !document.querySelector('.photo[data-url$="phone.jpg"]'));
@@ -698,73 +550,41 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#listedDrawer [data-range="today"]');
     await panel.click('#listedClose');
     assert.ok(await panel.$eval('#listedDrawer', el => el.hidden));
-    assert.ok(await panel.$eval('#crumbLock', el => el.hidden), 'the lock is released after the listing is recorded');
+    assert.ok(!(await panel.$eval('#lock', el => el.classList.contains('on'))), 'the lock is released after the listing is recorded');
 
     // Back on the search page nothing is searched until an item is clicked in the queue.
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
     await panel.click('#storeAmazon');
-    await toQueue();
     await panel.waitForSelector('#itemList .item[data-upc="883049370897-1"]', { timeout: 15000 });
     await panel.click('#storeEbay');
     await panel.waitForFunction(() => document.querySelector('#itemList .item') && !document.querySelector('#itemList .item[data-upc="883049370897-1"]'), null, { timeout: 15000 });
-    await panel.waitForFunction(() => document.body.dataset.pageKind === 'listing-start', null, { timeout: 15000 });
+    await panel.waitForFunction(() => document.getElementById('pageCard').textContent.includes('search for the product'), null, { timeout: 15000 });
     await store.waitForTimeout(1500);
     assert.ok(store.url().includes('/sl/prelist/suggest'), 'the next queued item is not searched by itself');
-    await toQueue();
-    await toQueue();
+    await panel.click('#viewList');
     await panel.click('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
-    // The row's play button starts it: the store tab goes back to eBay's start page and searches that UPC.
+    // A double-click on a queue item starts it: the store tab goes back to eBay's start page and searches that UPC.
     await store.goto('https://www.ebay.com/sl/prelist/suggest?sr=wn');
-    await toQueue();
-    await panel.click('.item[data-upc="012345678905"] button[data-start]');
+    await panel.dblclick('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/sl\/prelist\/identify\?sr=sug&title=012345678905/, { timeout: 20000 });
-    // Amazon works the same: the row's play button opens Seller Central's product search (/abis/listing/syh
-    // resumes a draft and errors on /interactive/listing/workflow/offer), types the UPC and presses Next.
+    // Amazon works the same: a double-click opens "List Your Products" the way the Add Products menu does
+    // (the bare /abis/listing/syh resumes a draft and errors), types the UPC and presses Search.
     await store.goto('https://sellercentral.amazon.com/inventory');
     await panel.click('#storeAmazon');
-    await toQueue();
     await panel.waitForSelector('#itemList .item[data-upc="012345678905"]', { timeout: 15000 });
     await panel.waitForTimeout(600);
-    await toQueue();
-    await panel.click('.item[data-upc="012345678905"] button[data-start]');
+    await panel.dblclick('.item[data-upc="012345678905"]');
     await store.waitForURL(/\/listing\/results\?q=012345678905/, { timeout: 20000 });
-    assert.ok(calls.amazonPages.includes('/product-search'), 'opened the product search: ' + calls.amazonPages);
-    assert.ok(!calls.amazonPages.some(p => p.startsWith('/abis/listing/syh')), 'never the draft URL');
-    // Already on that page: the play button searches right there, no reload.
-    await store.goto('https://sellercentral.amazon.com/product-search');
+    assert.ok(calls.amazonPages.includes('/abis/listing/syh?ref_=xx_addprod_dnav_xx'), 'opened with the menu ref: ' + calls.amazonPages);
+    assert.ok(!calls.amazonPages.includes('/abis/listing/syh'), 'never the bare draft URL');
+    // Already on that page: the double-click searches right there, no reload.
+    await store.goto('https://sellercentral.amazon.com/abis/listing/syh?ref_=xx_addprod_dnav_xx');
     const opened = calls.amazonPages.length;
     await panel.waitForTimeout(1500);
-    await toQueue();
-    await panel.click('.item[data-upc="883049370897-1"] button[data-start]');
+    await panel.dblclick('.item[data-upc="883049370897-1"]');
     await store.waitForURL(/\/listing\/results\?q=883049370897$/, { timeout: 20000 });
     assert.deepEqual(calls.amazonPages.slice(opened), ['/listing/results?q=883049370897'], 'searched in place: ' + calls.amazonPages.slice(opened));
-
-    // The Add offer page: we always ship it ourselves, the quantity box that answer reveals gets
-    // what the rack holds, and the price comes from Amazon's own "Match lowest price" link.
-    await store.goto('https://sellercentral.amazon.com/abis/listing/syh?asin=B0LENOX&sku=883049370897-1');
-    await store.waitForFunction(() => document.getElementById('mfn') && document.getElementById('mfn').checked, null, { timeout: 25000 });
-    assert.ok(!(await store.$eval('#fba', el => el.checked)), 'the FBA radio is never the one picked');
-    await store.waitForFunction(() => document.getElementById('qty') && document.getElementById('qty').value === '1', null, { timeout: 25000 });
-    await store.waitForFunction(() => document.getElementById('price') && document.getElementById('price').value === '29.40', null, { timeout: 25000 });
-    assert.equal(await store.$eval('#cond', el => el.value), 'Used - Good', 'the condition select gets our condition');
-    // Quantity, then price, then the condition - and a value we put in is a violet "check it"
-    // checkpoint until the user lands on it, not a silent green.
-    await store.waitForFunction(() => document.querySelectorAll('#ss-lister-guide [data-ss-cp]').length >= 3, null, { timeout: 25000 });
-    if (!(await store.$('#ss-lister-guide [data-ss-row]'))) await store.click('#ss-lister-guide [data-ss="steps"]');
-    await store.waitForSelector('#ss-lister-guide [data-ss-row]');
-    const offerRows = await store.$$eval('#ss-lister-guide [data-ss-row]', els => els.map(row => ({ text: row.textContent.replace(/\s+/g, ' ').trim(), dot: row.querySelector('span').style.background })));
-    const offerNames = offerRows.map(r => r.text.split(' ')[0]).join(',');
-    assert.ok(offerRows[0].text.startsWith('Quantity') && offerRows[1].text.startsWith('Price'), 'quantity then price lead the Amazon checklist: ' + offerNames);
-    // Seller Central calls it "Item Condition", so the row wears the page's own words.
-    assert.ok(/condition/i.test(offerRows[2].text), 'the condition comes third: ' + offerNames);
-    assert.ok(offerRows[1].dot.includes('124, 58, 237'), 'the price we filled still wants a look (violet): ' + JSON.stringify(offerRows[1]));
-    assert.ok(!offerRows.some(r => r.text.startsWith('Photos') && r.dot.includes('220, 38, 38')), 'photos are not a red must on a catalogue listing: ' + JSON.stringify(offerRows));
-    await store.click('#ss-lister-guide [data-ss-cp="1"]');
-    await store.waitForFunction(() => {
-      const dots = document.querySelectorAll('#ss-lister-guide [data-ss-cp] span');
-      return dots[1] && dots[1].style.background.includes('22, 163, 74');
-    }, null, { timeout: 15000 });
     console.log('lister browser test passed');
   } finally {
     await context.close();
