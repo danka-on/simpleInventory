@@ -140,6 +140,7 @@
     .tile .d { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tile.zero { border-top-color: var(--line); }
     .tile.zero .n { color: var(--muted); opacity: .5; }
+    a.tile { display: block; text-decoration: none; color: inherit; }
     .tile:hover { border-color: var(--line-2); border-top-color: var(--s, var(--line-2)); }
     .clue { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; margin-bottom: 6px; font-size: 13px; border: 1px solid transparent; }
     .clue .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
@@ -228,7 +229,7 @@
       .loc { padding: 5px 10px; }
       .section { padding: 12px; }
 
-      /* Seven tiles fit three across instead of running off the screen. */
+      /* Eight tiles fit three across instead of running off the screen. */
       .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
       .tile { padding: 7px 8px; }
       .tile .n { font-size: 18px; }
@@ -730,6 +731,10 @@ function renderDashboard() {
   const soldUnits = ledger.sold_units ?? sold.reduce((s, r) => s + (num(pick(r, 'quantity')) || 1), 0);
   const soldOrders = ledger.sold_orders ?? sold.length;
   const tile = (key, n, label, detail) => `<button type="button" class="tile ${n ? '' : 'zero'}" data-scroll="sec-${key}" style="--s:var(--s-${key})"><span class="n">${esc(String(n))}</span><span class="l">${esc(label)}</span>${detail ? `<span class="d">${esc(detail)}</span>` : ''}</button>`;
+  // Prep opens Items to List instead of scrolling, since that is where prepped items get worked.
+  const prepQty = processed.reduce((s, r) => s + (num(pick(r, 'quantity')) || 0), 0);
+  const prepGood = processed.reduce((s, r) => s + (num(pick(r, 'good_qty')) || 0), 0);
+  const prepTile = `<a class="tile ${prepQty ? '' : 'zero'}" href="${attrEsc(openSourceUrl('processed', upc))}" target="_blank" rel="noopener" data-source-link="processed" style="--s:var(--s-processed)" title="Open in Items to List"><span class="n">${esc(String(prepQty))}</span><span class="l">Prep ↗</span>${processed.length ? `<span class="d">${esc(`${prepGood} good`)}</span>` : ''}</a>`;
   const listingDetail = (rows, qty) => {
     if (!rows.length) return '';
     const price = rows.map(r => money(pick(r, 'price'))).find(Boolean);
@@ -737,7 +742,8 @@ function renderDashboard() {
   };
   const tiles = [
     tile('shelves', onShelfQty, 'On shelf', onShelf.length ? onShelf.map(r => r.position || '?').slice(0, 3).join(', ') : ''),
-    tile('bol', receivedQty, 'Received', lots.length ? `LOT ${lots.slice(0, 2).join(', ')}` : ''),
+    prepTile,
+    tile('bol', receivedQty, 'Macy shipment', lots.length ? `LOT ${lots.slice(0, 2).join(', ')}` : ''),
     tile('sold', soldUnits, 'Sold', soldOrders ? `${soldOrders} order${soldOrders === 1 ? '' : 's'}` : ''),
     tile('returns', ledger.returned || returns.length, 'Returned', ledger.restocked ? `${ledger.restocked} restocked` : ''),
     tile('amazon', amazon.length, 'On Amazon', listingDetail(amazon, amazonQty)),
