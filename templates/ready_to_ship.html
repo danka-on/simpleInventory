@@ -2113,6 +2113,21 @@ function readyToShipUsableImage(value) {
     return image && !/^(?:nan|none|null|undefined|n\/?a|no\s*image)$/i.test(image);
 }
 
+// Ask the image host for a ~120px copy for the 44px table thumbnail; the full
+// URL stays in data-original-src so a failed small copy retries the original.
+function readyToShipThumbUrl(url) {
+    const image = String(url || '').trim();
+    let match = image.match(/^https?:\/\/m\.media-amazon\.com\/images\/I\/([^/.]+)(?:\.[^/]*)?\.(jpe?g|png|gif|webp)$/i);
+    if (match) return `https://m.media-amazon.com/images/I/${match[1]}._SL120_.${match[2]}`;
+    match = image.match(/^https?:\/\/i\.ebayimg\.com\/images\/g\/([^/]+)\/s-l\d+\.(jpe?g|png|webp)$/i);
+    if (match) return `https://i.ebayimg.com/images/g/${match[1]}/s-l140.${match[2]}`;
+    match = image.match(/^https?:\/\/i\.ebayimg\.com\/\d+\/s\/[^/]+\/z\/([^/]+)\/\$_\d+\.(jpe?g|png)(?:\?.*)?$/i);
+    if (match) return `https://i.ebayimg.com/images/g/${match[1]}/s-l140.${match[2].toLowerCase()}`;
+    match = image.match(/^https?:\/\/slimages\.macys\.com\/is\/image\/([^?#]+)$/i);
+    if (match) return `https://slimages.macys.com/is/image/${match[1]}?wid=120&hei=120&fit=fit`;
+    return image;
+}
+
 function handleReadyToShipImageError(img) {
     if (!img) return;
     const originalSrc = String(img.dataset.originalSrc || '').trim();
@@ -2342,7 +2357,7 @@ function tdTitle(order) {
     const imageValue = readyToShipUsableImage(order.image) ? order.image : order.image_url;
     const imgSrc = readyToShipUsableImage(imageValue) ? esc(imageValue) : '';
     const thumbHtml = imgSrc
-        ? `<img src="${imgSrc}" data-original-src="${imgSrc}" onerror="handleReadyToShipImageError(this)" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);" loading="lazy">`
+        ? `<img src="${esc(readyToShipThumbUrl(imageValue))}" data-original-src="${imgSrc}" onerror="handleReadyToShipImageError(this)" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);" loading="lazy">`
         : `<img src="${esc(READY_TO_SHIP_MISSING_THUMB)}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;margin-right:10px;vertical-align:middle;border:1px solid rgba(255,255,255,0.08);">`;
     return `<td class='sold-td-small'><div class="rt-title-wrap">${thumbHtml}<div class="rt-title-copy"><a href="#" class="order-title-link rt-title-link" data-order-id="${order.id}">${fullTitle}</a><div class="rt-prep-flag-slot" data-order-id="${order.id}">${renderReadyToShipMetaBadges(order)}</div></div></div></td>`;
 }
