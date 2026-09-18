@@ -599,7 +599,9 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.waitForFunction(() => window.photoNames && window.photoNames.length === 1 && window.photoNames[0] === 'own.jpg', null, { timeout: 15000 });
 
     // The AI photoshop prompt: typing in it stays on this item, "Save for all" makes it the default.
-    await panel.click('details:has(#aiPrompt) summary');
+    // Since 0.2.37 it lives in the Advanced disclosure behind ⚙ Options.
+    if (await panel.$eval('.gearbox', el => el.hidden)) await panel.click('#gearBtn');
+    await panel.click('#advBox summary');
     await panel.$eval('#aiPrompt', el => { el.value = 'Just this one.'; el.dispatchEvent(new Event('input', { bubbles: true })); });
     assert.equal(await panel.$eval('#aiPromptWhere', el => el.textContent), 'this item only');
     await panel.click('#aiPromptSave');

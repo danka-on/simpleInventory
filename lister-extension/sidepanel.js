@@ -1016,7 +1016,8 @@
         // What the rack really holds, so the overlay can pin it under the store's quantity box.
         const inv = info.inventory || {}, g = info.gate || {};
         const stock = { rack: g.rackQty ?? inv.quantity ?? null, listable: g.listable ?? inv.quantity ?? null, positions: inv.positions || [] };
-        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, stock, aiFields: state.aiGenerated[info.upc] || {} } });
+        // Quantity and price are put in for the user, so the HUD still stops at them for a look.
+        response = await pageMessage({ type: 'guide-start', options: { values: v, store: state.page.store, aspects: info.fields.aspects || {}, noteFields, stock, confirmFields: ['quantity', 'price'], aiFields: state.aiGenerated[info.upc] || {} } });
         if (!silent && !response.state.needed.length) toast('Nothing left to fill on this page');
       } else if (action === 'go') response = await pageMessage({ type: 'guide-go', index });
       else response = await pageMessage({ type: 'guide-' + action });
