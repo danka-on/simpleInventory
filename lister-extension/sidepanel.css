@@ -577,6 +577,10 @@ button.tiny.phone-btn .phone-ico { font-size: 13px; line-height: 1; }
 .fbview .fb-photos img { width: 64px; height: 64px; object-fit: cover; border-radius: 7px; background: var(--chip); flex: none; }
 .fbview .fb-two { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
 .fbview .fb-n { float: right; font-variant-numeric: tabular-nums; color: var(--faint); }
+/* The eBay/Amazon item's strip and photo card inside the FB review card, and its AI buttons. */
+.fbview .fb-edit .strip { padding: 10px 0 2px; }
+.fbview .fb-edit .sect { padding: 10px 0; }
+.fbview .fb-ai { font-size: 11px; padding: 1px 8px; margin: 0 4px; vertical-align: middle; }
 .fbview #fbCatSearch { margin-top: 6px; }
 .fbview .fb-results { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; max-height: 180px; overflow: auto; }
 .fbview .fb-cat { text-align: left; font-size: 12px; padding: 4px 8px; background: var(--card-2); }

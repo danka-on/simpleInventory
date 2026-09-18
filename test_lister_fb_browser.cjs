@@ -19,7 +19,7 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
     channel: 'msedge', headless: false, acceptDownloads: true,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { panel: [], saves: [], build: 0, listed: 0 };
+  const calls = { panel: [], saves: [], build: 0, listed: 0, generate: [] };
   const fbItem = { upc: UPC, status: 'queued', title: 'Lenox Butterfly Meadow Dinner Plate', price: 24, condition: 'New', category: '',
                    reviewed: false, batchId: null, thumb: '', problems: [] };
   const batches = [];
@@ -46,6 +46,18 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
           conditions: ['New', 'Used - Like New', 'Used - Good', 'Used - Fair'], notes: '', defect: 'Small chip', racks: [],
           limits: { title: 150, description: 5000 }, problems: [] });
       }
+      // The full Lister item the FB review card borrows its strip and photo card from.
+      if (url.pathname === `/api/lister/queue/${UPC}` && request.method() === 'GET') {
+        return json({ success: true, item: { upc: UPC, title: 'LENOX BUTTERFLY MEADOW DINNER PLT', suffixed: false,
+          photos: [{ url: 'https://pi.nexuscentralhq.org/static/p1.jpg', name: 'p1.jpg', source: 'listing' },
+                   { url: 'https://pi.nexuscentralhq.org/static/p2.jpg', name: 'p2.jpg', source: 'prep' }],
+          inventory: { quantity: 2, positions: ['B-4'] }, gate: { rackQty: 2, listable: 2, liveEbay: 1, liveAmazon: 0 },
+          links: [{ platform: 'ebay', url: 'https://www.ebay.com/itm/335566778899', kind: 'listed', listing_id: '335566778899' }],
+          existing: {}, queue: { listed: { ebay: true }, skipped: [] }, notes: [], voiceNotes: [], defect: 'Small chip',
+          fields: { title: 'Lenox Butterfly Meadow Dinner Plate', brand: 'Lenox', aspects: { Color: ['White'] } },
+          mobilePhotosUrl: 'https://pi.nexuscentralhq.org/items-to-list/mobile-photos/x' } });
+      }
+      if (url.pathname === '/api/lister/qr') return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
       if (url.pathname === '/api/lister/fb/categories') return json({ success: true, categories: [CATEGORY], suggested: [] });
       if (url.pathname.startsWith('/static/')) return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
       if (/^\/api\/lister\/fb\/batch\/\d+\.xlsx$/.test(url.pathname)) {
@@ -58,6 +70,13 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
         calls.saves.push(body);
         Object.assign(fbItem, { price: Number(body.price), condition: body.condition, category: body.category, status: body.ready ? 'ready' : 'queued' });
         return json({ success: true, upc: UPC, status: fbItem.status, problems: [] });
+      }
+      if (url.pathname === `/api/lister/queue/${UPC}/generate`) {
+        const body = request.postDataJSON();
+        calls.generate.push(body);
+        return json(body.kind === 'title'
+          ? { success: true, kind: 'title', title: 'Lenox Butterfly Meadow Dinner Plate 10.75 in White' }
+          : { success: true, kind: 'description', descriptionText: 'Beautiful Lenox Butterfly Meadow dinner plate.', descriptionHtml: '<p>x</p>' });
       }
       if (url.pathname === '/api/lister/fb/build') {
         calls.build += 1;
@@ -98,6 +117,33 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
     assert.equal(await panel.$eval('#fbTitle', el => el.value), 'Lenox Butterfly Meadow Dinner Plate');
     assert.match(await panel.textContent('#fbTitleN'), /^35\/150$/);
     assert.match(await panel.textContent('#fbCard .fb-note'), /Small chip/);
+    // The same cards as the eBay/Amazon item: Rack · eBay · Amazon, and the whole photo card.
+    await panel.waitForSelector('#fbCard .strip .cell.rack');
+    assert.match(await panel.textContent('#fbCard .strip .cell.rack'), /2\s*to list/);
+    assert.match(await panel.textContent('#fbCard .strip .cell.rack'), /B-4/);
+    assert.match(await panel.textContent('#fbCard .strip .cell.ebay'), /Listed/);
+    assert.match(await panel.textContent('#fbCard .strip .cell.amazon'), /Not listed/);
+    assert.equal(await panel.$$eval('#fbCard .photos .photo', els => els.length), 2);
+    for (const id of ['photoLink', 'addPhoto', 'photoRefresh', 'aiPhotos']) assert.ok(await panel.$('#fbCard #' + id), 'photo card has ' + id);
+    assert.equal(await panel.$('#fbCard #sendPhotos'), null, 'no "Send to page": there is no Facebook form to fill');
+    await panel.click('#fbCard .photos .photo');
+    assert.ok(await panel.$eval('#fbCard .photos .photo', el => el.classList.contains('selected')), 'a photo can be ticked');
+    await panel.click('#fbCard #addPhoto');
+    await panel.waitForSelector('#fbCard .qr img');
+    // AI beside Title and Description fills the box; nothing is saved until Save.
+    await panel.click('#fbCard [data-act="ai-title"]');
+    await panel.waitForFunction(() => document.getElementById('fbTitle').value.endsWith('10.75 in White'));
+    assert.equal(calls.generate.at(-1).kind, 'title');
+    assert.equal(calls.generate.at(-1).values.brand, 'Lenox', 'the writer gets the item facts');
+    assert.equal(calls.generate.at(-1).values.condition, 'New', 'and the Facebook condition');
+    assert.ok(calls.generate.at(-1).values.notes.includes('Small chip'), 'and the notes');
+    await panel.click('#fbCard [data-act="ai-description"]');
+    await panel.waitForFunction(() => document.getElementById('fbDesc').value.startsWith('Beautiful Lenox'));
+    assert.match(await panel.textContent('#fbTitleN'), /^50\/150$/, 'the counter follows');
+    assert.equal(calls.saves.length, 0, 'nothing saved by the AI buttons');
+    // Back to the original text so the rest of this test reads as before.
+    await panel.fill('#fbTitle', 'Lenox Butterfly Meadow Dinner Plate');
+    await panel.fill('#fbDesc', 'Lenox plate.');
     await panel.fill('#fbPrice', '22');
     await panel.selectOption('#fbCond', 'Used - Good');
     await panel.fill('#fbCatSearch', 'plates');

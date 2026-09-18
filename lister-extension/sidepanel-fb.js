@@ -19,7 +19,7 @@
 
   const fb = {
     open: false, items: [], counts: {}, batches: [], listedToday: 0, uploadUrl: '', helpUrl: '', maxRows: 50,
-    upc: null, item: null, itemError: '', loaded: false, error: '', armed: null, armTimer: null, searchTimer: null,
+    upc: null, item: null, info: null, aiBusy: '', itemError: '', loaded: false, error: '', armed: null, armTimer: null, searchTimer: null,
   };
 
   // -- data ---------------------------------------------------------------------------------
@@ -43,8 +43,11 @@
   }
 
   async function openItem(upc) {
-    fb.upc = upc; fb.item = null; fb.itemError = '';
+    fb.upc = upc; fb.item = null; fb.info = null; fb.itemError = '';
+    P().clearPhotoSelection();
     renderItem();
+    // The full Lister item (the same one the eBay/Amazon view shows): photos, rack and store status.
+    void loadInfo(upc);
     P().renderActionBar();
     const done = P().busy('Opening the item…');
     try {
@@ -57,8 +60,43 @@
     if (fb.upc === upc) { renderItem(); P().renderActionBar(); }
   }
 
+  async function loadInfo(upc) {
+    try {
+      const info = await P().loadItem(upc);
+      if (fb.upc === upc) { fb.info = info; renderItem(); }
+    } catch { /* the review card works without it */ }
+  }
+
+  // "AI" beside Title and Description: the Lister's own writer, from the item, its notes and this draft.
+  async function aiText(kind) {
+    if (!fb.item || fb.aiBusy) return;
+    const full = fb.info || {}, fields = full.fields || {}, v = values();
+    const title = v.title || fields.title || full.title || '';
+    if (!title) { P().toast('Put a title in first: the AI starts from it', true); return; }
+    fb.aiBusy = kind; renderItem();
+    const done = P().busy(kind === 'title' ? 'Writing the title with AI\u2026' : 'Writing the description with AI\u2026');
+    try {
+      const notes = [...(full.notes || []).map(n => n.english || n.text), ...(full.voiceNotes || []).map(n => n.english),
+        full.defect || fb.item.defect].filter(Boolean);
+      const data = await P().api('/api/lister/queue/' + encodeURIComponent(fb.upc) + '/generate', { method: 'POST', body: { kind, values: {
+        title, systemTitle: full.title || '', brand: fields.brand || '', categoryPath: (v.category || '').replace(/\/\//g, ' > '),
+        condition: v.condition || '', conditionDescription: fields.conditionDescription || '', notes, aspects: fields.aspects || {},
+      }, instructions: kind === 'title' ? P().titlePrompt : '' } });
+      const box = $(kind === 'title' ? 'fbTitle' : 'fbDesc');
+      if (box) {
+        box.value = String(kind === 'title' ? data.title : data.descriptionText || '').slice(0, box.maxLength > 0 ? box.maxLength : undefined);
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      P().toast((kind === 'title' ? 'AI title written' : 'AI description written') + ' \u2014 press Save to keep it');
+    } catch (error) {
+      P().toast('AI ' + kind + ': ' + (error.message || error), true);
+    } finally {
+      fb.aiBusy = ''; done(); renderItem();
+    }
+  }
+
   function backToList() {
-    fb.upc = null; fb.item = null;
+    fb.upc = null; fb.item = null; fb.info = null;
     renderList();
     P().renderActionBar();
     void load({ quiet: true });
@@ -244,8 +282,11 @@
         <div class="muted" style="margin-top:8px">${fb.itemError ? esc(fb.itemError) : 'Loading…'}</div></div>`);
       return;
     }
-    const d = info.draft;
+    // A redraw (photos changed, AI busy) keeps what was typed but not saved yet.
+    const d = $('fbTitle') ? { ...info.draft, ...values() } : info.draft;
     const locked = info.status === 'in_template';
+    const full = fb.info;
+    const aiBtn = (kind, label) => `<button class="mini fb-ai" type="button" data-act="ai-${kind}" title="Write the ${kind} with AI from the item and its notes"${locked || fb.aiBusy ? ' disabled' : ''}>${fb.aiBusy === kind ? '<span class="spin"></span>' : '\u2728'} ${label}</button>`;
     const categories = [...new Set([d.category, ...(d.suggestions || [])].filter(Boolean))];
     const photos = (info.photos || []).slice(0, 8).map(p => `<img src="${esc(p.thumb || p.url)}" alt="" loading="lazy">`).join('');
     const note = [info.defect, info.notes].filter(Boolean).join(' · ');
@@ -254,11 +295,12 @@
         <div class="fb-editbar"><button class="link" type="button" data-act="back">← Facebook list</button>
           <span class="muted small">${esc(info.upc)} · ${esc(STATUS[info.status] || info.status)}</span></div>
         ${locked ? `<div class="small fb-lock">In workbook #${esc(info.batchId)}. Put that workbook back to change it.</div>` : ''}
-        <div class="fb-photos">${photos || '<span class="muted small">No photos yet.</span>'}</div>
+        ${full ? P().statusStripHtml(full) : ''}
+        ${full ? P().photoCardHtml(full) : `<div class="fb-photos">${photos || '<span class="muted small">No photos yet.</span>'}</div>`}
         <div class="row tight"><button class="mini" type="button" data-act="photos"${photos ? '' : ' disabled'}>⬇ Save photos</button>
           <span class="muted small">Facebook's file has no photos; add them on the listing.</span></div>
         ${note ? `<div class="small fb-note">${esc(note)}</div>` : ''}
-        <label>Title <span class="fb-n" id="fbTitleN"></span><input id="fbTitle" maxlength="${info.limits.title}" value="${esc(d.title)}"></label>
+        <label>Title ${aiBtn('title', 'AI title')}<span class="fb-n" id="fbTitleN"></span><input id="fbTitle" maxlength="${info.limits.title}" value="${esc(d.title)}"></label>
         <div class="fb-two">
           <label>Price (whole $)<input id="fbPrice" type="number" min="1" step="1" inputmode="numeric" value="${esc(d.price ?? '')}"></label>
           <label>Condition<select id="fbCond">${info.conditions.map(c => `<option${c === d.condition ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
@@ -266,13 +308,14 @@
         <label>Category<select id="fbCat"><option value="">(none)</option>${categories.map(c => `<option value="${esc(c)}"${c === d.category ? ' selected' : ''}>${esc(c.replace(/\/\//g, ' › '))}</option>`).join('')}</select></label>
         <input id="fbCatSearch" type="search" placeholder="Search all Facebook categories…" aria-label="Search Facebook categories">
         <div id="fbCatResults" class="fb-results"></div>
-        <label>Description <span class="fb-n" id="fbDescN"></span><textarea id="fbDesc" rows="8" maxlength="${info.limits.description}">${esc(d.description)}</textarea></label>
+        <label>Description ${aiBtn('description', 'AI description')}<span class="fb-n" id="fbDescN"></span><textarea id="fbDesc" rows="8" maxlength="${info.limits.description}">${esc(d.description)}</textarea></label>
         <div class="row">
           <button type="button" data-act="save"${locked ? ' disabled' : ''}>Save</button>
           <button class="danger" type="button" data-act="remove">Remove from FB</button>
         </div>
       </div>`);
-    for (const el of card.querySelectorAll('input, select, textarea')) el.disabled = locked && el.id !== 'fbCatSearch';
+    for (const el of card.querySelectorAll('.fb-edit > label input, .fb-edit > label select, .fb-edit > label textarea, .fb-two input, .fb-two select')) el.disabled = locked;
+    if (full) P().wirePhotoCard(card, full, { rerender: renderItem, refresh: () => loadInfo(fb.upc) });
     counters();
   }
 
@@ -322,6 +365,8 @@
     const card = $('fbCard');
     if (!card || card.dataset.wired) return;
     card.dataset.wired = '1';
+    // AI photoshop, a new phone photo or the Phone link busy state redraws the open item too.
+    P().onPhotosChanged(() => { if (fb.open && fb.upc && fb.item) renderItem(); });
     card.addEventListener('click', event => {
       const act = event.target.closest('[data-act]');
       if (act) {
@@ -331,6 +376,8 @@
           case 'save': void save({ ready: false }).then(ok => ok && load({ quiet: true })); break;
           case 'remove': void remove(fb.upc); break;
           case 'photos': void savePhotos(); break;
+          case 'ai-title': void aiText('title'); break;
+          case 'ai-description': void aiText('description'); break;
           case 'facebook': openFacebook(); break;
           case 'download': void download(`/api/lister/fb/batch/${id}.xlsx`, `facebook-marketplace-${id}.xlsx`)
             .catch(error => P().toast(error.message || String(error), true)); break;

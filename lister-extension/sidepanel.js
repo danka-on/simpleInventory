@@ -1331,7 +1331,7 @@
   async function sendPhotoLink(info) {
     if (!info?.upc || state.photoLinkBusy) return;
     state.photoLinkBusy = true;
-    renderDetail();
+    photosChanged();
     try {
       const result = await api('/api/lister/photo-link', { method: 'POST', body: { upc: info.upc } });
       const who = (result.sent || []).join(', ');
@@ -1340,7 +1340,7 @@
       toast('Photo link: ' + error.message, true);
     } finally {
       state.photoLinkBusy = false;
-      renderDetail();
+      photosChanged();
     }
   }
 
@@ -1437,8 +1437,7 @@
     }
   }
 
-  async function aiPhotoshop() {
-    const info = detail();
+  async function aiPhotoshop(info = detail()) {
     if (!info) return;
     const urls = (info.photos || []).map(p => p.url).filter(u => state.selectedPhotos.has(u));
     if (!urls.length) { toast('Tick the photos to clean up first', true); return; }
@@ -1538,7 +1537,7 @@
     let done = 0;
     const release = busy('AI photoshop…');
     for (const url of urls) {
-      state.aiBusy = `AI photoshop ${done + 1}/${urls.length}…`; release.update(`AI photoshop ${done + 1} of ${urls.length}…`); renderDetail();
+      state.aiBusy = `AI photoshop ${done + 1}/${urls.length}…`; release.update(`AI photoshop ${done + 1} of ${urls.length}…`); photosChanged();
       try {
         const data = await api('/api/lister/photos/ai', { method: 'POST', body: { upc: info.upc, url, prompt } });
         info.photos.unshift(data.photo);
@@ -1554,7 +1553,7 @@
     }
     state.aiBusy = ''; release();
     if (done) toast(`${done} photo${done === 1 ? '' : 's'} cleaned up; the originals are kept`);
-    renderDetail();
+    photosChanged();
   }
 
   // -- rendering ---------------------------------------------------------------------------
@@ -1981,26 +1980,16 @@
     return { lt: '', en: note.english || text };
   }
 
-  function renderDetail() {
-    const item = current();
-    const info = detail();
-    const el = $('detail');
-    el.hidden = !item || state.view !== 'item';
-    if (!item || state.view !== 'item') return;
-    if (!info) {
-      // The waiting card keeps the room the real one will need, so nothing jumps when it arrives.
-      setHtml(el, `<div class="hero">${item.thumb ? `<img src="${esc(item.thumb)}" alt="">` : '<div class="noimg"></div>'}<div><div class="name">${esc(item.title || item.upc)}</div><div class="facts">${esc(item.upc)}</div></div></div><p class="muted loading"><span class="spin"></span> Loading item\u2026</p>`);
-      return;
-    }
-    const v = values(info);
-    const store = state.page?.store || '';
-    const notes = info.notes || [];
-    const voice = info.voiceNotes || [];
-    const photos = info.photos || [];
-    const existing = (info.existing || {})[state.platform] || [];
-    const linkedHere = (info.links || []).find(l => l.platform === state.platform);
-    const aspects = Object.entries(info.fields.aspects || {});
-    const prep = info.prepStatus || {};
+  // -- item cards shared with the FB tab (sidepanel-fb.js) --------------------------------------
+  // The eBay/Amazon item and the FB tab's item both draw these; both redraw when the photos change.
+  const photoWatchers = new Set();
+  function photosChanged() {
+    renderDetail();
+    for (const fn of photoWatchers) { try { fn(); } catch { /* a view that is closed */ } }
+  }
+
+  // Rack · eBay · Amazon: how many are on the rack and where, and whether each store has it.
+  function statusStripHtml(info) {
     const stock = info.inventory || {};
     const gate = info.gate || {};
     const storeUrlFor = platform => {
@@ -2034,6 +2023,96 @@
     const where = stock.positions?.length
       ? `@ ${stock.positions.map(p => `<button type="button" class="loc" data-locpv="${esc(p)}" title="Show the shelf photo for ${esc(p)}">${esc(p)}</button>`).join(', ')}`
       : 'no rack position';
+    return `
+      <div class="strip">
+        <div class="cell rack ${rackQty ? 'good' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Rack</div>
+          <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search"><span class="num">${esc(listable)}</span> to list</a>${gate.mismatch ? ' <span class="neq">\u2260</span>' : ''}</div>
+          <div class="s">${where}</div></div>
+        ${storeCell('ebay')}${storeCell('amazon')}
+      </div>`;
+  }
+
+  // The photo card: tiles to tick and drag, the phone camera (Telegram or QR), AI photoshop and,
+  // on a store form (send), "Send to page".
+  function photoCardHtml(info, { send = false } = {}) {
+    const photos = info.photos || [];
+    const store = state.page?.store || '';
+    const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : p.source === 'catalog' ? 'catalog' : '');
+    const tile = p => { const used = state.usedPhotos.has(p.url); return `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''} ${used ? 'used' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)}${used ? ' \u00b7 already on the page' : ' \u00b7 drag onto the store page'}">
+        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}>
+        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px \u2014 never sent automatically">too small</span>${used ? '<span class="tag used" title="This photo already went into the page">used</span>' : ''}</div>`; };
+    return `
+      <div class="sect">
+        <div class="sect-h"><span class="lbl">Photos</span><span class="n">${photos.length}${state.usedPhotos.size ? ` \u00b7 ${state.usedPhotos.size} sent` : ''}</span><span class="sp"></span>
+          <button id="photoLink" class="tiny phone-btn" type="button" title="Telegram the camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : '<span class="phone-ico" aria-hidden="true">\ud83d\udcf1</span>Phone'}</button>
+          <button id="addPhoto" class="tiny" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : 'QR'}</button>
+          <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button></div>
+        ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone \u2014 it opens straight into the camera. Press \u21bb when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
+        ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use QR or Phone to shoot some.</div>'}
+        <div class="row tight">
+          ${send ? `<button id="sendPhotos" class="primary mini" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending\u2026' : '\u2b05 Send to page'}</button>` : ''}
+          <button id="aiPhotos" class="mini" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '\u2728 AI photoshop'}</button>
+        </div>
+      </div>`;
+  }
+
+  function wirePhotoCard(root, info, { rerender, refresh }) {
+    const photos = info.photos || [];
+    const q = id => root.querySelector('#' + id);
+    q('photoRefresh').onclick = refresh;
+    for (const box of root.querySelectorAll('input[data-select]')) box.onchange = () => { if (box.checked) state.selectedPhotos.add(box.dataset.select); else state.selectedPhotos.delete(box.dataset.select); box.closest('.photo').classList.toggle('selected', box.checked); };
+    for (const tileEl of root.querySelectorAll('.photo')) {
+      const img = tileEl.querySelector('img');
+      const flagSize = () => { if (!img.naturalWidth) return; const size = { w: img.naturalWidth, h: img.naturalHeight }; state.photoSizes[tileEl.dataset.url] = size; if (isTooSmall(size)) { tileEl.querySelector('.tag.small').hidden = false; tileEl.classList.add('too-small'); } };
+      if (img.complete) flagSize(); else img.onload = flagSize;
+      tileEl.onclick = event => { if (event.target.matches('input')) return; const box = tileEl.querySelector('input'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); };
+      tileEl.onmouseenter = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
+      tileEl.onmousedown = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
+      tileEl.ondragstart = event => {
+        const url = tileEl.dataset.url;
+        const cached = state.photoFiles[url];
+        const photo = photos.find(p => p.url === url) || {};
+        event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('text/uri-list', url);
+        event.dataTransfer.setData('text/plain', url);
+        // The page script turns this into a real file where it lands (a File cannot cross from the panel).
+        event.dataTransfer.setData('application/x-sweetshelves-photo', JSON.stringify({ url, name: cached?.name || photo.name || 'photo.jpg', type: cached?.type || 'image/jpeg', base64: cached?.base64 || '' }));
+        if (cached) {
+          event.dataTransfer.setData('DownloadURL', `${cached.type}:${cached.name}:${url}`);
+          try { event.dataTransfer.items.add(cached.file); } catch { /* the page gets the URL instead */ }
+        }
+      };
+    }
+    if (q('sendPhotos')) q('sendPhotos').onclick = () => sendPhotos();
+    q('aiPhotos').onclick = () => aiPhotoshop(info);
+    q('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; rerender(); };
+    q('photoLink').onclick = () => sendPhotoLink(info);
+  }
+
+  function renderDetail() {
+    const item = current();
+    const info = detail();
+    const el = $('detail');
+    el.hidden = !item || state.view !== 'item';
+    if (!item || state.view !== 'item') return;
+    if (!info) {
+      // The waiting card keeps the room the real one will need, so nothing jumps when it arrives.
+      setHtml(el, `<div class="hero">${item.thumb ? `<img src="${esc(item.thumb)}" alt="">` : '<div class="noimg"></div>'}<div><div class="name">${esc(item.title || item.upc)}</div><div class="facts">${esc(item.upc)}</div></div></div><p class="muted loading"><span class="spin"></span> Loading item\u2026</p>`);
+      return;
+    }
+    const v = values(info);
+    const store = state.page?.store || '';
+    const notes = info.notes || [];
+    const voice = info.voiceNotes || [];
+    const photos = info.photos || [];
+    const existing = (info.existing || {})[state.platform] || [];
+    const linkedHere = (info.links || []).find(l => l.platform === state.platform);
+    const aspects = Object.entries(info.fields.aspects || {});
+    const prep = info.prepStatus || {};
+    const stock = info.inventory || {};
+    const gate = info.gate || {};
+    const rackQty = gate.rackQty ?? stock.quantity ?? 0;
+    const prepUrl = serverBase() + '/items-to-list?direct_search=1&q=' + encodeURIComponent(info.upc);
     // The thing you must act on, said once, in words - not a chip in a row of chips.
     const alerts = [];
     const wrong = (prep.status === 'bad' ? (prep.reason || 'marked bad in Item Prep') : '') || info.defect || '';
@@ -2042,10 +2121,6 @@
     if (gate.mismatch) alerts.push(`<div class="alert warn">Item Prep counted ${esc(gate.prepQty)}, the rack holds ${esc(rackQty)} \u2014 <a href="${esc(prepUrl)}" target="_blank" rel="noopener">open Items to List</a></div>`);
     if (existing.length && !linkedHere) alerts.push(`<div class="alert warn"><span class="grow">Already on ${storeName(state.platform)}: ${existing.map(x => esc(x.listingId || x.asin || x.sku) + (x.state ? ' (' + esc(x.state) + ')' : '')).join(', ')}</span>
       <button id="markExisting" class="tiny" type="button">Use that listing</button></div>`);
-    const bubble = p => (p.source === 'ai' ? 'ai' : p.source === 'prep' ? 'prep' : p.source === 'catalog' ? 'catalog' : '');
-    const tile = p => { const used = state.usedPhotos.has(p.url); return `<div class="photo ${p.source} ${state.selectedPhotos.has(p.url) ? 'selected' : ''} ${used ? 'used' : ''}" data-url="${esc(p.url)}" draggable="true" title="${esc(p.name)}${used ? ' \u00b7 already on the page' : ' \u00b7 drag onto the store page'}">
-        <img src="${esc(p.url)}" alt="" loading="lazy" draggable="false"><input type="checkbox" data-select="${esc(p.url)}" ${state.selectedPhotos.has(p.url) ? 'checked' : ''}>
-        ${bubble(p) ? `<span class="tag ${bubble(p)}">${bubble(p)}</span>` : ''}<span class="tag small" hidden title="Under ${MIN_PHOTO_SIDE} px \u2014 never sent automatically">too small</span>${used ? '<span class="tag used" title="This photo already went into the page">used</span>' : ''}</div>`; };
     const noteRow = (icon, lt, en, extra = '', plain = false) => `<div class="note2${plain ? ' plain' : ''}"><span class="ico" title="${icon === '\ud83c\udfa4' ? 'Voice note' : 'Written note'}">${icon}</span>
         <div class="lt">${lt ? esc(lt) : '<span class="muted">\u2014</span>'}</div><div class="en">${en ? esc(en) : '<span class="muted">\u2014</span>'}</div>${extra}</div>`;
     const html = `
@@ -2054,12 +2129,7 @@
           <div class="facts">${esc(info.upc.split('-')[0])}${info.suffixed ? ` \u00b7 <span class="unit">unit ${esc(info.upc.split('-')[1])}</span>` : ''}${info.cost != null ? ' \u00b7 $' + money(info.cost) : ''}${v.price != null ? ' \u2192 <b>$' + esc(money(v.price)) + '</b>' : ''} \u00b7 qty ${esc(v.quantity ?? '?')}</div>
         </div></div>
       ${alerts.join('')}
-      <div class="strip">
-        <div class="cell rack ${rackQty ? 'good' : 'bad'} ${gate.mismatch ? 'mismatch' : ''}"><div class="k">Rack</div>
-          <div class="v"><a href="${esc(warehouseUrl)}" target="_blank" rel="noopener" title="Open the warehouse search"><span class="num">${esc(listable)}</span> to list</a>${gate.mismatch ? ' <span class="neq">\u2260</span>' : ''}</div>
-          <div class="s">${where}</div></div>
-        ${storeCell('ebay')}${storeCell('amazon')}
-      </div>
+      ${statusStripHtml(info)}
 
       <div class="sect notes">
         <div class="sect-h"><span class="lbl">Notes</span><span class="n">${notes.length || voice.length || info.defect ? 'LT \u00b7 EN' : 'none'}</span><span class="sp"></span></div>
@@ -2074,18 +2144,7 @@
         <audio id="notePlayer" preload="none" hidden></audio>
       </div>
 
-      <div class="sect">
-        <div class="sect-h"><span class="lbl">Photos</span><span class="n">${photos.length}${state.usedPhotos.size ? ` \u00b7 ${state.usedPhotos.size} sent` : ''}</span><span class="sp"></span>
-          <button id="photoLink" class="tiny phone-btn" type="button" title="Telegram the camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : '<span class="phone-ico" aria-hidden="true">\ud83d\udcf1</span>Phone'}</button>
-          <button id="addPhoto" class="tiny" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : 'QR'}</button>
-          <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button></div>
-        ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone \u2014 it opens straight into the camera. Press \u21bb when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
-        ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use QR or Phone to shoot some.</div>'}
-        <div class="row tight">
-          <button id="sendPhotos" class="primary mini" type="button" ${store && !state.busy ? '' : 'disabled'} title="Puts the ticked photos into the page's photo uploader; with nothing ticked, ${state.settings.autoSendAiOnly ? 'the AI generated ones' : 'ours (AI version preferred)'} minus too-small ones">${state.busy === 'photos' ? '<span class="spin"></span> Sending\u2026' : '\u2b05 Send to page'}</button>
-          <button id="aiPhotos" class="mini" type="button" ${state.aiBusy || !photos.length ? 'disabled' : ''}>${state.aiBusy ? '<span class="spin"></span> ' + esc(state.aiBusy) : '\u2728 AI photoshop'}</button>
-        </div>
-      </div>
+      ${photoCardHtml(info, { send: true })}
 
       <div class="gearrow"><button id="gearBtn" class="gear" type="button" aria-expanded="${state.gearOpen ? 'true' : 'false'}" title="What happens by itself, prompts and specifics, and the manual Confirm &amp; link">⚙ Options${state.gearOpen ? '' : ' · <span class="gearsum">' + esc(autoSummary()) + '</span>'}</button></div>
 
@@ -2132,32 +2191,7 @@
       toast(pushed ? 'Condition note updated on the page' : 'Condition note updated');
       renderDetail();
     };
-    $('photoRefresh').onclick = () => { delete state.details[info.upc]; void loadDetail(info.upc, { force: true }); };
-    for (const box of el.querySelectorAll('input[data-select]')) box.onchange = () => { if (box.checked) state.selectedPhotos.add(box.dataset.select); else state.selectedPhotos.delete(box.dataset.select); box.closest('.photo').classList.toggle('selected', box.checked); };
-    for (const tileEl of el.querySelectorAll('.photo')) {
-      const img = tileEl.querySelector('img');
-      const flagSize = () => { if (!img.naturalWidth) return; const size = { w: img.naturalWidth, h: img.naturalHeight }; state.photoSizes[tileEl.dataset.url] = size; if (isTooSmall(size)) { tileEl.querySelector('.tag.small').hidden = false; tileEl.classList.add('too-small'); } };
-      if (img.complete) flagSize(); else img.onload = flagSize;
-      tileEl.onclick = event => { if (event.target.matches('input')) return; const box = tileEl.querySelector('input'); box.checked = !box.checked; box.dispatchEvent(new Event('change')); };
-      tileEl.onmouseenter = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
-      tileEl.onmousedown = () => { void photoFile(tileEl.dataset.url).catch(() => {}); };
-      tileEl.ondragstart = event => {
-        const url = tileEl.dataset.url;
-        const cached = state.photoFiles[url];
-        const photo = photos.find(p => p.url === url) || {};
-        event.dataTransfer.effectAllowed = 'copy';
-        event.dataTransfer.setData('text/uri-list', url);
-        event.dataTransfer.setData('text/plain', url);
-        // The page script turns this into a real file where it lands (a File cannot cross from the panel).
-        event.dataTransfer.setData('application/x-sweetshelves-photo', JSON.stringify({ url, name: cached?.name || photo.name || 'photo.jpg', type: cached?.type || 'image/jpeg', base64: cached?.base64 || '' }));
-        if (cached) {
-          event.dataTransfer.setData('DownloadURL', `${cached.type}:${cached.name}:${url}`);
-          try { event.dataTransfer.items.add(cached.file); } catch { /* the page gets the URL instead */ }
-        }
-      };
-    }
-    $('sendPhotos').onclick = () => sendPhotos();
-    $('aiPhotos').onclick = () => aiPhotoshop();
+    wirePhotoCard(el, info, { rerender: renderDetail, refresh: () => { delete state.details[info.upc]; void loadDetail(info.upc, { force: true }); } });
     $('aiPrompt').oninput = () => {
       state.promptDraft = { upc: info.upc, text: $('aiPrompt').value };
       $('aiPromptWhere').textContent = 'this item only';
@@ -2182,8 +2216,6 @@
       await chrome.storage.local.set({ [TITLE_PROMPT_KEY]: '' });
       renderDetail();
     };
-    $('addPhoto').onclick = () => { state.qrOpen = !state.qrOpen; renderDetail(); };
-    $('photoLink').onclick = () => sendPhotoLink(info);
     for (const code of el.querySelectorAll('code[data-copy]')) code.onclick = () => copy(code.dataset.copy, 'Copied ' + code.dataset.copy);
     renderActionBar();
   }
@@ -2928,6 +2960,9 @@
 
   // sidepanel-fb.js (the FB tab) works through these instead of its own copies.
   globalThis.SSListerPanel = { api, serverBase, esc, toast, busy, setHtml, renderActionBar, openMenu: () => openMore(),
+                               loadItem: upc => api('/api/lister/queue/' + encodeURIComponent(upc)).then(data => data.item),
+                               statusStripHtml, photoCardHtml, wirePhotoCard, onPhotosChanged: fn => photoWatchers.add(fn),
+                               clearPhotoSelection: () => state.selectedPhotos.clear(), get titlePrompt() { return state.titlePrompt; },
                                get connected() { return state.connected; } };
 
   async function main() {
