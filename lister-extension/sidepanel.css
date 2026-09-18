@@ -341,6 +341,11 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .listgear .gearrow { padding: 0 12px 8px; border-bottom: 0; }
 .listgear .lgearbox { margin: 0 12px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); }
 .listgear textarea { width: 100%; box-sizing: border-box; }
+/* items on the other store's list only */
+.otherlist { opacity: .78; }
+.otherhead { padding: 10px 12px 4px; font-size: 10px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--faint); }
+.item.other { cursor: default; }
+.item.other .addhere { white-space: nowrap; }
 
 .adv { padding: 10px 12px 14px; }
 .adv > summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; display: flex; align-items: center; gap: 6px; }

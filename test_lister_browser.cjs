@@ -169,11 +169,13 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
       if (url.pathname === '/api/lister/ping') return json({ success: true, version: '0.2.0', user: 'dan@example.com' });
       if (url.pathname === '/items-to-list') return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Items to List</title><h1>Items to List</h1>' });
+      if (url.pathname === '/api/lister/queue/099999999999/store') { calls.addHere = request.postDataJSON(); return json({ success: true, state: { queue: 'queued', ebay: 'on', amazon: 'on' } }); }
       if (url.pathname === '/api/lister/queue') {
         calls.queueLoads = (calls.queueLoads || 0) + 1;
         const platform = url.searchParams.get('platform');
         const items = (queue[platform] || []).map(it => linked && it.upc === UPC + '-1' ? platform !== 'ebay' ? { ...it, otherStatus: 'listed' } : { ...it, status: 'listed', listedAt: '2026-09-16T10:00:00', links: [{ platform: 'ebay', listing_id: '335566778899' }] } : it);
-        return json({ success: true, items, counts: { queued: items.filter(i => i.status === 'queued').length, listed: items.filter(i => i.status !== 'queued').length, hidden: 0 } });
+        const elsewhere = platform === 'amazon' && !calls.addHere ? [{ id: 90, upc: '099999999999', baseUpc: '099999999999', title: 'Queued for eBay only', thumb: '', onPlatform: 'ebay' }] : [];
+        return json({ success: true, items, elsewhere, counts: { queued: items.filter(i => i.status === 'queued').length, listed: items.filter(i => i.status !== 'queued').length, hidden: 0 } });
       }
       if (url.pathname === `/api/lister/queue/${UPC}-1`) { calls.detail += 1; return json({ success: true, item: linked ? { ...detail, links: [{ platform: 'ebay', listing_id: '335566778899', url: 'https://www.ebay.com/itm/335566778899' }] } : detail }); }
       if (url.pathname === '/api/lister/queue/012345678905') return json({ success: true, item: { ...detail, upc: '012345678905', baseUpc: '012345678905', suffixed: false, proposal: {}, fields: { ...detail.fields, source: 'inventory', sku: '012345678905', upc: '012345678905' } } });
@@ -272,6 +274,12 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     for (let i = 0; i < 50 && !(calls.panel || []).some(r => r.platform === 'amazon'); i += 1) await panel.waitForTimeout(100);
     assert.ok(calls.panel.some(r => r.platform === 'ebay' && r.follow === true && r.open === true), 'the panel reported eBay: ' + JSON.stringify(calls.panel));
     assert.ok(calls.panel.some(r => r.platform === 'amazon'), 'and Amazon after the switch: ' + JSON.stringify(calls.panel));
+    // Queued for eBay only (Items to List "+" with the panel on eBay): the Amazon list names it, with a button to add it here.
+    await panel.waitForSelector('#otherList:not([hidden]) [data-other="099999999999"]');
+    assert.ok((await panel.textContent('#otherList')).includes('on eBay list'), 'it says it is on the eBay list');
+    await panel.click('#otherList button[data-addhere="099999999999"]');
+    await panel.waitForFunction(() => document.getElementById('otherList').hidden, null, { timeout: 10000 });
+    assert.deepEqual(calls.addHere, { platform: 'amazon', on: true }, 'the button puts it on the Amazon list');
     // "+" on Items to List (in this browser) makes the panel reload its list at once, through queue-bridge.js.
     const itemsPage = await context.newPage();
     await itemsPage.goto('https://pi.nexuscentralhq.org/items-to-list?q=x');

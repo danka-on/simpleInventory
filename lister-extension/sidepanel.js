@@ -404,6 +404,7 @@
     try {
       const data = await api('/api/lister/queue?platform=' + state.platform);
       state.items = data.items || [];
+      state.elsewhere = data.elsewhere || [];
       if (data.stamp) reported.stamp = data.stamp;
       for (const it of state.items) if (it.preload?.running) { state.preload.items[it.upc] = it.preload; state.preload.watch.add(it.upc); }
       if (state.preload.watch.size) pollPreload();
@@ -1938,8 +1939,44 @@
     };
   }
 
+  // Items waiting on the OTHER store's list only (Items to List "+" adds to the store the panel
+  // shows): named here - "on the eBay list" - with one button to put them on this list too.
+  function renderElsewhere() {
+    const el = $('otherList');
+    if (!el) return;
+    const filter = state.filter.trim().toLowerCase();
+    const rows = state.statusFilter === 'all' ? (state.elsewhere || []).filter(it => !filter
+      || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter)) : [];
+    el.hidden = !rows.length;
+    if (!rows.length) { setHtml(el, ''); return; }
+    const here = storeName(state.platform);
+    setHtml(el, `<div class="otherhead">Only on the ${esc(storeName(rows[0].onPlatform))} list (${rows.length})</div>`
+      + rows.map(it => `<div class="item other" data-other="${esc(it.upc)}" title="Queued for ${esc(storeName(it.onPlatform))} only">`
+        + `<span class="stripe"></span>${it.thumb ? `<img alt="" loading="lazy" src="${esc(it.thumb)}">` : '<div class="noimg"></div>'}`
+        + `<div class="body"><div class="title">${esc(it.title || '(no title)')}</div><div class="sub"><span class="upc">${esc(it.upc)}</span>`
+        + `<span class="sig quiet">on ${esc(storeName(it.onPlatform))} list</span></div></div>`
+        + `<span class="state"><button class="tiny addhere" type="button" data-addhere="${esc(it.upc)}" title="Put it on the ${esc(here)} list too">+ ${esc(here)}</button></span></div>`).join(''));
+    if (el.dataset.wired) return;
+    el.dataset.wired = '1';
+    el.onclick = async event => {
+      const button = event.target.closest('button[data-addhere]');
+      if (!button) return;
+      const platform = state.platform;
+      button.disabled = true;
+      try {
+        await api('/api/lister/queue/' + encodeURIComponent(button.dataset.addhere) + '/store', { method: 'POST', body: { platform, on: true } });
+        toast(`Added to the ${storeName(platform)} list`);
+        await loadQueue({ keep: true });
+      } catch (error) {
+        button.disabled = false;
+        toast(error.message, true);
+      }
+    };
+  }
+
   function renderItems() {
     renderListGear();
+    renderElsewhere();
     const filter = state.filter.trim().toLowerCase();
     const isFlagged = it => (it.prepStatus?.status || '') === 'bad' || Boolean(it.defect);
     const isOnStore = it => Boolean(it.alreadyOnStore) || it.otherStatus === 'listed';
