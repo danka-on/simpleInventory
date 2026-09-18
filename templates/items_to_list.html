@@ -1204,6 +1204,11 @@ function _listagentQueueUiState(queueItem){
 
 const AGENT_STORE_NAMES = { ebay: 'eBay', amazon: 'Amazon' };
 
+// The Lister side panel (through its queue-bridge.js on this page) reloads its list at once.
+function notifyListerQueue(){
+  try{ window.postMessage({ source: 'sweetshelves-items-to-list', type: 'queue-changed' }, location.origin); }catch(err){ /* no extension */ }
+}
+
 function agentHeadHtml(){
   if(!agentPanel.active) return '+ Listing Agent';
   const p = agentPanel.platform;
@@ -1307,6 +1312,7 @@ async function onAgentStorePlus(btn, upc){
     } else if(j.state.queue !== 'done'){
       listingAgentQueueState[upc] = null;
     }
+    notifyListerQueue();
   }catch(err){
     alert('Error: ' + (err && err.message ? err.message : err));
   }
@@ -3220,6 +3226,7 @@ async function onAddToListingAgentQueue(e){
       const j = await resp.json().catch(()=> ({}));
       if(resp.ok && j && j.success){
         listingAgentQueueState[upc] = null;
+        notifyListerQueue();
         const queueUi = _listagentQueueUiState(null);
         btn.textContent = queueUi.label;
         btn.title = queueUi.title;
@@ -3249,6 +3256,7 @@ async function onAddToListingAgentQueue(e){
     const j = await resp.json().catch(()=> ({}));
     if(resp.ok && j && j.success){
       listingAgentQueueState[upc] = j.item || { upc, status: 'queued', added_mode: 'my' };
+      notifyListerQueue();
       const queueUi = _listagentQueueUiState(listingAgentQueueState[upc]);
       btn.textContent = queueUi.label;
       btn.title = queueUi.title;

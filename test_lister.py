@@ -501,6 +501,22 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(on('amazon'), {'queue': 'queued', 'ebay': 'off', 'amazon': 'on'})
         self.assertEqual(self.client.post(f'/api/lister/queue/{new}/store', json={'platform': 'etsy', 'on': True}).status_code, 400)
 
+    def test_queue_stamp_moves_with_every_change_so_the_panel_reloads(self):
+        dan = {'Cf-Access-Authenticated-User-Email': 'dan@example.com'}
+        stamp = lambda: self.client.post('/api/lister/panel', json={'platform': 'ebay'}, headers=dan).get_json()['queueStamp']
+        first = stamp()
+        self.assertEqual(self.client.get('/api/lister/queue?platform=ebay').get_json()['stamp'], first, 'the list carries the same stamp')
+        self.assertEqual(stamp(), first, 'nothing changed, nothing to reload')
+        self.queue_add('012345678905', 'Added on Items to List', '2026-09-18T09:00:00')
+        added = stamp()
+        self.assertNotEqual(added, first)
+        self.client.post('/api/lister/queue/012345678905/store', json={'platform': 'ebay', 'on': False})
+        skipped = stamp()
+        self.assertNotEqual(skipped, added)
+        self.client.post('/api/lister/queue/012345678905/store', json={'platform': 'ebay', 'on': True})
+        self.assertNotEqual(stamp(), skipped, 'put back on the list')
+        self.assertIn('queueStamp', self.client.get('/api/lister/panel', headers=dan).get_json())
+
     def test_listed_on_both_stores_shows_both_even_after_the_queue_row_was_cleared(self):
         with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
             conn.execute("""INSERT INTO listing_queue (upc, title, status, added_at, listed_platform, listed_ebay_at, listed_amazon_at)

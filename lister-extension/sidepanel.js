@@ -173,13 +173,23 @@
 
   // Items to List asks the server which store list is open here, so its "+" adds to that store only.
   // A heartbeat while the panel is open; the page treats silence as a closed panel.
-  const reported = { platform: '', at: 0 };
+  const reported = { platform: '', at: 0, stamp: '' };
   function reportPanel(open = true) {
     if (state.connected === false || !state.platform) return;
     reported.platform = state.platform; reported.at = Date.now();
     const body = JSON.stringify({ platform: state.platform, follow: state.settings.followPlus !== false, open });
     fetch(serverBase() + '/api/lister/panel', { method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'manual', keepalive: true,
-      headers: { 'Content-Type': 'application/json', 'X-Sweet-Shelves-Lister': '1' }, body }).catch(() => {});
+      headers: { 'Content-Type': 'application/json', 'X-Sweet-Shelves-Lister': '1' }, body })
+      .then(r => r.json()).then(d => { if (open && d?.queueStamp && reported.stamp && d.queueStamp !== reported.stamp) queueChanged(); })
+      .catch(() => {});
+  }
+
+  // Something changed the queue elsewhere: Items to List on this computer says so at once (through
+  // queue-bridge.js); another device shows up at the next heartbeat. The list reloads in place.
+  let queueNudge = null;
+  function queueChanged() {
+    clearTimeout(queueNudge);
+    queueNudge = setTimeout(() => { if (state.connected !== false) void loadQueue({ keep: true }); }, 300);
   }
   setInterval(() => { if (document.visibilityState === 'visible') reportPanel(); }, 15000);
   document.addEventListener('visibilitychange', () => reportPanel(document.visibilityState === 'visible'));
@@ -392,6 +402,7 @@
     try {
       const data = await api('/api/lister/queue?platform=' + state.platform);
       state.items = data.items || [];
+      if (data.stamp) reported.stamp = data.stamp;
       for (const it of state.items) if (it.preload?.running) { state.preload.items[it.upc] = it.preload; state.preload.watch.add(it.upc); }
       if (state.preload.watch.size) pollPreload();
       renderPreloadBar();
@@ -1052,6 +1063,8 @@
       state.pick = null; renderPick();
     } else if (message?.type === 'ss-lister-guide') {
       state.guide = message.state; renderGuideOnly();
+    } else if (message?.type === 'ss-lister-queue-changed') {
+      queueChanged();
     } else if (message?.type === 'ss-lister-assist') {
       state.assist = message.state; renderPage();
     } else if (message?.type === 'ss-lister-choice') {

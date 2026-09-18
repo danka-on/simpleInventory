@@ -168,7 +168,9 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const url = new URL(request.url());
       const json = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
       if (url.pathname === '/api/lister/ping') return json({ success: true, version: '0.2.0', user: 'dan@example.com' });
+      if (url.pathname === '/items-to-list') return route.fulfill({ status: 200, contentType: 'text/html', body: '<title>Items to List</title><h1>Items to List</h1>' });
       if (url.pathname === '/api/lister/queue') {
+        calls.queueLoads = (calls.queueLoads || 0) + 1;
         const platform = url.searchParams.get('platform');
         const items = (queue[platform] || []).map(it => linked && it.upc === UPC + '-1' ? platform !== 'ebay' ? { ...it, otherStatus: 'listed' } : { ...it, status: 'listed', listedAt: '2026-09-16T10:00:00', links: [{ platform: 'ebay', listing_id: '335566778899' }] } : it);
         return json({ success: true, items, counts: { queued: items.filter(i => i.status === 'queued').length, listed: items.filter(i => i.status !== 'queued').length, hidden: 0 } });
@@ -269,6 +271,26 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     for (let i = 0; i < 50 && !(calls.panel || []).some(r => r.platform === 'amazon'); i += 1) await panel.waitForTimeout(100);
     assert.ok(calls.panel.some(r => r.platform === 'ebay' && r.follow === true && r.open === true), 'the panel reported eBay: ' + JSON.stringify(calls.panel));
     assert.ok(calls.panel.some(r => r.platform === 'amazon'), 'and Amazon after the switch: ' + JSON.stringify(calls.panel));
+    // "+" on Items to List (in this browser) makes the panel reload its list at once, through queue-bridge.js.
+    const itemsPage = await context.newPage();
+    await itemsPage.goto('https://pi.nexuscentralhq.org/items-to-list?q=x');
+    await panel.bringToFront();
+    const loadsBefore = calls.queueLoads;
+    for (let i = 0; i < 30; i += 1) {
+      await itemsPage.evaluate(() => window.postMessage({ source: 'sweetshelves-items-to-list', type: 'queue-changed' }, location.origin));
+      await panel.waitForTimeout(300);
+      if (calls.queueLoads > loadsBefore) break;
+    }
+    assert.ok(calls.queueLoads > loadsBefore, 'the panel reloaded its list when Items to List said the queue changed');
+    // A message that is not the page's own nudge does nothing (let the reload above settle first:
+    // a reload also counts the other store, so it is two loads).
+    await panel.waitForTimeout(1500);
+    const loadsAfter = calls.queueLoads;
+    await itemsPage.evaluate(() => window.postMessage({ source: 'someone-else', type: 'queue-changed' }, location.origin));
+    await panel.waitForTimeout(900);
+    assert.equal(calls.queueLoads, loadsAfter, 'only the page\'s own message counts');
+    await itemsPage.close();
+    await panel.bringToFront();
     await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]')?.classList.contains('blocked'), null, { timeout: 15000 });
     assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('restricted'));
     assert.ok(!(await panel.$('.item[data-upc="883049370897-1"] .sig.block')), 'a listable UPC says nothing: a clean row is the good row');

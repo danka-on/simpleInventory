@@ -13,6 +13,7 @@ debby app.py, so every dependency is injected through register(app, deps).
 
 import base64
 import datetime
+import hashlib
 import html as html_module
 import json
 import mimetypes
@@ -1471,7 +1472,8 @@ class Lister:
             }
             (done if listed_at else active).append(item)
         done.sort(key=lambda it: -_order_key(it['listedAt']))
-        return {'items': active + done, 'counts': {'queued': len(active), 'listed': len(done), 'hidden': hidden}}
+        return {'items': active + done, 'counts': {'queued': len(active), 'listed': len(done), 'hidden': hidden},
+                'stamp': self.queue_stamp()}
 
     def _upc_detail(self, upc, base_url):
         """The Listing Agent's aggregate view of one UPC (inventory, BOL, stores, prep notes/photos/voice)."""
@@ -2031,6 +2033,19 @@ class Lister:
             conn.commit()
         return self.panel_state(email)
 
+    def queue_stamp(self):
+        """Changes whenever anything is added to, taken off, listed from or skipped in the queue."""
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            self.init_listagent(cur)
+            cur.execute('''SELECT COUNT(*), MAX(id), MAX(added_at), MAX(removed_at), MAX(listed_ebay_at), MAX(listed_amazon_at),
+                                  SUM(CASE WHEN status = 'queued' THEN 1 ELSE 0 END) FROM listing_queue''')
+            parts = list(cur.fetchone())
+            cur.execute('SELECT COUNT(*), MAX(created_at) FROM lister_queue_state')
+            parts += list(cur.fetchone())
+        return hashlib.sha1(json.dumps(parts, default=str).encode()).hexdigest()[:12]
+
     def panel_state(self, email):
         """The store the side panel shows for this person, when it is open and the setting is on."""
         with self.db('listagent.db') as conn:
@@ -2039,10 +2054,10 @@ class Lister:
             cur.execute('SELECT * FROM lister_panel_state WHERE email = ?', (email or '',))
             row = _row(cur.fetchone())
         if not row:
-            return {'active': False, 'platform': ''}
+            return {'active': False, 'platform': '', 'queueStamp': self.queue_stamp()}
         age = max(0.0, time.time() - float(row['updated_at'] or 0))
         active = bool(row['open']) and bool(row['follow']) and age <= self.PANEL_FRESH_SECONDS
-        return {'active': active, 'platform': row['platform'] if active else '', 'follow': bool(row['follow']),
+        return {'active': active, 'platform': row['platform'] if active else '', 'follow': bool(row['follow']), 'queueStamp': self.queue_stamp(),
                 'open': bool(row['open']) and age <= self.PANEL_FRESH_SECONDS}
 
     def store_states(self, upcs):

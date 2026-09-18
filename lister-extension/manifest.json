@@ -49,6 +49,15 @@
     },
     {
       "matches": [
+        "https://pi.nexuscentralhq.org/items-to-list*"
+      ],
+      "js": [
+        "queue-bridge.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
         "https://www.facebook.com/marketplace/*"
       ],
       "js": [
