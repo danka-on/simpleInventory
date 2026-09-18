@@ -104,11 +104,16 @@
   <button id="listedBtn" class="listedlink" type="button" title="What the Lister has recorded">✓ <b><span id="countListedToday">0</span> listed today</b> through the Lister<span class="chev">›</span></button>
 </section>
 
-<!-- "+ NEW": the barcode and the photo marking happen here, the naming happens on the phone. -->
+<!-- "+ NEW": three numbered steps in one card. The barcode is done here; the name, the details
+     and the photos come from the phone, which the blue Phone pill messages. Each step keeps its
+     own container so a photo arriving never rebuilds the field somebody is typing in. -->
 <section id="newCard" class="newitem" hidden>
-  <div id="newHead"></div>
-  <div id="newPhone"></div>
-  <div id="newPhotos"></div>
+  <div id="newEmpty" class="card" hidden></div>
+  <div id="newSteps" class="card steps" hidden>
+    <div id="newHead"></div>
+    <div id="newFields"></div>
+    <div id="newPhotos"></div>
+  </div>
 </section>
 
 <div id="editor" class="editor" hidden></div>

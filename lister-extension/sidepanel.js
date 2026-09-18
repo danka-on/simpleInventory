@@ -53,7 +53,7 @@
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, sessions: [], lastForm: null, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
     // "+ NEW": the draft the phone is filling from the other end.
-    newItem: { id: null, draft: null, barcodeDraft: '', timer: null, opening: false, linking: null },
+    newItem: { id: null, draft: null, barcodeDraft: '', timer: null, opening: false, linking: null, linkBusy: false },
   };
 
   const $ = id => document.getElementById(id);
@@ -2306,7 +2306,7 @@
     try {
       const data = await api('/api/lister/new/' + id + '/link', { method: 'POST', body: {} });
       if (newDraft() && newDraft().id === id && data.draft) { state.newItem.draft = data.draft; renderNew(); }
-      toast('Photo link sent to ' + (data.sent || []).join(', ') + everyoneHint(data));
+      toast('\uD83D\uDCF2 Link sent' + ((data.sent || []).length ? ' to ' + data.sent.join(', ') : '') + ' on Telegram' + everyoneHint(data));
     } catch (error) {
       if (newDraft() && newDraft().id === id) toast('The phone was not sent a link: ' + error.message, true);
     }
@@ -2350,6 +2350,17 @@
     if (data.link && data.link.kind === 'photos') toast('Name found — the phone was re-sent a photos-only link');
     if (data.linkError) toast('The new link did not send: ' + data.linkError, true);
     return true;
+  }
+
+  // The blue Phone pill: the same link the draft sends itself when it opens, sent again on
+  // one press, with the pill spinning while Telegram answers.
+  async function newPhoneLink() {
+    const draft = newDraft();
+    if (!draft || state.newItem.linkBusy) return;
+    state.newItem.linkBusy = true;
+    renderNew();
+    const done = busy('Sending the phone its link\u2026');
+    try { await newSendLink(draft.id); } finally { done(); state.newItem.linkBusy = false; renderNew(); }
   }
 
   async function newPrintLabel(code, description) {
@@ -2575,49 +2586,60 @@
   }
 
   // -- the "+ NEW" card -----------------------------------------------------------------------
+  // One card, three numbered steps, each saying whose turn it is: the barcode is yours, the name
+  // and the photos are the phone's. A step shows its state as one coloured dot (red = do this,
+  // amber = the phone is on it, green = done) and the action bar names what is next. Each step
+  // renders into its own container, so a photo arriving never rebuilds a field being typed in.
 
-  const STAGE_WORDS = { title: 'naming it', details: 'saying what it is like', photos: 'taking photos', done: 'finished' };
+  const STAGE_WORDS = { title: 'naming it', details: 'adding details', photos: 'taking photos', done: 'finished' };
   const TITLE_SOURCE = { system: 'from our own records', voice: 'dictated on the phone', typed: 'typed here' };
   const PRINTER_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
     '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><rect x="7" y="14" width="10" height="7"/><circle cx="17.5" cy="12" r=".6" fill="currentColor"/></svg>';
+
+  // A step with a control on its right keeps its status on the next line, so a pill never eats it.
+  function stepHtml({ n, tone, label, sub, right, body }) {
+    const status = sub ? '<span class="sub' + (right ? ' below' : '') + '" title="' + esc(sub) + '">' + esc(sub) + '</span>' : '';
+    return '<div class="step ' + tone + '"><div class="rail"><span class="dot">' + (tone === 'done' ? '\u2713' : n) + '</span></div>' +
+      '<div class="head"><b>' + label + '</b>' + (right ? '<span class="sp"></span>' + right : status) + '</div>' +
+      (right ? status : '') +
+      '<div class="body">' + (body || '') + '</div></div>';
+  }
 
   function renderNew() {
     $('newCard').hidden = state.view !== 'new';
     if (state.view !== 'new') return;
     const draft = newDraft();
+    $('newEmpty').hidden = Boolean(draft);
+    $('newSteps').hidden = !draft;
     if (!draft) {
-      setHtml($('newHead'), state.newItem.opening
-        ? '<div class="card"><strong>Opening a new item…</strong></div>'
-        : '<div class="card"><strong>No new item open</strong><p class="muted small">Press + NEW again to start one.</p></div>');
-      setHtml($('newPhone'), '');
-      setHtml($('newPhotos'), '');
+      const empty = state.newItem.opening ? '<div class="empty"><strong>Opening a new item\u2026</strong></div>'
+        : '<div class="empty"><strong>No new item open</strong>' +
+          '<p class="muted small">For something that is on no BOL: you scan the barcode here, the phone names it and takes the photos.</p>' +
+          '<button id="newOpen" class="primary" type="button">Start a new item</button></div>';
+      if (setHtml($('newEmpty'), empty) && $('newOpen')) $('newOpen').onclick = () => void newStart();
       renderActionBar();
       return;
     }
-    renderNewHead(draft);
-    renderNewPhone(draft);
+    renderNewCode(draft);
+    renderNewFields(draft);
     renderNewPhotos(draft);
     renderActionBar();
   }
 
-  function renderNewHead(draft) {
-    const code = draft.upc
+  // Step 1, the only one done at the bench: scan the code, or take one of ours and print it.
+  function renderNewCode(draft) {
+    const body = draft.upc
       ? '<div class="row tight"><b class="mono grow">' + esc(draft.upc) + '</b>' +
-        '<span class="muted small">' + (draft.upcKind === 'generated' ? 'ours' : 'the item’s own') + '</span>' +
-        '<button id="newRecode" class="tiny" type="button">Change</button></div>' +
+        '<button id="newRecode" class="tiny" type="button" title="Put a different code on it">Change</button></div>' +
         '<button id="newPrint" class="printbtn" type="button" title="Print this barcode on the Item Prep printer">' + PRINTER_SVG + '<span>Print label</span></button>'
-      : '<div class="row tight"><div class="search grow"><span aria-hidden="true">⌷</span>' +
+      : '<div class="row tight"><div class="search grow"><span aria-hidden="true">\u2337</span>' +
         '<input id="newBarcode" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Scan the barcode"></div>' +
-        '<button id="newNoCode" type="button">No barcode</button></div>';
-    const source = TITLE_SOURCE[draft.titleSource];
-    const html = '<div class="card">' +
-      '<div class="row tight newtop"><label class="fieldlabel grow">Barcode</label>' +
-      '<button id="newRestart" class="tiny" type="button" title="Throw this item away and start a blank one">↻ Start over</button></div>' + code +
-      '<label class="fieldlabel" for="newTitle">Name' + (source ? ' <span class="muted small">· ' + esc(source) + '</span>' : '') + '</label>' +
-      '<input id="newTitle" class="wide" type="text" placeholder="The phone fills this in" value="' + esc(draft.title) + '">' +
-      '<label class="fieldlabel" for="newDesc">Details</label>' +
-      '<textarea id="newDesc" rows="3" placeholder="What the phone dictates lands here">' + esc(draft.description) + '</textarea>' +
-      '</div>';
+        '<button id="newNoCode" type="button" title="Take the next code of ours and print it">No barcode</button></div>';
+    const html = stepHtml({
+      n: 1, tone: draft.upc ? 'done' : 'need', label: 'Barcode',
+      sub: draft.upc ? (draft.upcKind === 'generated' ? 'ours, printed' : 'the item\u2019s own') : 'scan it now',
+      right: '<button id="newRestart" class="tiny" type="button" title="Throw this item away and start a blank one">\u21bb Start over</button>',
+      body });
     if (!setHtml($('newHead'), html)) return;
     const field = $('newBarcode');
     if (field) {
@@ -2627,8 +2649,8 @@
       field.onkeydown = event => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
-        const code2 = field.value.trim();
-        if (code2) void newSetBarcode(code2, 'scanned');
+        const code = field.value.trim();
+        if (code) void newSetBarcode(code, 'scanned');
       };
       field.focus();
     }
@@ -2636,39 +2658,49 @@
     if ($('newPrint')) $('newPrint').onclick = () => void newPrintLabel(draft.upc, draft.title);
     if ($('newRecode')) $('newRecode').onclick = () => newNoBarcodeModal();
     $('newRestart').onclick = () => void newRestart();
-    for (const [id, key, label] of [['newTitle', 'title', 'Saving the name…'], ['newDesc', 'description', 'Saving the details…']]) {
+  }
+
+  // Step 2 is the phone's: the pill messages it the link, the fields fill in as it dictates. They
+  // stay editable here for a quick fix.
+  function renderNewFields(draft) {
+    const onPhone = draft.linkSent && draft.status === 'draft';
+    const source = TITLE_SOURCE[draft.titleSource];
+    const doing = onPhone && !draft.title && STAGE_WORDS[draft.stage] ? 'the phone is ' + STAGE_WORDS[draft.stage] + '\u2026' : '';
+    const sub = draft.title ? (source || '') : (doing || (onPhone ? 'waiting for the phone' : 'press Phone to send the link'));
+    const tone = draft.title ? 'done' : (onPhone ? 'wait' : 'need');
+    const pill = '<button id="newPhoneBtn" class="tiny phone-btn" type="button" title="' +
+      (draft.linkSent ? 'Send the phone its link again on Telegram' : 'Telegram the phone the link: it names the item and takes the photos') + '"' +
+      (state.newItem.linkBusy ? ' disabled' : '') + '>' +
+      (state.newItem.linkBusy ? '<span class="spin"></span>' : '<span class="phone-ico" aria-hidden="true">\ud83d\udcf1</span>Phone') + '</button>';
+    const body = '<label class="lbl" for="newTitle">Name</label>' +
+      '<input id="newTitle" class="wide" type="text" placeholder="Dictated on the phone" value="' + esc(draft.title) + '">' +
+      '<label class="lbl" for="newDesc">Details</label>' +
+      '<textarea id="newDesc" rows="3" placeholder="Dictated on the phone: what it is, what is in the box">' + esc(draft.description) + '</textarea>';
+    const html = stepHtml({ n: 2, tone, label: 'Name & details', sub, right: pill, body });
+    if (!setHtml($('newFields'), html)) return;
+    $('newPhoneBtn').onclick = () => void newPhoneLink();
+    for (const [id, key, label] of [['newTitle', 'title', 'Saving the name\u2026'], ['newDesc', 'description', 'Saving the details\u2026']]) {
       const box = $(id);
       box.onchange = () => { void newPost('/fields', { [key]: box.value, source: 'typed' }, label); };
     }
   }
 
-  function renderNewPhone(draft) {
-    const doing = draft.status === 'draft' ? STAGE_WORDS[draft.stage] || '' : '';
-    const html = '<div class="card">' +
-      '<div class="row tight"><span class="grow">' +
-      (draft.linkSent
-        ? '📲 The phone has the link' + (doing ? ' · <b>' + esc(doing) + '</b>' : '')
-        : '📲 The phone has no link yet') +
-      '</span><button id="newResend" class="tiny" type="button">' + (draft.linkSent ? 'Send again' : 'Send the link') + '</button></div>' +
-      '<div class="muted small ellip" title="' + esc(draft.phoneUrl) + '">' + esc(draft.phoneUrl) + '</div></div>';
-    if (!setHtml($('newPhone'), html)) return;
-    $('newResend').onclick = async () => {
-      const data = await newPost('/link', {}, 'Sending the link…');
-      if (data) toast('Link sent to ' + (data.sent || []).join(', '));
-    };
-  }
-
+  // Step 3: the phone's photos land here on their own; a tap on one opens the marker.
   function renderNewPhotos(draft) {
     const photos = draft.photos || [];
+    const marked = photos.filter(p => p.markedUrl).length;
+    const waiting = draft.linkSent && draft.status === 'draft' && draft.stage === 'photos';
     const tiles = photos.map(photo =>
-      '<figure class="ptile' + (photo.markedUrl ? ' marked' : '') + '" data-photo="' + photo.id + '" title="' + esc(photo.note || 'Mark this photo') + '">' +
+      '<figure class="ptile' + (photo.markedUrl ? ' marked' : '') + '" data-photo="' + photo.id + '" title="' + esc(photo.note || 'Circle what is wrong') + '">' +
       '<img src="' + esc(serverBase() + (photo.markedUrl || photo.url)) + '" alt="" loading="lazy">' +
-      '<figcaption>' + (photo.note ? esc(photo.note) : '<span class="muted">✎ mark</span>') + '</figcaption></figure>').join('');
-    const html = '<div class="card">' +
-      '<label class="fieldlabel">Photos' + (photos.length ? ' <span class="muted small">· ' + photos.length + '</span>' : '') + '</label>' +
-      (photos.length ? '<div class="ptiles">' + tiles + '</div>'
-        : '<p class="muted small">Nothing from the phone yet. They arrive here on their own.</p>') +
-      '</div>';
+      '<figcaption>' + (photo.note ? esc(photo.note) : '<span class="muted">\u270e mark</span>') + '</figcaption></figure>').join('');
+    const body = photos.length
+      ? '<div class="ptiles">' + tiles + '</div>' + (marked < photos.length ? '<div class="hint">Tap a photo to circle what is wrong with it.</div>' : '')
+      : '<div class="hint">' + (waiting ? 'They land here as the phone takes them.' : 'The phone takes them after the name.') + '</div>';
+    const html = stepHtml({
+      n: 3, tone: photos.length ? 'done' : (waiting ? 'wait' : 'todo'), label: 'Photos',
+      sub: photos.length ? String(photos.length) + (marked ? ' \u00b7 ' + marked + ' marked' : '') : (waiting ? 'the phone is taking photos\u2026' : 'not yet'),
+      body });
     if (!setHtml($('newPhotos'), html)) return;
     $('newPhotos').onclick = event => {
       const tile = event.target.closest('[data-photo]');

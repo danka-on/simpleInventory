@@ -108,9 +108,17 @@ const draft = {
     assert.equal(calls.link, 1, 'the phone link goes out beside the draft');
     assert.equal(await panel.$eval('#storeNew', el => el.getAttribute('aria-selected')), 'true');
     assert.ok(await panel.$eval('#listCard', el => el.hidden), 'the queue steps aside while a new item is open');
-    assert.ok((await panel.textContent('#newPhone')).includes('The phone has the link'));
-    assert.ok((await panel.textContent('#newPhone')).includes('naming it'), 'the card says what the phone is doing');
-    assert.ok((await panel.textContent('#newPhotos')).includes('Nothing from the phone yet'));
+    assert.ok((await panel.textContent('#newFields')).includes('the phone is naming it'), 'step 2 says what the phone is doing');
+    assert.equal(await panel.$eval('#newFields .step', el => el.classList.contains('wait')), true, 'and waits on it');
+    assert.equal(await panel.$eval('#newHead .step', el => el.classList.contains('need')), true, 'the barcode is on you');
+    assert.equal(await panel.$('#newPhone'), null, 'no separate phone-link card any more');
+    assert.ok(!(await panel.textContent('#newCard')).includes('new-item/' + TOKEN), 'and the URL is not on the card');
+    assert.ok((await panel.textContent('#newPhotos')).includes('after the name'));
+    // 1b. The Phone pill sends the phone its link again, in one press.
+    await panel.click('#newPhoneBtn');
+    for (let i = 0; i < 50 && calls.link < 2; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.link, 2, 'the Phone pill re-sends the link');
+    await panel.waitForFunction(() => !document.getElementById('newPhoneBtn').disabled, null, { timeout: 5000 });
     assert.equal(await panel.textContent('#goBtn'), 'Needs a barcode and a name');
     assert.ok(await panel.$eval('#goBtn', el => el.disabled), 'nothing to submit yet');
 
@@ -147,8 +155,8 @@ const draft = {
     await panel.waitForSelector('#newBarcode', { timeout: 10000 });
     assert.equal(calls.cancel, 1, 'the old draft is thrown away');
     assert.equal(calls.create, 2, 'and a fresh one opens');
-    for (let i = 0; i < 50 && calls.link < 2; i += 1) await panel.waitForTimeout(100);
-    assert.equal(calls.link, 2, 'with a fresh phone link');
+    for (let i = 0; i < 50 && calls.link < 3; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.link, 3, 'with a fresh phone link');
     assert.equal(await panel.$eval('#newTitle', el => el.value), '', 'nothing of the old item is left');
 
     // 3. A scanner types the code and presses Enter. The server already knows the name, so the
@@ -159,14 +167,17 @@ const draft = {
     assert.deepEqual(calls.barcode.at(-1).barcode, UPC);
     assert.equal(calls.barcode.at(-1).kind, 'scanned');
     assert.ok((await panel.textContent('#newHead')).includes(UPC), 'the code it is now filed under is on the card');
-    assert.ok((await panel.textContent('#newHead')).includes('from our own records'), 'and where the name came from');
-    assert.ok((await panel.textContent('#newPhone')).includes('taking photos'));
+    assert.ok((await panel.textContent('#newFields')).includes('from our own records'), 'and where the name came from');
+    assert.equal(await panel.$eval('#newHead .step', el => el.classList.contains('done')), true, 'barcode step is ticked');
+    assert.equal(await panel.$eval('#newFields .step', el => el.classList.contains('done')), true, 'name step is ticked');
+    assert.ok((await panel.textContent('#newPhotos')).includes('taking photos'), 'photos step says the phone is on it');
     assert.equal(await panel.textContent('#goBtn'), 'Submit to Items to List');
 
     // 4. The phone sends a photo; the card is watching for it.
     current = { ...current, photos: [{ id: 9, url: '/static/items_prep/new_9.png', markedUrl: '', note: '', createdAt: '2026-09-17T10:05:00' }] };
     await panel.waitForSelector('.ptile[data-photo="9"]', { timeout: 15000 });
     assert.ok((await panel.textContent('#newPhotos')).includes('mark'), 'a photo nobody has marked says so');
+    assert.ok((await panel.textContent('#newPhotos')).includes('Tap a photo to circle'), 'and the card says how');
 
     // 5. Circle the damage and say what it is.
     await panel.click('.ptile[data-photo="9"]');

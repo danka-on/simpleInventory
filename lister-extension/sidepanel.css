@@ -455,13 +455,36 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 
 .newitem[hidden] { display: none; }
 .newitem .card { margin: 8px; }
+.newitem .card[hidden] { display: none; }
 .newitem .mono { font-size: 15px; font-weight: 700; letter-spacing: .02em; }
-.fieldlabel { display: block; margin: 10px 0 3px; color: var(--muted); font-size: 11px; font-weight: 600;
-  letter-spacing: .05em; text-transform: uppercase; }
-.newitem .card > .fieldlabel:first-child { margin-top: 0; }
 .newitem input.wide, .newitem textarea { width: 100%; }
-.newitem .newtop { align-items: center; margin-bottom: 3px; }
-.newitem .newtop .fieldlabel { margin: 0; }
+.newitem .empty { text-align: center; padding: 18px 12px; }
+.newitem .empty p { margin: 4px 0 12px; }
+
+/* The card is a numbered checklist. The dot is the only state a step shows: red = you have to do
+   this, amber = the phone is on it, green = done; a plain dot is simply not yet. */
+.newitem .steps { padding: 0; overflow: hidden; }
+.step { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 8px; padding: 10px 12px 12px 10px; }
+.step + .step { border-top: 1px solid var(--line-2); }
+.step .rail { grid-row: 1 / span 3; display: flex; justify-content: center; }
+.step .dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--faint); color: var(--muted);
+  font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; background: var(--card); }
+.step.need .dot { border-color: var(--red); color: var(--red); }
+.step.wait .dot { border-color: var(--amber); color: var(--amber); animation: waiting 1.8s ease-in-out infinite; }
+.step.done .dot { background: var(--green); border-color: var(--green); color: var(--green-ink); }
+@keyframes waiting { 50% { box-shadow: 0 0 0 4px var(--amber-soft); } }
+.step .head { display: flex; align-items: center; gap: 6px; min-height: 22px; min-width: 0; }
+.step .head b { font-size: 13px; white-space: nowrap; }
+.step .head .sub { color: var(--muted); font-size: 11.5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.step.need .head .sub { color: var(--red); }
+.step.wait .head .sub { color: var(--amber); font-weight: 600; }
+.step .head .sp { flex: 1; }
+.step .sub.below { display: block; grid-column: 2; margin-top: 1px; }
+.step .body { grid-column: 2; margin-top: 7px; min-width: 0; }
+.step .body:empty { display: none; }
+.step .lbl { display: block; margin: 8px 0 3px; color: var(--muted); font-size: 11px; font-weight: 600; }
+.step .lbl:first-child { margin-top: 0; }
+.step .hint { margin-top: 6px; color: var(--muted); font-size: 11.5px; }
 /* The label printer is the one thing you reach for at the bench, so it is a real button. */
 .printbtn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 8px;
   padding: 10px 12px; border-radius: 9px; font-size: 14px; font-weight: 700;
