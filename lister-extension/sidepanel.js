@@ -1838,7 +1838,7 @@
     const list = $('itemList');
     if (!rows.length) {
       const listedHere = state.items.filter(it => it.status === 'listed').length;
-      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : (listedHere ? `Everything queued for ${storeName(state.platform)} is listed.` : `Nothing queued for ${storeName(state.platform)}. Add items to the Listing Agent queue on <b>Items to List</b>.`))}</div>`;
+      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : (listedHere ? `Everything queued for ${storeName(state.platform)} is listed.` : `Nothing queued for ${storeName(state.platform)}. Press <b>+ Add items</b> above and queue some on Items to List.`))}</div>`;
       return;
     }
     // Only the exceptions earn a word here: a row with nothing on it is the good row. At most two,

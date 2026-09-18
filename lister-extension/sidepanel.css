@@ -497,7 +497,17 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 .printbtn.printed { background: var(--green); color: var(--green-ink); letter-spacing: .04em; }
 .printbtn.printed:hover { filter: brightness(1.08); }
 .printbtn.queued { background: none; color: var(--amber); border-color: var(--amber); letter-spacing: .04em; }
-.listacts { display: flex; align-items: center; gap: 8px; padding: 2px 12px 6px; }
+.listacts { display: flex; align-items: center; gap: 10px; padding: 4px 12px 8px; }
+/* The way to get more work into the list: a real button, not a link. */
+.addbtn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 10px;
+  border: 1.5px solid var(--blue); background: var(--blue-soft); color: var(--blue); text-align: left; cursor: pointer; }
+.addbtn:hover { background: var(--blue); color: var(--bg); filter: none; }
+.addplus { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--blue); color: var(--bg); font-size: 19px; font-weight: 700; line-height: 1; }
+.addbtn:hover .addplus { background: var(--bg); color: var(--blue); }
+.addtxt { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.addtxt b { font-size: 13.5px; }
+.addtxt small { font-size: 11px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lact { background: none; border: 0; padding: 2px 0; font-size: 11.5px; font-weight: 600; color: var(--blue); cursor: pointer; }
 .lact:hover { text-decoration: underline; filter: none; }
 .lact.danger { margin-left: auto; color: var(--red); }
