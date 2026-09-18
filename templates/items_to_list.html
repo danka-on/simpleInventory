@@ -374,6 +374,13 @@
     /* Listing Agent column: one line per store the item is listed on, then the "+" for the store the Lister panel shows. */
     .agent-cell{display:flex;flex-direction:column;align-items:center;gap:3px}
     .agent-listed{font-size:11.5px;font-weight:600;color:#15803d;white-space:nowrap}
+    .agent-other{font-size:11.5px;font-weight:600;color:#b45309;white-space:nowrap}
+    /* Narrow window: the least important columns step aside (fitItemsTable) and titles wrap. */
+    #fit-note{margin:8px 0 -4px;font-size:.85rem;color:#64748b}
+    #fit-note button{background:none;border:0;padding:0;color:#2563eb;font:inherit;text-decoration:underline;cursor:pointer}
+    #results table.fitted td{white-space:normal}
+    #results table.fitted .title-cell a{word-break:break-word}
+    #results table.fitted .title-cell{min-width:170px}
     .agent-store{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle}
     .agent-store.ebay{background:#2563eb}
     .agent-store.amazon{background:#d97706}
@@ -1240,6 +1247,10 @@ function agentListedStores(upc){
 }
 
 // The Listing Agent cell: "Listed on eBay ✓" / "Listed on Amazon ✓" (both when both), then the button.
+function agentButton(upc, titleEnc, itemStatus, label, title, active){
+  return `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${active ? ' btn-copied' : ''}" data-upc="${esc(upc)}" data-title="${titleEnc}" data-item-status="${esc(itemStatus)}" title="${esc(title)}">${esc(label)}</button>`;
+}
+
 function agentCellInner(upc, titleEnc = '', itemStatus = ''){
   const listed = agentListedStores(upc);
   const st = agentStoreState[upc] || null;
@@ -1250,7 +1261,11 @@ function agentCellInner(upc, titleEnc = '', itemStatus = ''){
   let label = '', title = '', active = false;
   if(agentPanel.active){
     const p = agentPanel.platform, name = AGENT_STORE_NAMES[p];
+    const other = p === 'ebay' ? 'amazon' : p === 'amazon' ? 'ebay' : '';
+    const otherLine = other && st && st[other] === 'on' && st[p] !== 'on'
+      ? `<div class="agent-other" title="Already queued for ${AGENT_STORE_NAMES[other]} in the Lister">In ${AGENT_STORE_NAMES[other]} queue</div>` : '';
     if(listed.includes(p)) return lines;
+    if(otherLine && !lines.includes(otherLine)) return lines + otherLine + agentButton(upc, titleEnc, itemStatus, `+ ${name}`, `Also add it to the ${name} list (it is already queued for ${AGENT_STORE_NAMES[other]})`, false);
     if(st && st[p] === 'on'){ label = `On ${name} list`; title = `On the ${name} list in the Lister (click to take it off ${name})`; active = true; }
     else { label = `+ ${name}`; title = `Add to the ${name} list in the Lister (the side panel is on ${name})`; }
   } else {
@@ -1266,6 +1281,49 @@ function agentCellInner(upc, titleEnc = '', itemStatus = ''){
   }
   return lines + `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${active ? ' btn-copied' : ''}" data-upc="${esc(upc)}" data-title="${titleEnc}" data-item-status="${esc(itemStatus)}" title="${esc(title)}">${esc(label)}</button>`;
 }
+
+// A narrow window (the Lister side panel open, a small screen): the least important columns step
+// aside one at a time until the table fits. Status, Defect, Title and + Listing Agent always stay.
+const FIT_DROP_ORDER = ['Last Edited', 'Info', 'Marketplaces', 'Notes and Media', 'UPC', 'PREP', 'Warehouse'];
+let showAllColumns = false;
+try{ showAllColumns = localStorage.getItem('itl_show_all_columns') === '1'; }catch(err){ /* private mode */ }
+function fitItemsTable(){
+  const wrap = document.getElementById('results');
+  const table = wrap && wrap.querySelector('table');
+  if(!table || !table.tHead || !table.tHead.rows.length) return;
+  const heads = Array.from(table.tHead.rows[0].cells);
+  const name = th => (th.id === 'agentHead' ? '+ Listing Agent' : th.textContent.replace(/[\u25b2\u25bc]/g, '').trim());
+  const setHidden = (index, hidden) => {
+    for(const row of table.rows){ const cell = row.cells[index]; if(cell) cell.style.display = hidden ? 'none' : ''; }
+  };
+  heads.forEach((_, i) => setHidden(i, false));
+  table.classList.remove('fitted');
+  const tooWide = () => table.scrollWidth > wrap.clientWidth + 1 || table.offsetWidth > wrap.clientWidth + 1;
+  const hidden = [];
+  if(!showAllColumns){
+    for(const drop of FIT_DROP_ORDER){
+      if(!tooWide()) break;
+      const index = heads.findIndex(th => name(th).toLowerCase() === drop.toLowerCase());
+      if(index < 0) continue;
+      setHidden(index, true);
+      hidden.push(drop);
+      table.classList.add('fitted');
+    }
+  }
+  let note = document.getElementById('fit-note');
+  if(!hidden.length && !(showAllColumns && tooWide())){ if(note) note.remove(); return; }
+  if(!note){ note = document.createElement('div'); note.id = 'fit-note'; wrap.insertBefore(note, table); }
+  note.innerHTML = showAllColumns
+    ? 'All columns shown. <button type="button" data-fit="on">Fit to the window</button>'
+    : `Narrow window: showing the essentials (${hidden.length} column${hidden.length === 1 ? '' : 's'} hidden: ${esc(hidden.join(', '))}). <button type="button" data-fit="off">Show all columns</button>`;
+  note.querySelector('button').onclick = event => {
+    showAllColumns = event.currentTarget.dataset.fit === 'off';
+    try{ localStorage.setItem('itl_show_all_columns', showAllColumns ? '1' : '0'); }catch(err){ /* private mode */ }
+    fitItemsTable();
+  };
+}
+let fitTimer = null;
+window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitItemsTable, 150); });
 
 function refreshAgentCells(){
   const head = document.getElementById('agentHead');
@@ -1291,12 +1349,23 @@ async function hydrateAgentStores(upcs){
 }
 
 // Which store list the Lister side panel has open (it reports it every 15 s while open).
+let agentQueueStamp = '';
+async function refreshAgentStates(){
+  if(!Array.isArray(lastRenderedResults) || !lastRenderedResults.length) return;
+  await hydrateListingAgentQueueState(lastRenderedResults);
+  refreshAgentCells();
+}
+
 async function pollAgentPanel(){
   if(document.visibilityState !== 'visible') return;
   try{
     const resp = await fetch('/api/lister/panel', { cache: 'no-store' });
     const j = await resp.json().catch(() => ({}));
     if(!resp.ok || !j || !j.success) return;
+    // Something was listed, queued or skipped anywhere (the Lister, another device): re-read the rows.
+    const stampMoved = Boolean(j.queueStamp && agentQueueStamp && j.queueStamp !== agentQueueStamp);
+    if(j.queueStamp) agentQueueStamp = j.queueStamp;
+    if(stampMoved) void refreshAgentStates();
     const next = { active: !!j.active, platform: j.active ? String(j.platform || '') : '' };
     if(next.active === agentPanel.active && next.platform === agentPanel.platform) return;
     agentPanel = next;
@@ -2577,6 +2646,7 @@ function render(results){
   });
   document.querySelectorAll('.btn-copy').forEach(el=> el.addEventListener('click', onCopyUpc));
   document.querySelectorAll('.btn-listagent-queue').forEach(el=> el.addEventListener('click', onAddToListingAgentQueue));
+  fitItemsTable();
   document.querySelectorAll('.pics-count').forEach(el=> el.addEventListener('click', onOpenNotesMedia));
   document.querySelectorAll('.note-icon').forEach(el=> el.addEventListener('click', onOpenNotesMedia));
 }

@@ -890,6 +890,7 @@
     await maybeAssist();
     await maybeAutoFill();
     await maybeAutoLink();
+    await checkSubmission();
   }
 
   // eBay's steps before the form (category, catalog match, condition): highlight our guess, learn the click.
@@ -1067,6 +1068,8 @@
       state.guide = message.state; renderGuideOnly();
     } else if (message?.type === 'ss-lister-queue-changed') {
       queueChanged();
+    } else if (message?.type === 'ss-lister-submitted') {
+      onSubmitted(message);
     } else if (message?.type === 'ss-lister-assist') {
       state.assist = message.state; renderPage();
     } else if (message?.type === 'ss-lister-choice') {
@@ -1117,6 +1120,57 @@
     if (state.autoLinked.has(key)) return;
     state.autoLinked.add(key);
     await recordLink({ ...linkBodyFromPage(item, platform, page, v), note: 'auto-detected by the extension' }, { auto: true });
+  }
+
+  // The HUD pressed the store's own List it / Save and finish. Once the store moves on from the form -
+  // and no success page recorded it with its number - the item counts as listed there: off that store's
+  // list, onto its Listed list. The item number follows with the store sync.
+  const SUBMIT_WAIT_MS = 3 * 60 * 1000;
+  function onSubmitted(message) {
+    const tabId = state.tab?.id;
+    const upc = state.fillSessions[tabId] || state.locked || state.currentUpc;
+    const platform = message.store || state.page?.store || '';
+    if (!upc || !platform) return;
+    state.submission = { tabId, upc, platform, sku: message.sku || '', url: message.url || '', at: Date.now(), told: false };
+    toast(`Pressed ${platform === 'amazon' ? 'Save and finish' : 'List it'} on ${storeName(platform)}\u2026`);
+    setTimeout(() => { void refreshTab(); }, 2500);
+    setTimeout(() => { void checkSubmission(); }, 45000);
+  }
+
+  async function checkSubmission() {
+    const sub = state.submission;
+    const page = state.page;
+    if (!sub) return;
+    if (Date.now() - sub.at > SUBMIT_WAIT_MS) { state.submission = null; return; }
+    if (state.tab?.id !== sub.tabId || !page) return;
+    const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
+    const sameUrl = (page.url || '').split('#')[0] === (sub.url || '').split('#')[0];
+    if (onForm && sameUrl) {
+      // Still on the form after a while: the store said no (a missing field, an error).
+      if (Date.now() - sub.at > 40000 && !sub.told) { sub.told = true; toast(`Still on the ${storeName(sub.platform)} form \u2014 check the page for an error`, true); }
+      return;
+    }
+    // A success page with its number is recorded by maybeAutoLink; this is for everything else.
+    const info = state.details[sub.upc];
+    const recorded = (info?.links || []).some(l => l.platform === sub.platform) ||
+      state.items.some(it => it.upc === sub.upc && it.status === 'listed' && (it.links || []).length);
+    if (recorded) { state.submission = null; return; }
+    state.submission = null;
+    try {
+      await api('/api/lister/queue/' + encodeURIComponent(sub.upc) + '/submitted', { method: 'POST', body: { platform: sub.platform, sku: sub.sku } });
+      const undo = async () => {
+        await api('/api/lister/queue/' + encodeURIComponent(sub.upc) + '/submitted', { method: 'POST', body: { platform: sub.platform, undo: true } });
+        delete state.details[sub.upc]; await loadQueue({ keep: true });
+      };
+      toast(`Listed on ${storeName(sub.platform)} \u2014 moved to its Listed list`, false, { label: 'Undo', run: undo });
+      dropSession(sub.upc, sub.platform);
+      delete state.details[sub.upc];
+      await loadQueue({ keep: false });
+      state.view = 'list';
+      renderAll();
+    } catch (error) {
+      toast('Could not mark it listed: ' + error.message, true);
+    }
   }
 
   async function recordLink(body, { auto = false } = {}) {
@@ -1828,17 +1882,19 @@
     const tests = { all: () => true, flagged: isFlagged, listed: isOnStore, blocked: isBlocked };
     rememberThumbs(state.items);
     const queued = state.items.filter(it => it.status === 'queued');
+    const listedHere = state.items.filter(it => it.status === 'listed');
     $('clearAll').disabled = !queued.length;
     // The filters carry their own counts: the numbers are why you would press one.
     for (const [id, value, n] of [['statusAll', 'all', queued.length], ['statusFlagged', 'flagged', queued.filter(isFlagged).length],
-      ['statusListed', 'listed', queued.filter(isOnStore).length], ['statusBlocked', 'blocked', queued.filter(isBlocked).length]]) {
+      ['statusListed', 'listed', queued.filter(isOnStore).length], ['statusBlocked', 'blocked', queued.filter(isBlocked).length], ['statusDone', 'done', listedHere.length]]) {
       const button = $(id);
       button.setAttribute('aria-pressed', String(state.statusFilter === value));
       button.querySelector('.n').textContent = n;
       button.hidden = value === 'blocked' && state.platform !== 'amazon';
     }
     const match = it => !filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter);
-    const rows = queued.filter(it => (tests[state.statusFilter] || tests.all)(it) && match(it));
+    // Listed ones leave the list for their own: "Listed ✓" shows them to inspect.
+    const rows = state.statusFilter === 'done' ? listedHere.filter(match) : queued.filter(it => (tests[state.statusFilter] || tests.all)(it) && match(it));
     const list = $('itemList');
     if (!rows.length) {
       const listedHere = state.items.filter(it => it.status === 'listed').length;
@@ -1847,6 +1903,14 @@
     }
     // Only the exceptions earn a word here: a row with nothing on it is the good row. At most two,
     // in fixed slots - what blocks this item, then where it already lives.
+    // A listed row says where: the item number when it is known, "number pending" after a submit.
+    const listedSig = it => {
+      const link = (it.links || [])[0];
+      const id = link?.listing_id || link?.sku || it.ownListing?.listingId || it.ownListing?.asin || '';
+      const url = link?.url || it.storeUrl || '';
+      const text = id ? `listed \u00b7 ${esc(id)}` : (it.submitted ? 'listed \u00b7 number pending' : 'listed');
+      return `<span class="sig done">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${text} \u2197</a>` : text}</span>`;
+    };
     const signalsOf = it => {
       const signals = [];
       const ac = state.platform === 'amazon' ? it.amazonCheck : null;
@@ -1905,7 +1969,7 @@
       const body = el.children[2];
       const text = it.title || '(no title)';
       if (body.firstElementChild.textContent !== text) body.firstElementChild.textContent = text;
-      setHtml(body.children[1], `<span class="upc">${upcHtml(it)}</span>${signalsOf(it).join('')}`);
+      setHtml(body.children[1], `<span class="upc">${upcHtml(it)}</span>${it.status === 'listed' ? listedSig(it) : signalsOf(it).join('')}`);
       // The selected row carries its own next step, so the second click has an obvious target.
       setHtml(el.children[4], armed ? `Click again to list on ${storeName(state.platform)} →` : '');
       const right = el.children[3];
@@ -1942,6 +2006,8 @@
         if (open) { event.stopPropagation(); pickItem(open.dataset.open); return; }
         const el = event.target.closest('.item');
         if (!el || event.target.closest('a, button')) return;
+        // A listed one is there to look at, not to list again.
+        if (el.classList.contains('listed')) { pickItem(el.dataset.upc); return; }
         // First click selects and highlights the row; a click on the selected row lists it.
         if (state.armedUpc === el.dataset.upc && state.currentUpc === el.dataset.upc) { void startOn(state.platform); return; }
         pickItem(el.dataset.upc, { stay: true });
@@ -2937,7 +3003,7 @@
       else if (!$('modal').hidden) $('modal').hidden = true;
     });
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
-    for (const [id, value] of [['statusAll', 'all'], ['statusFlagged', 'flagged'], ['statusListed', 'listed'], ['statusBlocked', 'blocked']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
+    for (const [id, value] of [['statusAll', 'all'], ['statusFlagged', 'flagged'], ['statusListed', 'listed'], ['statusBlocked', 'blocked'], ['statusDone', 'done']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
     $('preloadAll').onclick = () => void preloadAll();
     $('clearAll').onclick = () => void clearAll();
     $('addItems').onclick = () => chrome.tabs.create({ url: serverBase() + '/items-to-list' });

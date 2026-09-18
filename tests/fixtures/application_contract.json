@@ -6037,6 +6037,17 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/lister/queue/<upc>/submitted",
+      "endpoint": "api_lister_queue_submitted",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/lister/queue/<upc>/mark-existing",
       "endpoint": "api_lister_queue_mark_existing",
       "methods": [

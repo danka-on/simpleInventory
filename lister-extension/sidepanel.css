@@ -162,6 +162,7 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .fchip[aria-pressed="true"] .n { color: var(--bg); opacity: .7; }
 .fchip.flag[aria-pressed="true"] { background: var(--amber); border-color: var(--amber); color: #fff; }
 .fchip.block[aria-pressed="true"] { background: var(--red); border-color: var(--red); color: #fff; }
+.fchip.done[aria-pressed="true"] { background: var(--green); border-color: var(--green); color: var(--green-ink); }
 /* min-width: "Preload all" and "Preloading…" are different lengths; without it the chip row rewraps. */
 .fchip.preload { margin-left: auto; min-width: 104px; justify-content: center; border-color: var(--green); color: var(--green); white-space: nowrap; }
 .fchip[hidden] { display: none; }

@@ -300,6 +300,7 @@
     // Seller Central only renders the quantity box once that question is answered, so the quantity
     // is filled again when it turns up.
     if (fulfilment && fulfilment.ok) fillWhenShown('quantity', values, store);
+    else if (store === 'amazon') keepMerchantFulfilled(values, store);
     const lowest = matchLowestPrice(store);
     if (lowest) (lowest.ok ? report.filled : report.skipped).push({ target: 'matchLowest', value: lowest.label, label: 'Match lowest price', reason: lowest.ok ? '' : 'could not click it' });
     // No link to press (Seller Central does not always draw one): the lowest offer is still written
@@ -347,11 +348,42 @@
       const text = controlText(radio);
       if (!/ship this item myself|merchant fulfill|easy ship/.test(text)) continue;
       if (/amazon (ships|will ship|fulfills)|fulfilled by amazon|\bfba\b/.test(text)) continue;
-      const already = radio.checked === true || radio.getAttribute('checked') !== null;
-      if (!already) { try { radio.click(); } catch { return { ok: false, label: 'Merchant Fulfilled' }; } }
-      return { ok: true, label: 'Merchant Fulfilled' };
+      if (!radioChecked(radio)) pressRadio(radio);
+      return { ok: radioChecked(radio), label: 'Merchant Fulfilled' };
     }
     return null;
+  }
+
+  // Seller Central's radios are Katal components: depending on the build the host, its inner <input>
+  // or its label takes the click. Press them in turn until the radio reads as checked.
+  function radioChecked(radio) {
+    const inner = radio.shadowRoot && radio.shadowRoot.querySelector('input[type=radio]');
+    const host = shadowHost(radio);
+    return Boolean(radio.checked === true || (inner && inner.checked) || radio.getAttribute('aria-checked') === 'true' ||
+      (radio.tagName === 'KAT-RADIOBUTTON' && radio.hasAttribute('checked')) ||
+      (host && (host.checked === true || host.getAttribute('aria-checked') === 'true')));
+  }
+
+  function pressRadio(radio) {
+    const inner = radio.shadowRoot && radio.shadowRoot.querySelector('input[type=radio]');
+    let label = null;
+    try { label = radio.closest('label') || (radio.id && ownDocument(radio).querySelector(`label[for="${CSS.escape(radio.id)}"]`)); } catch { /* ignore */ }
+    for (const target of [inner, radio, label, shadowHost(radio)]) {
+      if (!target) continue;
+      try { target.click(); } catch { /* next */ }
+      if (radioChecked(radio)) break;
+    }
+    if (!radioChecked(radio)) { try { radio.checked = true; } catch { /* read-only host */ } }
+    for (const type of ['input', 'change']) {
+      try { radio.dispatchEvent(new Event(type, { bubbles: true, composed: true })); } catch { /* ignore */ }
+    }
+  }
+
+  // The offer form can draw its fulfilment question after the fill: keep asking for ~20 s, once.
+  function keepMerchantFulfilled(values, store, attempts = 20) {
+    const done = chooseFulfilment(store);
+    if (done && done.ok) { fillWhenShown('quantity', values, store); return; }
+    if (attempts > 0) setTimeout(() => keepMerchantFulfilled(values, store, attempts - 1), 1000);
   }
 
   // Both stores offer the number themselves - Seller Central as "Match lowest price: USD$29.40"
@@ -435,7 +467,8 @@
       const texts = [b.textContent, b.getAttribute('aria-label'), b.getAttribute('label'), b.value,
         host && host.getAttribute('label'), host && host.getAttribute('aria-label')]
         .map(text => M.normalize(text || '')).filter(Boolean);
-      return texts.some(text => /^(search|get started|continue|find|go|next|submit|search now)$/.test(text) || /search|get started/.test(text));
+      return texts.some(text => /^(search|get started|continue|find|go|next|submit|search now)$/.test(text) || /search|get started/.test(text)) ||
+        searchIcon(b);
     });
     // When a custom element and the real <button> inside it both match, click the real one:
     // the host has no default action of its own (Katal listens on the inner button).
@@ -445,6 +478,15 @@
       return anchor.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING;
     });
     return after[0] || inner[0] || null;
+  }
+
+  // Seller Central's search button can be a bare magnifier: no words, only an icon named "search".
+  function searchIcon(b) {
+    const icon = '[name*="search" i], [class*="search" i], [data-icon*="search" i], [icon*="search" i], svg[aria-label*="search" i]';
+    try {
+      return Boolean(/search/i.test(b.getAttribute('title') || '') || /search/i.test(b.getAttribute('icon') || '') ||
+        (b.querySelector && b.querySelector(icon)) || (b.shadowRoot && b.shadowRoot.querySelector(icon)));
+    } catch { return false; }
   }
 
   // Enter first (some pages submit on it), then the button as soon as the page enables it.
@@ -458,7 +500,7 @@
       let button = null;
       try { button = searchButton(el); } catch { /* page navigated away */ }
       if (button) { try { button.click(); } catch { /* gone */ } return done('button'); }
-      if (Date.now() - started < 3000) return setTimeout(attempt, 200);
+      if (Date.now() - started < 6000) return setTimeout(attempt, 200);
       if (form) { try { form.requestSubmit ? form.requestSubmit() : form.submit(); } catch { /* ignore */ } return done('form'); }
       done('enter');
     };
@@ -868,12 +910,22 @@
   // The page's own "List it" / "Save and finish" button: scroll there and flash it (the user presses it).
   function findSubmitButton() {
     const words = /^(list it|list item|list your item|save and finish|save and continue|submit listing|publish|list now|continue to listing)$/i;
-    const candidates = Array.from(document.querySelectorAll('button, input[type=submit], a[role=button], [role=button]'))
+    // Seller Central's buttons are Katal components: the words sit on the host's label attribute.
+    const candidates = deepQuery('button, input[type=submit], a[role=button], [role=button], kat-button')
       .filter(isVisible)
-      .filter(b => words.test(clip((b.textContent || '') + (b.value || '')).trim()));
-    return candidates[candidates.length - 1] || null;
+      .filter(b => !buttonDisabled(b))
+      .filter(b => {
+        const host = shadowHost(b);
+        return [b.textContent, b.value, b.getAttribute('label'), b.getAttribute('aria-label'), host && host.getAttribute('label')]
+          .some(text => words.test(clip(text || '').trim()));
+      });
+    // A host and the real <button> inside it both match: press the inner one.
+    const inner = candidates.filter(b => !candidates.some(other => other !== b && shadowHost(other) === b));
+    return inner[inner.length - 1] || null;
   }
 
+  // "All set - List it" on the HUD means it: the page's own List it / Save and finish is pressed, and the
+  // side panel is told, so it can count the item as listed once the store moves on from the form.
   function goToSubmit() {
     const button = findSubmitButton();
     if (!button) { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); return false; }
@@ -881,6 +933,10 @@
     const previous = button.style.boxShadow;
     button.style.boxShadow = '0 0 0 4px rgba(22,163,74,.75)';
     setTimeout(() => { button.style.boxShadow = previous; }, 2500);
+    let page = {};
+    try { page = detect(); } catch { /* the panel falls back to what it knows */ }
+    chrome.runtime.sendMessage({ type: 'ss-lister-submitted', store: page.store || '', sku: page.sku || '', url: location.href }).catch(() => {});
+    setTimeout(() => { try { button.click(); } catch { /* gone */ } }, 300);
     return true;
   }
 
@@ -1084,7 +1140,7 @@
       <div data-ss="foot" style="display:flex;gap:6px;align-items:center;padding:0 12px 12px;background:${guideTheme.foot}">
         <button data-ss="use" style="flex:1;background:#0a9c6c;color:#fff;border:0;border-radius:8px;padding:9px 11px;cursor:pointer;font:600 12.5px system-ui,sans-serif">Use this</button>
         <button data-ss="next" style="background:transparent;color:${guideTheme.muted};border:0;border-radius:8px;padding:9px 6px;cursor:pointer;font:500 12.5px system-ui,sans-serif">Skip</button>
-        <button data-ss="ready" title="Everything has a value: jump to the page's List it button" style="display:none;flex:1 1 100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 13px system-ui,sans-serif;box-shadow:0 4px 14px rgba(22,163,74,.4)">\u2713 All set \u2014 go to List it</button>
+        <button data-ss="ready" title="Everything has a value: press the page's own List it / Save and finish" style="display:none;flex:1 1 100%;background:#16a34a;color:#fff;border:0;border-radius:10px;padding:10px 14px;cursor:pointer;font:700 13px system-ui,sans-serif;box-shadow:0 4px 14px rgba(22,163,74,.4)">\u2713 All set \u2014 List it</button>
       </div>`;
     // The green button does whatever the step in front of you needs: take the suggestion, go to the
     // field when there is nothing to take, or move on when it already has a value.
@@ -1725,7 +1781,7 @@
   }
 
   const api = { describe, collect: () => collect().map(describe), fill, detect, startPick, stopPick, setPicked, search, addPhotos,
-    guideStart, guideNext, guideGo, guideUse, guideStop, guideState, assistStart, assistStop, version: 3 };
+    guideStart, guideNext, guideGo, guideUse, guideStop, guideState, assistStart, assistStop, pressSubmit: goToSubmit, version: 3 };
   globalThis.__ssLister = api;
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

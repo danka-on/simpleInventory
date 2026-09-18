@@ -782,6 +782,18 @@ class Lister:
                 PRIMARY KEY (upc, platform)
             )
         ''')
+        # "Done - List it" on the HUD pressed the store's own submit and the store moved on: listed there,
+        # the item number (eBay) arrives later with the store sync or a success page.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS lister_submissions (
+                upc TEXT NOT NULL,
+                platform TEXT NOT NULL,
+                sku TEXT,
+                actor TEXT,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (upc, platform)
+            )
+        ''')
         # Which store list the side panel has open, per signed-in person, so Items to List can
         # make its "+" add to that store only. A heartbeat: an old row means the panel is closed.
         cur.execute('''
@@ -896,7 +908,8 @@ class Lister:
             with self.db('ebayStore.db') as conn:
                 cur = conn.cursor()
                 if self._has_table(cur, 'INVENTORY'):
-                    cur.execute(f"SELECT ItemID, SKU, UPC, Title, List_State FROM INVENTORY WHERE TRIM(COALESCE(UPC, '')) IN ({placeholders}) ORDER BY ID DESC LIMIT 10", keys)
+                    cur.execute(f"SELECT ItemID, SKU, UPC, Title, List_State FROM INVENTORY WHERE TRIM(COALESCE(UPC, '')) IN ({placeholders}) "
+                                f"OR TRIM(COALESCE(SKU, '')) IN ({placeholders}) ORDER BY ID DESC LIMIT 10", keys + keys)
                     for r in cur.fetchall():
                         r = _row(r)
                         out['ebay'].append({'listingId': _text(r.get('ItemID')), 'sku': _text(r.get('SKU')),
@@ -908,7 +921,8 @@ class Lister:
             with self.db('amazonStore.db') as conn:
                 cur = conn.cursor()
                 if self._has_table(cur, 'ITEMS'):
-                    cur.execute(f"SELECT ASIN, SKU, UPC, TITLE, STATUS, FULFILLMENT_CHANNEL FROM ITEMS WHERE TRIM(COALESCE(UPC, '')) IN ({placeholders}) ORDER BY rowid DESC LIMIT 10", keys)
+                    cur.execute(f"SELECT ASIN, SKU, UPC, TITLE, STATUS, FULFILLMENT_CHANNEL FROM ITEMS WHERE TRIM(COALESCE(UPC, '')) IN ({placeholders}) "
+                                f"OR TRIM(COALESCE(SKU, '')) IN ({placeholders}) ORDER BY rowid DESC LIMIT 10", keys + keys)
                     for r in cur.fetchall():
                         r = _row(r)
                         out['amazon'].append({'asin': _text(r.get('ASIN')), 'sku': _text(r.get('SKU')),
@@ -1421,6 +1435,8 @@ class Lister:
         with self.db('listagent.db') as conn:
             cur = conn.cursor()
             rows, skips = self._queue_rows(cur)
+            cur.execute('SELECT upc, platform FROM lister_submissions')
+            submissions = {(r['upc'], r['platform']) for r in cur.fetchall()}
             upcs = [self.format_upc12(r['upc']) or _text(r['upc']) for r in rows]
             links = self._links_for_upcs(cur, list({*upcs, *[r['upc'] for r in rows]}))
             proposals = self._latest_proposals(cur, upcs)
@@ -1441,6 +1457,9 @@ class Lister:
             existing = stores.get(platform) or []
             live = [e for e in existing if not e.get('state') or e['state'].lower() in ('active', 'live')]
             own_links = [l for l in links.get(upc, []) + links.get(row['upc'], []) if l['platform'] == platform]
+            # Every Lister listing carries our UPC (with its -N) as the SKU: that listing is this unit's.
+            own_live = [e for e in live if _text(e.get('sku')).lower() == upc.lower()]
+            listed_at = listed_at or (own_links[0].get('created_at') if own_links else '') or ('store' if own_live else '')
             proposal = proposals.get(upc) or {}
             item = {
                 'id': int(row['id']),
@@ -1461,6 +1480,8 @@ class Lister:
                 'storeUrl': (self.store_url(platform, live[0]) if live else '') or (own_links[0].get('url') if own_links else ''),
                 'alreadyOnStore': bool(live) and not listed_at,
                 'links': own_links,
+                'ownListing': own_live[0] if own_live else None,
+                'submitted': (upc, platform) in submissions and not own_links and not own_live,
                 'proposal': {k: proposal[k] for k in ('id', 'status', 'ready', 'updatedAt') if k in proposal},
                 'preparing': self._job_state(upc).get('running', False),
                 'checkRequest': bool(row.get('has_check_request')),
@@ -1471,7 +1492,7 @@ class Lister:
                 'defect': defects.get(upc, ''),
             }
             (done if listed_at else active).append(item)
-        done.sort(key=lambda it: -_order_key(it['listedAt']))
+        done.sort(key=lambda it: -_order_key(it['listedAt'] if it['listedAt'] != 'store' else ''))
         return {'items': active + done, 'counts': {'queued': len(active), 'listed': len(done), 'hidden': hidden},
                 'stamp': self.queue_stamp()}
 
@@ -2083,8 +2104,11 @@ class Lister:
                 latest = rows[0] if rows else {}
                 key = self.format_upc12(raw) or raw
                 entry = {'queue': latest.get('status') or ''}
+                stores = self._store_listings(key)
                 for p in PLATFORMS:
-                    listed = p in linked or any(r.get(f'listed_{p}_at') for r in rows)
+                    ours = any(_text(e.get('sku')).lower() == key.lower() and (not e.get('state') or e['state'].lower() in ('active', 'live'))
+                               for e in stores.get(p) or [])
+                    listed = p in linked or ours or any(r.get(f'listed_{p}_at') for r in rows)
                     off = any((v, p) in skipped for v in {key, raw, *variants})
                     if listed:
                         entry[p] = 'listed'
@@ -2117,6 +2141,85 @@ class Lister:
         else:
             self.skip(raw, platform=platform, actor=actor)
         return self.store_states([raw])[raw]
+
+    def submitted(self, upc, *, platform, sku='', actor='', undo=False):
+        """The store took the listing (the HUD pressed List it / Save and finish and the page moved on).
+
+        Marks it listed on that store like a recorded link does - off that store's list, onto the Listed
+        list, Items to List's box ticked - before the item number is known. Undo puts all of it back.
+        """
+        upc = self.format_upc12(upc)
+        if not upc:
+            raise ListerError('upc is required')
+        if platform not in PLATFORMS:
+            raise ListerError('platform must be ebay or amazon')
+        sku = _text(sku, 120) or upc
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            self.init_listagent(cur)
+            if undo:
+                cur.execute('DELETE FROM lister_submissions WHERE upc = ? AND platform = ?', (upc, platform))
+                variants = self._variants(upc)
+                cur.execute(f"SELECT * FROM listing_queue WHERE upc IN ({','.join('?' for _ in variants)}) ORDER BY id DESC LIMIT 1", tuple(variants))
+                row = _row(cur.fetchone())
+                cur.execute(f"SELECT 1 FROM listing_links WHERE upc IN ({','.join('?' for _ in variants)}) AND platform = ? LIMIT 1", (*variants, platform))
+                linked = cur.fetchone() is not None
+                if row and row.get(f'listed_{platform}_at') and not linked:
+                    cur.execute(f'''UPDATE listing_queue SET listed_{platform}_at = NULL, status = 'queued', removed_at = NULL,
+                                    listed_platform = NULL, listed_at = NULL WHERE id = ?''', (row['id'],))
+                conn.commit()
+            else:
+                cur.execute('''INSERT INTO lister_submissions (upc, platform, sku, actor, created_at) VALUES (?, ?, ?, ?, ?)
+                               ON CONFLICT(upc, platform) DO UPDATE SET sku = excluded.sku, actor = excluded.actor,
+                               created_at = excluded.created_at''', (upc, platform, sku, actor or None, _now()))
+                conn.commit()
+        if undo:
+            try:
+                with self.db('listinglog.db') as conn:
+                    cur = conn.cursor()
+                    if self._has_table(cur, 'listing_log'):
+                        cur.execute('''DELETE FROM listing_log WHERE LOWER(COALESCE(source, '')) = 'lister-submitted'
+                                       AND platform = ? AND upc = ?''', (platform, upc))
+                        conn.commit()
+            except sqlite3.Error:
+                pass
+            if self.mark_bol_listed:
+                try:
+                    with self.db('bol.db') as conn:
+                        cur = conn.cursor()
+                        if self._has_table(cur, 'bol_items'):
+                            keys = tuple({upc, upc.lstrip('0') or upc, *self._variants(upc)})
+                            cur.execute(f'''UPDATE bol_items SET listed_{platform} = 0, listed_{platform}_date = NULL, listed_{platform}_source = NULL
+                                            WHERE TRIM(COALESCE(upc, '')) IN ({','.join('?' for _ in keys)}) AND listed_{platform}_source = 'listing_center' ''', keys)
+                            conn.commit()
+                except sqlite3.Error:
+                    pass
+            if self.bump_data_version:
+                try:
+                    self.bump_data_version()
+                except Exception:
+                    pass
+            return {'upc': upc, 'platform': platform, 'undone': True}
+        steps = []
+        try:
+            self.mark_listed(upc, platform=platform, sku=sku, source='lister-submitted', action='listed')
+            steps.append(f'listing queue marked listed on {platform}')
+        except Exception as e:
+            steps.append('queue: ' + str(e)[:200])
+        if self.mark_bol_listed:
+            try:
+                self.mark_bol_listed(platform, upc=upc)
+                steps.append(f'Items to List marked listed on {platform}')
+            except Exception as e:
+                steps.append('Items to List: ' + str(e)[:200])
+        finalized = self.finalize_queue(upc)
+        if self.bump_data_version:
+            try:
+                self.bump_data_version()
+            except Exception:
+                pass
+        return {'upc': upc, 'platform': platform, 'sku': sku, 'queue': finalized or 'queued', 'steps': steps}
 
     def mark_existing(self, upc, *, platform, entry, actor='', base_url='http://localhost/'):
         """The store already carries this UPC: record that listing as the link without touching the page."""
@@ -2982,6 +3085,16 @@ def register(app, deps):
         except Exception as e:
             return failure(e, 'lister:store')
 
+    def api_lister_queue_submitted(upc):
+        try:
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            result = lister.submitted(upc, platform=_text(data.get('platform')).lower(), sku=data.get('sku') or '',
+                                      actor=actor(), undo=bool(data.get('undo')))
+            return jsonify({'success': True, **result})
+        except Exception as e:
+            return failure(e, 'lister:submitted')
+
     def api_lister_queue_mark_existing(upc):
         try:
             guard_mutation()
@@ -3108,6 +3221,7 @@ def register(app, deps):
     app.add_url_rule('/api/lister/panel', 'api_lister_panel', api_lister_panel, methods=['GET', 'POST'])
     app.add_url_rule('/api/lister/queue-stores', 'api_lister_queue_stores', api_lister_queue_stores, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/store', 'api_lister_queue_store', api_lister_queue_store, methods=['POST'])
+    app.add_url_rule('/api/lister/queue/<upc>/submitted', 'api_lister_queue_submitted', api_lister_queue_submitted, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/mark-existing', 'api_lister_queue_mark_existing', api_lister_queue_mark_existing, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/generate', 'api_lister_queue_generate', api_lister_queue_generate, methods=['POST'])
     app.add_url_rule('/api/lister/queue/<upc>/preload', 'api_lister_queue_preload', api_lister_queue_preload, methods=['GET', 'POST'])

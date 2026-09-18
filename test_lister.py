@@ -501,6 +501,41 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(on('amazon'), {'queue': 'queued', 'ebay': 'off', 'amazon': 'on'})
         self.assertEqual(self.client.post(f'/api/lister/queue/{new}/store', json={'platform': 'etsy', 'on': True}).status_code, 400)
 
+    def test_a_submitted_listing_leaves_the_store_list_for_the_listed_list_and_undo_brings_it_back(self):
+        unit = '012345678905'
+        self.queue_add(unit, 'Other item', '2026-09-18T08:00:00')
+        on = lambda p: [it['upc'] for it in self.client.get(f'/api/lister/queue?platform={p}').get_json()['items'] if it['status'] == 'queued']
+        self.assertIn(unit, on('ebay'))
+        res = self.client.post(f'/api/lister/queue/{unit}/submitted', json={'platform': 'ebay', 'sku': unit})
+        self.assertEqual(res.status_code, 200, res.get_json())
+        ebay = self.client.get('/api/lister/queue?platform=ebay').get_json()['items']
+        listed = [it for it in ebay if it['upc'] == unit]
+        self.assertEqual(listed[0]['status'], 'listed', 'off the eBay list, on its Listed list')
+        self.assertTrue(listed[0]['submitted'], 'the item number is still to come')
+        self.assertIn(unit, on('amazon'), 'still waiting on Amazon')
+        self.assertEqual(self.client.post('/api/lister/queue-stores', json={'upcs': [unit]}).get_json()['items'][unit]['ebay'], 'listed')
+        self.assertIn(('ebay', unit), self.bol_marks, 'Items to List ticks eBay')
+        # Undo: back on the eBay list.
+        self.client.post(f'/api/lister/queue/{unit}/submitted', json={'platform': 'ebay', 'undo': True})
+        self.assertIn(unit, on('ebay'))
+        self.assertEqual(self.client.post('/api/lister/queue-stores', json={'upcs': [unit]}).get_json()['items'][unit]['ebay'], 'on')
+        self.assertEqual(self.client.post(f'/api/lister/queue/{unit}/submitted', json={'platform': 'etsy'}).status_code, 400)
+
+    def test_a_store_listing_with_our_sku_counts_as_listed_even_without_a_upc(self):
+        unit = '012345678905-1'
+        self.queue_add(unit, 'Unit one', '2026-09-18T08:00:00')
+        with closing(sqlite3.connect(self.root / 'ebayStore.db')) as conn:
+            conn.execute("INSERT INTO INVENTORY (Title, ItemID, SKU, UPC, List_State) VALUES ('Unit one', '998877665544', ?, '', 'Active')", (unit,))
+            conn.commit()
+        ebay = {it['upc']: it for it in self.client.get('/api/lister/queue?platform=ebay').get_json()['items']}
+        self.assertEqual(ebay[unit]['status'], 'listed', 'our SKU is live on eBay: listed, off the list')
+        self.assertEqual(ebay[unit]['ownListing']['listingId'], '998877665544')
+        self.assertFalse(ebay[unit]['alreadyOnStore'], 'not "already on the store": it is this unit\'s own listing')
+        self.assertEqual(self.client.post('/api/lister/queue-stores', json={'upcs': [unit]}).get_json()['items'][unit]['ebay'], 'listed')
+        # Somebody else's listing of the same product (another SKU) does not count as ours.
+        self.assertTrue(ebay[UPC]['alreadyOnStore'])
+        self.assertEqual(ebay[UPC]['status'], 'queued')
+
     def test_queue_stamp_moves_with_every_change_so_the_panel_reloads(self):
         dan = {'Cf-Access-Authenticated-User-Email': 'dan@example.com'}
         stamp = lambda: self.client.post('/api/lister/panel', json={'platform': 'ebay'}, headers=dan).get_json()['queueStamp']

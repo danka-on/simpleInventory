@@ -728,10 +728,10 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // Fill the last open row by hand and pretend the counter moved: the ready button shows and jumps to List it.
     await store.evaluate(() => { const c = document.getElementById('color'); c.value = 'White'; c.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('h2 + p').textContent = '1/25'; });
     await store.waitForFunction(() => document.querySelector('#ss-lister-guide [data-ss="ready"]').style.display !== 'none', null, { timeout: 15000 });
+    // "All set - List it" presses the page's own List it: eBay's success page (with the item number) opens.
     await store.click('#ss-lister-guide [data-ss="ready"]');
-    await store.waitForFunction(() => document.activeElement && document.activeElement.textContent.trim() === 'List it', null, { timeout: 10000 });
-    // eBay's success page carries the item number: the listing is recorded without a click.
-    await store.click('a[href*="/sl/list/success"]');
+    await store.waitForURL(/\/sl\/list\/success/, { timeout: 10000 });
+    // The success page carries the item number: the listing is recorded without a click.
     await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('recorded'), null, { timeout: 20000 });
     assert.equal(calls.links.length, 1);
     assert.equal(calls.links[0].platform, 'ebay');
@@ -744,6 +744,11 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // Listed on eBay: the item leaves the eBay list, stays on the Amazon list, and shows in the Listed side bar.
     await panel.waitForFunction(() => !document.querySelector('#itemList .item[data-upc="883049370897-1"]'), null, { timeout: 15000 });
     await panel.waitForFunction(() => document.getElementById('countListedToday').textContent === '1', null, { timeout: 15000 });
+    // ...and waits on eBay's "Listed ✓" list, where a click opens it to look at.
+    await panel.click('#statusDone');
+    await panel.waitForSelector('#itemList .item.listed[data-upc="883049370897-1"]', { timeout: 10000 });
+    assert.match(await panel.textContent('#itemList .item.listed[data-upc="883049370897-1"] .sub'), /listed · 335566778899/);
+    await panel.click('#statusAll');
     await panel.click('#listedBtn');
     await panel.waitForSelector('#listedDrawer:not([hidden]) .litem');
     assert.deepEqual(await panel.$$eval('#listedList .litem', els => els.map(e => e.dataset.link)), ['1'], 'Today shows only today\'s listing');

@@ -16,7 +16,7 @@ const BOTH = '840115641220';
 (async () => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'itl-agent-'));
   const context = await chromium.launchPersistentContext(userDataDir, { channel: 'msedge', headless: true, viewport: { width: 1500, height: 900 } });
-  const panel = { active: false, platform: '' };
+  const panel = { active: false, platform: '', queueStamp: 's1' };
   // The server's per-store rules, in small.
   const stores = { [NEW]: { queue: '', ebay: 'off', amazon: 'off' }, [BOTH]: { queue: 'removed', ebay: 'listed', amazon: 'listed' } };
   const calls = { add: [], store: [] };
@@ -108,6 +108,7 @@ const BOTH = '840115641220';
     panel.platform = 'amazon';
     await page.waitForFunction(() => document.getElementById('agentHead').textContent.includes('Amazon'), null, { timeout: 10000 });
     assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+ Amazon', 'reset for Amazon');
+    assert.equal((await cell(NEW).locator('.agent-other').textContent()).trim(), 'In eBay queue', 'says it already waits on eBay');
     await cell(NEW).locator('button').click();
     await page.waitForFunction(upc => document.querySelector(`.agent-cell[data-upc="${upc}"] button`)?.textContent.includes('On Amazon list'), NEW, { timeout: 10000 });
     assert.equal(calls.add.length, 1, 'already in the queue: no second add');
@@ -117,6 +118,27 @@ const BOTH = '840115641220';
     await page.waitForFunction(upc => document.querySelector(`.agent-cell[data-upc="${upc}"] button`)?.textContent.includes('+ Amazon'), NEW, { timeout: 10000 });
     assert.deepEqual(calls.store.at(-1), { upc: NEW, platform: 'amazon', on: false, only: true, fresh: false });
     assert.equal(stores[NEW].ebay, 'on', 'still on the eBay list');
+
+    // Listed on eBay from the Lister: the column says so without a reload (the queue stamp moved).
+    stores[NEW] = { queue: 'queued', ebay: 'listed', amazon: 'off' };
+    panel.queueStamp = 's2';
+    await page.waitForFunction(upc => document.querySelector(`.agent-cell[data-upc="${upc}"]`)?.textContent.includes('Listed on eBay'), NEW, { timeout: 12000 });
+
+    // A narrow window (the side panel open): the essentials stay, the rest steps aside, and can come back.
+    const visible = () => page.$$eval('#results thead th', ths => ths.filter(th => th.style.display !== 'none').map(th => th.id === 'agentHead' ? 'agent' : th.textContent.replace(/[\u25b2\u25bc]/g, '').trim()));
+    const wide = await visible();
+    assert.ok(wide.includes('Last Edited') && wide.includes('UPC'), 'a wide window shows everything: ' + wide);
+    await page.setViewportSize({ width: 620, height: 900 });
+    await page.waitForSelector('#fit-note', { timeout: 5000 });
+    const narrow = await visible();
+    for (const must of ['Status', 'Defect', 'Title', 'agent']) assert.ok(narrow.includes(must), must + ' stays: ' + narrow);
+    assert.ok(!narrow.includes('Last Edited') && !narrow.includes('Info'), 'the least important go first: ' + narrow);
+    await page.click('#fit-note button');
+    assert.deepEqual(await visible(), wide, 'Show all columns brings them back');
+    await page.click('#fit-note button');
+    assert.deepEqual(await visible(), narrow, 'Fit to the window hides them again');
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await page.waitForFunction(() => !document.getElementById('fit-note'), null, { timeout: 5000 });
 
     // The panel closes: the plain queue button again, saying which store it waits on.
     panel.active = false; panel.platform = '';
