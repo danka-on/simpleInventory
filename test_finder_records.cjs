@@ -22,7 +22,8 @@ const context = {URLSearchParams, AbortController, esc: escape, attrEsc: escape,
   fetch(url, options) { return new Promise(resolve => pending.push({url, options, resolve})); },
 };
 vm.createContext(context);
-vm.runInContext(code, context);
+const chipCode = html.slice(html.indexOf('function locationChip('), html.indexOf('function renderWarehouse('));
+vm.runInContext(chipCode + ';' + code, context);
 (async () => {
   const unsafe = context.recordHtml({title: '<img src=x onerror=alert(1)>', note: '<script>x</script>', quantity: 0, undone: false});
   assert.ok(!unsafe.includes('<script>'));
@@ -46,6 +47,11 @@ vm.runInContext(code, context);
   assert.ok(!context.recordOriginalLink({id:'ebayStore.db:INVENTORY'}, {upc:'123',url:'javascript:alert(1)'}).href.startsWith('javascript:'));
   assert.equal(context.recordDate('2026-09-07'), 'Sep 7, 2026');
   assert.ok(context.recordHtml({order_id:'order-7', quantity:2, price:12.5}, {id:'sold.db:orders'}).includes('$12.50'));
+  // Shelf codes are clickable for the shelf picture; addresses stay plain text
+  assert.ok(context.recordHtml({quantity:1, from_position:'or1s3b4', to_position:'hr2s3'}, {id:'rackhistory.db:removed_items'}).includes('data-loc="hr2s3"'));
+  assert.ok(context.recordHtml({quantity:3, item_position:'gr1s2'}, {id:'searchRack.db:searchrack'}).includes('showLocPopup'));
+  assert.ok(context.recordDetailsHtml({item_position:'or1s3b4'}).includes('data-loc="or1s3b4"'));
+  assert.ok(!context.recordDetailsHtml({location:'123 Main St, Springfield 62704'}).includes('data-loc'));
   assert.ok(!context.allDataButton('" onclick="alert(1)').includes(' onclick="'));
   const first = context.showAllUpcData('111111111111');
   const second = context.showAllUpcData('222222222222');

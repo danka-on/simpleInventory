@@ -576,6 +576,15 @@ function locationChip(rawLoc, picPos, extraClass) {
   return `<span class="loc ${extraClass || ''}" data-loc="${attrEsc(rawLoc)}" data-pic="${attrEsc(picPos || '')}" onclick="event.stopPropagation();showLocPopup(this.dataset.loc, this.dataset.pic)">${esc(rawLoc)}</span>`;
 }
 
+// Shelf codes in free-form record fields: clickable only when the value looks like a code, not an address
+function shelfCodeLike(value) {
+  const text = String(value ?? '').trim();
+  return !!text && text.length <= 30 && !/[,@]/.test(text) && !/\d{5}/.test(text) && text.split(/\s+/).length <= 3;
+}
+function locationChipIfCode(value, extraClass) {
+  return shelfCodeLike(value) ? locationChip(String(value).trim(), '', extraClass) : esc(String(value));
+}
+
 function renderWarehouse(items) {
   const el = document.getElementById('warehouseResults');
   document.getElementById('warehouseCount').textContent = items.length;
@@ -844,7 +853,7 @@ function renderTrail() {
 
   const stockHtml = onShelf.length
     ? `<div class="stock-chips">${onShelf.map(row => `<span class="stock-chip">${locationChip(row.position || '—', row.pictureposition)}<span class="n">× ${esc(String(row.quantity))}</span>${row.upc && hasRelated ? `<span class="pill">${esc(formatUpcDisplay(row.upc))}</span>` : ''}${!row.position ? `<span class="warn">no location</span>` : ''}${row.warehouse_note ? `<button type="button" class="mini-btn note warehouse-note-open-btn" data-note="${attrEsc(row.warehouse_note)}" data-barcode="${attrEsc(row.upc)}">${esc(t('warehouse_note'))}</button>` : ''}${row.custom ? '<span class="chip custom">custom</span>' : ''}</span>`).join('')}</div>`
-    : `<div class="not-on-shelf"><span class="pill">${esc(t('not_on_shelf'))}</span>${data.last_exit ? `<span class="last-exit">${esc(t('last_left'))} <b>${esc(data.last_exit.position || '?')}</b> · ${esc(whenLabel(data.last_exit.ts))} — ${esc(data.last_exit.title)} <button type="button" class="jump" data-jump="${attrEsc(data.last_exit.id)}">↓</button></span>` : (data.last_seen ? `<span class="last-exit">${esc(t('last_seen_at'))} <b>${esc(data.last_seen.position)}</b> · ${esc(whenLabel(data.last_seen.ts))} <button type="button" class="jump" data-jump="${attrEsc(data.last_seen.id)}">↓</button></span>` : '')}</div>`;
+    : `<div class="not-on-shelf"><span class="pill">${esc(t('not_on_shelf'))}</span>${data.last_exit ? `<span class="last-exit">${esc(t('last_left'))} ${data.last_exit.position ? locationChip(data.last_exit.position, '', 'ghost') : '<b>?</b>'} · ${esc(whenLabel(data.last_exit.ts))} — ${esc(data.last_exit.title)} <button type="button" class="jump" data-jump="${attrEsc(data.last_exit.id)}">↓</button></span>` : (data.last_seen ? `<span class="last-exit">${esc(t('last_seen_at'))} ${locationChip(data.last_seen.position, '', 'ghost') || '<b>?</b>'} · ${esc(whenLabel(data.last_seen.ts))} <button type="button" class="jump" data-jump="${attrEsc(data.last_seen.id)}">↓</button></span>` : '')}</div>`;
   const pendingRows = stockRows.filter(row => row.pending_deletion);
   const pendingHtml = pendingRows.length ? `<div class="hint">${pendingRows.length} zero-quantity row(s) scheduled for deletion${pendingRows[0].pending_deletion ? ' on ' + esc(pendingRows[0].pending_deletion.slice(0, 10)) : ''}.</div>` : '';
 
@@ -1095,17 +1104,19 @@ function recordHtml(record, source = {id: ''}, index = 0) {
   let heading = get('title', 'item_description', 'name') || recordSourceName({id: source.id || ':record'});
   if (table === 'orders') heading = `Order ${get('order_id', 'id') ?? '—'}${get('store') ? ' · ' + get('store') : ''}`;
   else if (table === 'prep_log') heading = 'Prep check';
-  else if (table === 'searchrack') heading = `${get('quantity') ?? '—'} units · ${get('item_position', 'location') || 'No location assigned'}`;
+  let headingLoc = '';
+  if (table === 'searchrack') { headingLoc = String(get('item_position', 'location') || '').trim(); heading = `${get('quantity') ?? '—'} units · ${headingLoc ? '' : 'No location assigned'}`; }
   else if (table === 'removed_items') heading = String(status || 'Inventory change').replace(/_/g, ' ') + (undone ? ' · Undone' : '');
   const metadata = [];
   const add = (label, value) => { if (value !== undefined && value !== null && value !== '') metadata.push(`<span>${esc(label)}${esc(String(value))}</span>`); };
+  const addLoc = (label, value) => { if (value !== undefined && value !== null && String(value).trim() !== '') metadata.push(`<span>${esc(label)}${locationChipIfCode(value, 'ghost')}</span>`); };
   const date = table === 'orders' ? get('paid_time', 'created_at') : table === 'returns' ? get('return_date', 'created_at') : get('removed_at', 'created_at', 'updated_at', 'import_date', 'changed_at', 'scanned_at', 'time_removed');
   add('', recordDate(date));
   if (table !== 'searchrack') {
     add('Qty: ', get('quantity_removed', 'quantity', 'qty'));
-    add('Location: ', get('item_position', 'location', 'from_position', 'source_location'));
+    addLoc('Location: ', get('item_position', 'location', 'from_position', 'source_location'));
   }
-  add('To: ', get('to_position'));
+  addLoc('To: ', get('to_position'));
   if (recordsContext?.family === '1') add('UPC: ', get('barcode', 'upc'));
   if (['raw_bol_items', 'bol_items', 'items_prep_status'].includes(table)) add('LOT: ', get('lot_number'));
   const price = get('price', 'new_price', 'refund_amount');
@@ -1114,7 +1125,7 @@ function recordHtml(record, source = {id: ''}, index = 0) {
   if (badge && table !== 'removed_items') metadata.push(badge);
   const note = get('note', 'notes', 'reason', 'return_reason', 'warehouse_note');
   const original = recordOriginalLink(source, record);
-  return `<article class="record-row"><div class="record-row-main"><strong>${esc(heading)}</strong>
+  return `<article class="record-row"><div class="record-row-main"><strong>${esc(heading)}${headingLoc ? locationChip(headingLoc) : ''}</strong>
     <div class="record-meta">${metadata.join('')}</div>
     ${note ? `<p class="record-note">${esc(String(note).slice(0, 220))}${String(note).length > 220 ? '…' : ''}</p>` : ''}</div>
     <div class="record-actions">${original ? `<a class="record-original" href="${attrEsc(original.href)}" target="_blank" rel="noopener noreferrer">${esc(original.label)} ↗</a>` : ''}
@@ -1132,7 +1143,9 @@ function recordDetailsHtml(record, technical = false) {
     if (typeof value === 'string' && /^[\[{]/.test(value.trim())) {
       try { display = JSON.stringify(JSON.parse(value), null, 2); } catch (_) {}
     } else if (value && typeof value === 'object') display = JSON.stringify(value, null, 2);
-    return `<dt>${esc(key.replace(/_/g, ' '))}</dt><dd>${esc(display == null ? '—' : String(display))}</dd>`;
+    const isLocField = /^(item_position|from_position|to_position|location|source_location|pictureposition|position)$/i.test(key);
+    const ddHtml = isLocField && typeof display !== 'object' ? locationChipIfCode(display) : esc(display == null ? '—' : String(display));
+    return `<dt>${esc(key.replace(/_/g, ' '))}</dt><dd>${ddHtml}</dd>`;
   }).join('');
   return `<dl class="record-fields">${fields}</dl>`;
 }

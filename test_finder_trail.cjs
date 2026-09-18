@@ -110,7 +110,7 @@ const TILE_KINDS = vm.runInContext('TILE_KINDS', context);
   assert.equal(content.hidden, false);
   assert.equal(elements.get('trailEmpty').hidden, true);
   assert.ok(content.innerHTML.includes('Godinger &lt;glass&gt;'));
-  assert.ok(content.innerHTML.includes('not_on_shelf') && content.innerHTML.includes('last_left') && content.innerHTML.includes('<b>hr2s3</b>'));
+  assert.ok(content.innerHTML.includes('not_on_shelf') && content.innerHTML.includes('last_left') && content.innerHTML.includes('<span class="loc">hr2s3</span>'));
   assert.ok(content.innerHTML.includes('data-jump="rackhistory.db:removed_items:8194"'));
   assert.ok(content.innerHTML.includes('scheduled for deletion on 2026-09-08'));
   assert.ok(content.innerHTML.includes('data-tile="sold_units"') && content.innerHTML.includes('<span class="n">4</span>'));
