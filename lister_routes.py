@@ -42,7 +42,19 @@ DAMAGE_WORDS = (
 )
 
 # "AI photoshop": one OpenAI image edit per photo. The prompt keeps the product untouched.
-OPENAI_IMAGE_MODEL = 'gpt-image-1'
+# The image models the Lister can pick from (panel ⚙ Options). The first is the default.
+OPENAI_IMAGE_MODELS = ('gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-1.5')
+OPENAI_IMAGE_MODEL = OPENAI_IMAGE_MODELS[0]
+
+
+def image_model(value=''):
+    """The OpenAI image model to use: blank means the default, anything off the list is refused."""
+    value = str(value or '').strip().lower()
+    if not value:
+        return OPENAI_IMAGE_MODEL
+    if value not in OPENAI_IMAGE_MODELS:
+        raise ListerError(f'Unknown image model {value!r}. Pick one of: ' + ', '.join(OPENAI_IMAGE_MODELS))
+    return value
 DEFAULT_AI_PHOTO_PROMPT = (
     'Clean up this product photo for an online marketplace listing. Replace the background with a plain, '
     'evenly lit white studio background and fix the exposure and white balance. Keep the product itself exactly '
@@ -1788,6 +1800,7 @@ class Lister:
             'preparing': self._job_state(upc),
             'mobilePhotosUrl': mobile_photos_url(upc, base_url),
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
+            'aiImageModels': list(OPENAI_IMAGE_MODELS), 'aiImageModel': OPENAI_IMAGE_MODEL,
         }
 
     def own_chat(self, email):
@@ -2537,7 +2550,7 @@ class Lister:
                   'aspects': fields.get('aspects') or {}}
         return info, values
 
-    def _preload_run(self, upc, steps, base_url):
+    def _preload_run(self, upc, steps, base_url, model=''):
         def mark(step, value):
             with self._jobs_lock:
                 job = self._preloads.get(upc)
@@ -2595,7 +2608,7 @@ class Lister:
                     errors = []
                     for p in own:
                         try:
-                            self.ai_photo(upc, url=p['url'], base_url=base_url)
+                            self.ai_photo(upc, url=p['url'], base_url=base_url, model=model)
                         except Exception as e:  # one bad source photo must not sink the rest
                             errors.append(str(e))
                             continue
@@ -2613,7 +2626,7 @@ class Lister:
                     job['running'] = False
                     job['finishedAt'] = _now()
 
-    def preload(self, upc, *, steps=None, base_url='http://localhost/'):
+    def preload(self, upc, *, steps=None, base_url='http://localhost/', model=''):
         """Start (or report) the background preload of one unit. Returns the job state."""
         upc = self.format_upc12(upc)
         if not upc:
@@ -2623,6 +2636,7 @@ class Lister:
             raise ListerError('nothing to preload: no steps')
         if not self.app:
             raise ListerError('preload is not available on this server', 501)
+        model = image_model(model)
         with self._jobs_lock:
             job = self._preloads.get(upc)
             if job and job.get('running') and time.time() - job.get('started', 0) <= PREPARE_STALE_SECONDS * 2:
@@ -2633,12 +2647,12 @@ class Lister:
 
         def run():
             with app.app_context():
-                self._preload_run(upc, steps, base_url)
+                self._preload_run(upc, steps, base_url, model)
 
         threading.Thread(target=run, name=f'lister-preload-{upc}', daemon=True).start()
         return self.preload_status(upc)
 
-    def preload_all(self, upcs, *, steps=None, base_url='http://localhost/'):
+    def preload_all(self, upcs, *, steps=None, base_url='http://localhost/', model=''):
         """Preload a list of units one after another (the whole queue, typically)."""
         upcs = [self.format_upc12(u) for u in upcs or [] if self.format_upc12(u)]
         steps = [s for s in (steps or list(self.PRELOAD_STEPS)) if s in self.PRELOAD_STEPS]
@@ -2648,6 +2662,7 @@ class Lister:
             raise ListerError('nothing to preload: no steps')
         if not self.app:
             raise ListerError('preload is not available on this server', 501)
+        model = image_model(model)
         with self._jobs_lock:
             if self._preload_all.get('running'):
                 return self.preload_all_status()
@@ -2667,7 +2682,7 @@ class Lister:
                         if job:
                             job['started'] = time.time()
                             job.pop('queued', None)
-                    self._preload_run(u, steps, base_url)
+                    self._preload_run(u, steps, base_url, model)
                 with self._jobs_lock:
                     self._preload_all['running'] = False
                     self._preload_all['finishedAt'] = _now()
@@ -2736,7 +2751,7 @@ class Lister:
         name = value.rsplit('/', 1)[-1].split('?')[0] or 'photo.jpg'
         return data, mime, name
 
-    def ai_photo(self, upc, *, url, prompt='', base_url='http://localhost/', quality='medium'):
+    def ai_photo(self, upc, *, url, prompt='', base_url='http://localhost/', quality='medium', model=''):
         """Send one photo through the OpenAI image edit and store the result as a listing photo."""
         upc = self.format_upc12(upc)
         if not upc:
@@ -2746,6 +2761,7 @@ class Lister:
             raise ListerError('AI photoshop needs server setup: add OPENAI_API_KEY to the Pi .env and restart the service.', 503)
         prompt = _text(prompt, 2000) or DEFAULT_AI_PHOTO_PROMPT
         quality = quality if quality in ('low', 'medium', 'high', 'auto') else 'medium'
+        model = image_model(model)
         data, mime, name = self.photo_bytes(url, base_url)
         import requests
         try:
@@ -2753,7 +2769,7 @@ class Lister:
                 'https://api.openai.com/v1/images/edits',
                 headers={'Authorization': f'Bearer {api_key}'},
                 files=[('image[]', (name, data, mime))],
-                data={'model': OPENAI_IMAGE_MODEL, 'prompt': prompt, 'n': '1', 'quality': quality, 'size': 'auto',
+                data={'model': model, 'prompt': prompt, 'n': '1', 'quality': quality, 'size': 'auto',
                       'output_format': 'jpeg'},
                 timeout=AI_PHOTO_TIMEOUT,
             )
@@ -2773,7 +2789,7 @@ class Lister:
             raise ListerError('The image service returned no picture.', 502)
         try:
             from ai_usage import record as record_ai_usage
-            record_ai_usage('openai', OPENAI_IMAGE_MODEL, 'Lister AI photoshop', result)
+            record_ai_usage('openai', model, 'Lister AI photoshop', result)
         except Exception:
             pass
         folder = self.static_folder / 'listingagent_uploads'
@@ -2795,7 +2811,7 @@ class Lister:
                 pass
         photo_url = base_url.rstrip('/') + '/static/' + rel
         return {'photo': {'url': photo_url, 'id': photo_id, 'source': 'ai', 'name': filename, 'from': name},
-                'prompt': prompt}
+                'prompt': prompt, 'model': model}
 
     # -- ledger ---------------------------------------------------------------------------------
 
@@ -3120,7 +3136,7 @@ def register(app, deps):
                 return jsonify({'success': True, 'preload': lister.preload_status(upc)})
             guard_mutation()
             data = request.get_json(silent=True) or {}
-            return jsonify({'success': True, 'preload': lister.preload(upc, steps=data.get('steps'), base_url=base_url())})
+            return jsonify({'success': True, 'preload': lister.preload(upc, steps=data.get('steps'), base_url=base_url(), model=_text(data.get('model')))})
         except Exception as e:
             return failure(e, 'lister:preload')
 
@@ -3130,7 +3146,7 @@ def register(app, deps):
                 return jsonify({'success': True, **lister.preload_all_status()})
             guard_mutation()
             data = request.get_json(silent=True) or {}
-            return jsonify({'success': True, **lister.preload_all(data.get('upcs') or [], steps=data.get('steps'), base_url=base_url())})
+            return jsonify({'success': True, **lister.preload_all(data.get('upcs') or [], steps=data.get('steps'), base_url=base_url(), model=_text(data.get('model')))})
         except Exception as e:
             return failure(e, 'lister:preload-all')
 
@@ -3165,7 +3181,8 @@ def register(app, deps):
             guard_mutation()
             data = request.get_json(silent=True) or {}
             result = lister.ai_photo(_text(data.get('upc')), url=_text(data.get('url'), 1000), prompt=data.get('prompt') or '',
-                                     base_url=base_url(), quality=_text(data.get('quality')).lower() or 'medium')
+                                     base_url=base_url(), quality=_text(data.get('quality')).lower() or 'medium',
+                                     model=_text(data.get('model')))
             return jsonify({'success': True, **result}), 201
         except Exception as e:
             return failure(e, 'lister:photo-ai')

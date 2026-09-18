@@ -722,7 +722,8 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(res.get_json()['prompt'], lister_routes.DEFAULT_AI_PHOTO_PROMPT)
         self.assertEqual((uploads / photo['name']).read_bytes(), b'hello')
         self.assertEqual(calls[0][0], 'https://api.openai.com/v1/images/edits')
-        self.assertEqual(calls[0][1]['data']['model'], 'gpt-image-1')
+        self.assertEqual(calls[0][1]['data']['model'], 'gpt-image-2')
+        self.assertEqual(res.get_json()['model'], 'gpt-image-2')
         self.assertEqual(calls[0][1]['files'][0][1][0], 'own.jpg')
         self.assertEqual(calls[0][1]['headers']['Authorization'], 'Bearer test-openai')
         self.assertEqual(self.sql('listagent.db', 'SELECT upc, image_path FROM listing_photos')[0], {'upc': UPC, 'image_path': 'listingagent_uploads/' + photo['name']})
@@ -733,6 +734,17 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual((fetched['name'], fetched['mime'], fetched['base64']), (photo['name'], 'image/jpeg', 'aGVsbG8='))
         with patch.dict(os.environ, {'OPENAI_API_KEY': ''}):
             self.assertEqual(self.client.post('/api/lister/photos/ai', json={'upc': UPC, 'url': photo['url']}).status_code, 503)
+        # The panel's model picker: each listed model goes through, anything else is refused before any call.
+        for model in lister_routes.OPENAI_IMAGE_MODELS:
+            with patch.object(requests, 'post', fake_post), patch.dict(os.environ, {'OPENAI_API_KEY': 'test-openai'}):
+                picked = self.client.post('/api/lister/photos/ai', json={'upc': UPC, 'url': photo['url'], 'model': model}, base_url='https://pi.example')
+            self.assertEqual((picked.status_code, picked.get_json()['model'], calls[-1][1]['data']['model']), (201, model, model))
+        self.assertEqual(lister_routes.OPENAI_IMAGE_MODELS, ('gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-1.5'))
+        sent = len(calls)
+        with patch.object(requests, 'post', fake_post), patch.dict(os.environ, {'OPENAI_API_KEY': 'test-openai'}):
+            bad = self.client.post('/api/lister/photos/ai', json={'upc': UPC, 'url': photo['url'], 'model': 'dall-e-2'}, base_url='https://pi.example')
+        self.assertEqual((bad.status_code, len(calls)), (400, sent))
+        self.assertEqual(detail['aiImageModels'][0], detail['aiImageModel'])
         self.assertEqual(self.client.get('/api/lister/photos/fetch?url=https://pi.example/static/../lister_routes.py', base_url='https://pi.example').status_code, 400)
 
     def test_voice_analysis_goes_through_the_shared_service(self):

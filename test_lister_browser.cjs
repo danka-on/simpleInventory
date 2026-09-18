@@ -190,6 +190,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       if (url.pathname === '/api/lister/photos/ai') {
         const body = request.postDataJSON(); const name = body.url.split('/').pop();
         calls.aiPhotos = (calls.aiPhotos || []).concat(name);
+        calls.aiModels = (calls.aiModels || []).concat(body.model);
         return json({ success: true, photo: { url: `https://pi.nexuscentralhq.org/static/listingagent_uploads/big-ai-${name}.png`, source: 'ai', id: 50 + calls.aiPhotos.length, name: `big-ai-${name}.png`, from: name } });
       }
       if (url.pathname.endsWith('/prepare')) { calls.prepare.push(url.pathname); return json({ success: true, status: 'ready', proposalId: 7 }); }
@@ -312,7 +313,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(await panel.$eval('#preloadBar', el => el.hidden), 'no preload bar before a preload');
     await panel.click('#preloadAll');
     await panel.waitForFunction(() => !document.getElementById('preloadBar').hidden, null, { timeout: 5000 });
-    assert.deepEqual(calls.preload.at(-1), { upcs: ['883049370897-1', '012345678905'], steps: ['prepare'] }, 'the queued units with the switched-on steps (values only: no AI switch is on)');
+    assert.deepEqual(calls.preload.at(-1), { upcs: ['883049370897-1', '012345678905'], steps: ['prepare'], model: 'gpt-image-2' }, 'the queued units with the switched-on steps (values only: no AI switch is on) and the picked image model');
     assert.ok((await panel.textContent('#preloadBar')).includes('Preloading'), 'the bar says it is preloading');
     assert.ok(await panel.$eval('#preloadAll', el => el.disabled), 'the button waits while it runs');
     await panel.waitForFunction(() => document.querySelector('#preloadBar').textContent.includes('100%'), null, { timeout: 15000 });
@@ -652,6 +653,13 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#aiPromptReset');
     await panel.waitForFunction(() => document.getElementById('aiPromptWhere').textContent === 'the default prompt', null, { timeout: 10000 });
     assert.equal(await panel.$eval('#aiPrompt', el => el.value), 'Clean up this product photo.', 'reset goes back to the default prompt');
+    // The AI photoshop model picker: the four ChatGPT image models, the pick is saved for every item.
+    assert.deepEqual(await panel.$$eval('#aiImageModel option', els => els.map(e => e.value)), ['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare', 'gpt-image-1.5']);
+    await panel.selectOption('#aiImageModel', 'gpt-image-2.5-flare');
+    await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('gpt-image-2.5-flare'), null, { timeout: 10000 });
+    assert.equal((await panel.evaluate(() => chrome.storage.local.get('ssListerSettings'))).ssListerSettings.imageModel, 'gpt-image-2.5-flare');
+    await panel.selectOption('#aiImageModel', 'gpt-image-2');
+    await panel.waitForFunction(() => document.getElementById('toast').textContent.trim().endsWith('uses gpt-image-2'), null, { timeout: 10000 });
 
     // "Change" next to "By itself" opens the automatic switches right there - not the Settings card
     // the header gear opens (server, name, ...).
@@ -699,6 +707,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await store.waitForFunction(() => Array.isArray(window.photoNames), null, { timeout: 20000 });
     assert.deepEqual(await store.evaluate(() => window.photoNames), ['big-ai-phone.jpg.png'], 'only the new phone photo (its AI version) went to the page');
     assert.deepEqual(calls.aiPhotos.slice(aiBefore), ['phone.jpg'], 'only the new photo was AI photoshopped');
+    assert.ok(calls.aiModels.every(m => m === 'gpt-image-2'), 'AI photoshop sends the default image model: ' + calls.aiModels);
     await panel.click('#settingsBtn');
     await panel.click('label.sw:has(#autoSendPhotos)');
     await panel.click('label.sw:has(#autoAiPhotos)');

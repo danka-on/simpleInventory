@@ -21,7 +21,7 @@
   // A listing walked away from half done: the store form it was on, kept so it can be clicked open again.
   const SESSIONS_KEY = 'ssListerSessions';
   const SESSION_MAX = 6, SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, followPlus: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
+  const DEFAULTS = { server: 'https://pi.nexuscentralhq.org', actor: '', autoFill: true, autoGuide: true, autoLink: true, autoPrepare: true, followPlus: true, autoAiTitle: false, autoAiDescription: false, autoAiPhotos: false, autoSendPhotos: false, autoSendAiOnly: true, imageModel: '', togglesOpen: false, photoTogglesOpen: false, theme: 'light' };
   // The automatic switches, shown in the folding menu on the store card (all of them) and by the photos (the photo ones).
   const AUTO_TOGGLES = [
     { key: 'autoAiTitle', group: 'Listing text', icon: '✍️', label: 'AI title', short: 'AI title', hint: 'Written into the form as the page loads' },
@@ -688,7 +688,7 @@
     state.preload.asked.add(key);
     if (preloadRunning(upc)) { state.preload.watch.add(upc); pollPreload(); return; }
     try {
-      const data = await api('/api/lister/queue/' + encodeURIComponent(upc) + '/preload', { method: 'POST', body: { steps } });
+      const data = await api('/api/lister/queue/' + encodeURIComponent(upc) + '/preload', { method: 'POST', body: { steps, model: imageModel() } });
       state.preload.items[upc] = data.preload;
       state.preload.watch.add(upc);
       renderItems(); pollPreload();
@@ -703,7 +703,7 @@
     const steps = preloadSteps();
     if (steps.length < 2) toast('No AI switch is on, so only the listing values are prepared. Switch on AI title, description or photos to preload those as well.');
     try {
-      const data = await api('/api/lister/preload', { method: 'POST', body: { upcs, steps } });
+      const data = await api('/api/lister/preload', { method: 'POST', body: { upcs, steps, model: imageModel() } });
       state.preload.startedHere = true;
       applyPreloadAll(data);
       for (const upc of upcs) state.preload.asked.add(upc + '|' + steps.join(','));
@@ -1579,6 +1579,27 @@
     await sendPhotoUrls(info, urls);
   }
 
+  // The OpenAI image model for AI photoshop (the server keeps the same list and refuses others).
+  // Blank = the server's default, which is the first one.
+  const IMAGE_MODELS = [
+    { id: 'gpt-image-2', label: 'gpt-image-2 (default)' },
+    { id: 'gpt-image-2.5-sunburst', label: 'gpt-image-2.5-sunburst' },
+    { id: 'gpt-image-2.5-flare', label: 'gpt-image-2.5-flare' },
+    { id: 'gpt-image-1.5', label: 'gpt-image-1.5' },
+  ];
+  function imageModel() {
+    const id = state.settings.imageModel || '';
+    return IMAGE_MODELS.some(m => m.id === id) ? id : IMAGE_MODELS[0].id;
+  }
+  function imageModelBox(id) {
+    return `<div><h3>AI photoshop model <span class="muted">every item, every session</span></h3>
+            <select id="${id}" title="Which ChatGPT image model cleans up the photos">${IMAGE_MODELS.map(m => `<option value="${esc(m.id)}" ${m.id === imageModel() ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</select></div>`;
+  }
+  function wireImageModelBox(id) {
+    const box = $(id);
+    if (box) box.onchange = async () => { await saveSettings({ ...state.settings, imageModel: box.value }); toast('AI photoshop now uses ' + box.value); };
+  }
+
   // The prompt box: this item's unsaved edit if there is one, else the prompt saved for all items
   // (state.aiPrompt, persisted by "Save for all"), else the server's default.
   function promptFor(info) {
@@ -1593,7 +1614,7 @@
     for (const url of urls) {
       state.aiBusy = `AI photoshop ${done + 1}/${urls.length}…`; release.update(`AI photoshop ${done + 1} of ${urls.length}…`); photosChanged();
       try {
-        const data = await api('/api/lister/photos/ai', { method: 'POST', body: { upc: info.upc, url, prompt } });
+        const data = await api('/api/lister/photos/ai', { method: 'POST', body: { upc: info.upc, url, prompt, model: imageModel() } });
         info.photos.unshift(data.photo);
         state.autoPhotos.add(url);  // a manual run counts: the auto switch skips this photo later
         state.selectedPhotos.delete(url);
@@ -2264,6 +2285,7 @@
 
       <details class="adv" id="advBox" ${state.advOpen ? 'open' : ''}><summary>Advanced \u2014 prompts, specifics, manual link</summary>
         <div class="inner">
+          ${imageModelBox('aiImageModel')}
           <div><h3>AI photoshop prompt <span class="muted" id="aiPromptWhere">${state.promptDraft?.upc === info.upc ? 'this item only' : (state.aiPrompt ? 'saved for all items' : 'the default prompt')}</span></h3>
             <textarea id="aiPrompt" rows="3">${esc(promptFor(info))}</textarea>
             <div class="row tight"><button id="aiPromptSave" class="tiny" type="button" title="Keep this prompt for every item and every session">Save for all</button><button id="aiPromptReset" class="tiny" type="button" title="Back to the default prompt for every item">Reset</button></div></div>
@@ -2302,6 +2324,7 @@
       renderDetail();
     };
     wirePhotoCard(el, info, { rerender: renderDetail, refresh: () => { delete state.details[info.upc]; void loadDetail(info.upc, { force: true }); } });
+    wireImageModelBox('aiImageModel');
     $('aiPrompt').oninput = () => {
       state.promptDraft = { upc: info.upc, text: $('aiPrompt').value };
       $('aiPromptWhere').textContent = 'this item only';
