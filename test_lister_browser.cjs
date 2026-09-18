@@ -265,7 +265,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(!(await panel.$('.item.blocked')), 'the eBay list does not carry Amazon verdicts');
     await panel.click('#storeAmazon');
     await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]')?.classList.contains('blocked'), null, { timeout: 15000 });
-    assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('Amazon restricted'));
+    assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('restricted'));
     assert.ok(!(await panel.$('.item[data-upc="883049370897-1"] .sig.block')), 'a listable UPC says nothing: a clean row is the good row');
     await panel.click('#storeEbay');
     await panel.waitForFunction(() => document.getElementById('countEbay').textContent.includes('2') && document.querySelector('.item.current')?.dataset.upc === '883049370897-1', null, { timeout: 15000 });

@@ -1788,9 +1788,9 @@
       const signals = [];
       const ac = state.platform === 'amazon' ? it.amazonCheck : null;
       if (state.platform === 'amazon' && state.checkingAmazon.has(it.baseUpc)) signals.push('<span class="sig quiet"><span class="spin"></span> checking</span>');
-      else if (ac?.status === 'restricted') signals.push(`<span class="sig block" title="${esc(amazonCheckWhy(ac) || 'Amazon restricts this listing for us')}">Amazon restricted</span>`);
+      else if (ac?.status === 'restricted') signals.push(`<span class="sig block" title="${esc(amazonCheckWhy(ac) || 'Amazon restricts this listing for us')}">restricted</span>`);
       else if (ac?.status === 'approval') signals.push(`<span class="sig block" title="${esc(amazonCheckWhy(ac) || 'Amazon needs to approve us for this')}">needs approval</span>`);
-      else if (ac?.status === 'no_asin') signals.push('<span class="sig block" title="No ASIN for this UPC: Amazon has no product page to list against">not in the catalogue</span>');
+      else if (ac?.status === 'no_asin') signals.push('<span class="sig block" title="No ASIN for this UPC: Amazon has no product page to list against">no ASIN</span>');
       const bad = it.prepStatus?.status === 'bad' ? (it.prepStatus.reason || 'bad') : '';
       const wrong = bad || it.defect || '';
       // One flag, even when Item Prep and the BOL both have something to say; the tooltip carries both.
@@ -1823,9 +1823,9 @@
       el.className = 'item';
       el.dataset.upc = it.upc;
       el.innerHTML = `<span class="stripe"></span>${it.thumb ? '<img alt="" loading="lazy">' : '<div class="noimg"></div>'}`
-        + '<div class="body"><div class="title"></div><div class="sub"></div><div class="go"></div></div>'
+        + '<div class="body"><div class="title"></div><div class="sub"></div></div>'
         + '<span class="state"><span class="bolt-slot"></span><button class="inspect" type="button">Details</button>'
-        + '<button class="remove" type="button" aria-label="Remove">\u00d7</button></span>';
+        + '<button class="remove" type="button" aria-label="Remove">\u00d7</button></span><div class="go"></div>';
       return el;
     };
     const patchRow = (el, it) => {
@@ -1844,7 +1844,7 @@
       if (body.firstElementChild.textContent !== text) body.firstElementChild.textContent = text;
       setHtml(body.children[1], `<span class="upc">${upcHtml(it)}</span>${signalsOf(it).join('')}`);
       // The selected row carries its own next step, so the second click has an obvious target.
-      setHtml(body.children[2], armed ? `Click again to list on ${storeName(state.platform)} →` : '');
+      setHtml(el.children[4], armed ? `Click again to list on ${storeName(state.platform)} →` : '');
       const right = el.children[3];
       setHtml(right.firstElementChild, boltOf(it));
       const inspect = right.children[1];
