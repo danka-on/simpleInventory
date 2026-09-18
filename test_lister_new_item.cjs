@@ -159,6 +159,15 @@ const draft = {
     assert.equal(calls.link, 3, 'with a fresh phone link');
     assert.equal(await panel.$eval('#newTitle', el => el.value), '', 'nothing of the old item is left');
 
+    // 2d. Start over from a blank item: the new card is the same markup as the old one, and the
+    //     half-typed barcode used to survive it.
+    await panel.fill('#newBarcode', '234234');
+    await panel.click('#newRestart');
+    for (let i = 0; i < 50 && calls.create < 3; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.create, 3, 'a blank item starts over without asking');
+    await panel.waitForFunction(() => document.querySelector('#newBarcode')?.value === '', null, { timeout: 5000 });
+    for (let i = 0; i < 50 && calls.link < 4; i += 1) await panel.waitForTimeout(100);
+
     // 3. A scanner types the code and presses Enter. The server already knows the name, so the
     //    title arrives filled in and the phone gets a photos-only link.
     await panel.fill('#newBarcode', UPC);

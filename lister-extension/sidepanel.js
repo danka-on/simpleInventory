@@ -2418,6 +2418,9 @@
     state.newItem.draft = null;
     state.newItem.id = null;
     state.newItem.barcodeDraft = '';
+    // A blank card after a blank card is the same markup, and setHtml would keep the old boxes -
+    // with the half-typed barcode and name still in them. Forget them so it draws afresh.
+    for (const id of ['newHead', 'newFields', 'newPhotos']) written.delete($(id));
     remember();
     await newStart();
   }
