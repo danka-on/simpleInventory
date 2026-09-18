@@ -33,7 +33,6 @@
   ],
   "host_permissions": [
     "https://pi.nexuscentralhq.org/*",
-    "https://debby.taila97a84.ts.net/*",
     "https://*.ebay.com/*",
     "https://sellercentral.amazon.com/*",
     "https://www.facebook.com/*"
@@ -41,8 +40,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://pi.nexuscentralhq.org/lister/*",
-        "https://debby.taila97a84.ts.net/lister/*"
+        "https://pi.nexuscentralhq.org/lister/*"
       ],
       "js": [
         "update-bridge.js"

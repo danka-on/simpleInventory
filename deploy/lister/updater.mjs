@@ -133,25 +133,10 @@ function extensionMessage(type) {
     send();
   });
 }
-export function setupCommand(origin, folder) {
-  const dir = (folder || '%LOCALAPPDATA%\\SweetShelvesLister\\extension').replace(/'/g, "''");
-  return `powershell -NoProfile -ExecutionPolicy Bypass -Command "irm '${origin}/lister/update.ps1' -OutFile \\"$env:TEMP\\lister-update.ps1\\"; & \\"$env:TEMP\\lister-update.ps1\\" -ExtensionDir '${dir}' -ServerUrl '${origin}' -InstallAutoUpdate"`;
-}
 export function startPage() {
   const status = document.getElementById('status'), label = document.getElementById('release');
   const button = document.getElementById('install'), change = document.getElementById('folder');
-  const command = document.getElementById('command'), commandFolder = document.getElementById('command-folder');
   let latest, folder, busy = false;
-  const tailnet = 'https://debby.taila97a84.ts.net';
-  function renderCommand() {
-    if (command) command.textContent = setupCommand(location.origin.endsWith('.ts.net') ? location.origin : tailnet, commandFolder?.value.trim());
-  }
-  commandFolder?.addEventListener('input', renderCommand);
-  document.getElementById('copy-command')?.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(command.textContent); status.textContent = 'Setup command copied. Paste it into PowerShell on the other PC.'; }
-    catch { status.textContent = 'Select the command text and copy it manually.'; }
-  });
-  renderCommand();
   function showFolder() { document.getElementById('folder-name').textContent = folder ? `Updates go to: ${folder.name}` : 'Choose your extension folder once. We’ll remember it on this computer.'; }
   savedFolder().then(value => { folder = value; showFolder(); }).catch(() => {});
   async function check() {

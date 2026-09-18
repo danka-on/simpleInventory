@@ -1,15 +1,14 @@
 """Create an immutable, checksummed Sweet Shelves Lister release using only the standard library.
 
 Same feed layout as the AmazingScout extension publisher: releases/<id>.zip (+ .json browser
-payload), latest.json with per-file SHA-256, update.ps1 for Windows PCs and index.html (the
-update page) with the hashed browser updater module.
+payload), latest.json with per-file SHA-256, and index.html (the update page) with the hashed
+browser updater module.
 """
 
 import argparse
 import base64
 import hashlib
 import json
-import shutil
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -64,7 +63,6 @@ def package_extension(dist: Path, output: Path, commit: str = '') -> dict:
 
 def build_feed(dist: Path, output: Path, deploy: Path, commit: str = '') -> dict:
     result = package_extension(dist, output, commit)
-    shutil.copyfile(deploy / 'update.ps1', output / 'update.ps1')
     module = (deploy / 'updater.mjs').read_bytes()
     module_name = 'updater-' + hashlib.sha256(module).hexdigest()[:20] + '.mjs'
     (output / module_name).write_bytes(module)

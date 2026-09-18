@@ -3,7 +3,7 @@
 // (keeps a pinned inbox tab open and relays what fb-inbox.js reads to Sweet Shelves).
 // Everything else runs in the panel.
 
-const UPDATE_ORIGINS = ['https://pi.nexuscentralhq.org', 'https://debby.taila97a84.ts.net'];
+const UPDATE_ORIGINS = ['https://pi.nexuscentralhq.org'];
 const DEFAULT_SERVER = 'https://pi.nexuscentralhq.org';
 
 function isUpdatePage(value) {

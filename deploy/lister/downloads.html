@@ -22,16 +22,6 @@
 </section>
 <h2>One-time setup on each computer</h2>
 <ol><li>Create an empty folder named <strong>Sweet Shelves Lister</strong> (for example in Documents) and choose it above, or choose the folder you already loaded.</li><li>Click <strong>Update &amp; reload</strong>. New installation? Open <code>chrome://extensions</code>, enable <strong>Developer mode</strong>, choose <strong>Load unpacked</strong> and select that folder. Pin the extension and click its icon on an eBay or Seller Central tab to open the panel.</li><li>The panel uses this browser's Sweet Shelves sign-in. If it says <em>sign in</em>, open <a href="/listingagent/review">the review page</a> once and go back to the panel.</li><li>Bookmark this page. Next time, click <strong>Update &amp; reload</strong>, then refresh your eBay and Seller Central tabs.</li></ol>
-<section class="card" aria-label="Windows automatic updates">
-<h2>Windows PCs: automatic updates over Tailscale</h2>
-<p class="muted">Optional. Runs every five minutes while you are signed in and applies updates when Chrome and Edge are fully closed, the same way AmazingScout updates. Requires Tailscale connected on that PC.</p>
-<label for="command-folder">Extension folder on that PC</label>
-<input id="command-folder" type="text" placeholder="%LOCALAPPDATA%\SweetShelvesLister\extension">
-<p class="muted">Enter the folder already loaded with <strong>Load unpacked</strong> to keep its extension ID and settings. Leave it blank for a new installation.</p>
-<pre id="command"></pre>
-<div class="actions"><button id="copy-command" class="secondary">Copy setup command</button></div>
-<p class="muted">Later, run <code>%LOCALAPPDATA%\SweetShelvesLister\Update Sweet Shelves Lister.cmd</code> for an immediate update, or rerun the command with <code>-RemoveAutoUpdate</code> to stop automatic checks.</p>
-</section>
 <p class="muted">The browser's own extension Reload button only reads files on disk. Use the button on this page to download new releases first.</p>
 <p><a id="download" hidden download>Download the latest extension ZIP</a></p>
 <script type="module">import { startPage } from './__UPDATER_MODULE__'; startPage();</script>
