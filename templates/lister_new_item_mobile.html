@@ -312,6 +312,8 @@
     const form = new FormData();
     form.append('audio', blob, 'dictation.' + ((type || 'audio/webm').includes('mp4') ? 'm4a' : 'webm'));
     form.append('kind', config.kind);
+    // Details are spoken in Lithuanian as often as not; the listing needs English only.
+    if (config.kind === 'note') form.append('english', '1');
     try {
       const response = await fetch('/api/warehouse/name-dictation', { method: 'POST', body: form });
       const result = await response.json().catch(() => ({}));
@@ -319,7 +321,8 @@
       const field = $(config.field);
       field.value = field.value.trim() ? (field.value.trim() + ' ' + result.text) : result.text;
       field.dispatchEvent(new Event('input'));
-      setStatus(config.status, config.done, 'ok');
+      if (result.warning) setStatus(config.status, result.warning, 'bad');
+      else setStatus(config.status, config.done, 'ok');
     } catch (error) {
       setStatus(config.status, error.message, 'bad');
     }

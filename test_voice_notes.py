@@ -397,6 +397,39 @@ class NameDictationTests(unittest.TestCase):
         self.assertEqual(len(self.dictate(kind='note').json['text']), 2000)
         self.assertEqual(len(self.dictate(kind='name').json['text']), 200)
 
+    def test_english_flag_translates_a_lithuanian_note(self):
+        self.post.side_effect = [
+            VoiceNoteTests.response({'text': 'Trūksta dviejų šaukštų. Dėžė pažeista.'}),
+            VoiceNoteTests.response({'stop_reason': 'end_turn', 'content': [
+                {'type': 'text', 'text': 'Two spoons are missing. The box is damaged.'}]})]
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-claude'}):
+            response = self.client.post('/api/warehouse/name-dictation', content_type='multipart/form-data', data={
+                'audio': (io.BytesIO(b'note'), 'note.webm'), 'kind': 'note', 'english': '1'})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['text'], 'Two spoons are missing. The box is damaged.')
+        self.assertEqual(response.json['warning'], '')
+        claude = self.post.call_args_list[1]
+        self.assertEqual(claude.args[0], 'https://api.anthropic.com/v1/messages')
+        self.assertEqual(claude.kwargs['json']['messages'][0]['content'], 'Trūksta dviejų šaukštų. Dėžė pažeista.')
+
+    def test_english_flag_keeps_the_note_when_translation_fails(self):
+        self.post.side_effect = [VoiceNoteTests.response({'text': 'Dėžė pažeista.'}),
+                                 VoiceNoteTests.response({}, 500)]
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-claude'}):
+            response = self.client.post('/api/warehouse/name-dictation', content_type='multipart/form-data', data={
+                'audio': (io.BytesIO(b'note'), 'note.webm'), 'kind': 'note', 'english': '1'})
+        self.assertEqual(response.status_code, 200, response.json)
+        self.assertEqual(response.json['text'], 'Dėžė pažeista.')
+        self.assertIn('Not translated', response.json['warning'])
+
+    def test_english_flag_is_ignored_for_names(self):
+        self.post.return_value = VoiceNoteTests.response({'text': 'Zwilling fry pan'})
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'test-claude'}):
+            response = self.client.post('/api/warehouse/name-dictation', content_type='multipart/form-data', data={
+                'audio': (io.BytesIO(b'name'), 'name.webm'), 'kind': 'name', 'english': '1'})
+        self.assertEqual(response.json['text'], 'Zwilling fry pan')
+        self.assertEqual(self.post.call_count, 1)
+
     def test_silent_note_and_unknown_kind_are_rejected(self):
         self.post.return_value = VoiceNoteTests.response({'text': 'Ačiū.'})
         response = self.dictate(kind='note')

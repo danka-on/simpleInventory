@@ -334,6 +334,20 @@ def transcribe_dictation(filename, audio, kind='name'):
     return text[:200 if kind == 'name' else 2000].rstrip()
 
 
+def english_note(service, text):
+    """(English text, warning) for a dictated note; English speech passes through unchanged.
+
+    A failed translation keeps the spoken text rather than losing it, and says so.
+    """
+    if not os.getenv('ANTHROPIC_API_KEY', '').strip():
+        return text, 'Not translated: English translation needs ANTHROPIC_API_KEY on the server.'
+    try:
+        return service.translate(text, written=True)[:2000].rstrip(), ''
+    except Exception as exc:
+        reason = str(exc) if isinstance(exc, VoiceError) else 'the translation could not finish.'
+        return text, 'Not translated to English: ' + reason
+
+
 def register(app, base_dir):
     service = VoiceNotes(base_dir, app.static_folder)
 
@@ -345,9 +359,14 @@ def register(app, base_dir):
             upload = request.files.get('audio')
             if upload is None:
                 raise VoiceError('No recording was received. Tap the microphone and try again.', 400)
-            text = transcribe_dictation(upload.filename, upload.read(MAX_DICTATION_BYTES + 1),
-                                        request.form.get('kind', 'name'))
-            response = jsonify(success=True, text=text)
+            kind = request.form.get('kind', 'name')
+            text = transcribe_dictation(upload.filename, upload.read(MAX_DICTATION_BYTES + 1), kind)
+            warning = ''
+            # Opt-in (the Lister new-item phone page): a note spoken in Lithuanian comes back in
+            # English only. The receiving screens leave it off and keep the spoken language.
+            if kind == 'note' and request.form.get('english') == '1':
+                text, warning = english_note(service, text)
+            response = jsonify(success=True, text=text, warning=warning)
             response.headers['Cache-Control'] = 'no-store'
             return response
         except VoiceError as exc:

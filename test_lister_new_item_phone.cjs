@@ -44,7 +44,9 @@ function page(step) {
       }
       if (url.pathname === '/api/warehouse/name-dictation') {
         const kind = /name="kind"\r?\n\r?\nnote/.test(request.postData() || '') ? 'note' : 'name';
-        calls.dictation.push(kind);
+        // Only the details ask for English; the name is already transcribed as English.
+        const english = /name="english"\r?\n\r?\n1/.test(request.postData() || '');
+        calls.dictation.push(kind + (english ? '+en' : ''));
         return json({ success: true, text: kind === 'name' ? 'Ninja blender 1000 watt black' : 'Jug is clean, lid is scratched' });
       }
       if (url.pathname === `/api/lister/new/t/${TOKEN}` && request.method() === 'GET') return json({ success: true, draft });
@@ -107,7 +109,7 @@ function page(step) {
 
     // 2. The details. A longer clip goes up as a note, which is the kind that gets translated.
     await dictate('details', 'scratched');
-    assert.deepEqual(calls.dictation, ['name', 'note']);
+    assert.deepEqual(calls.dictation, ['name', 'note+en'], 'the details ask for English');
 
     // 3. The camera opens by itself, and the shutter is the whole of that screen.
     await phone.click('#detailsNext');
