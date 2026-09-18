@@ -16,7 +16,8 @@ const ORIGIN = 'https://pi.example';
 function page(step) {
   return fs.readFileSync(path.join(root, 'templates', 'lister_new_item_mobile.html'), 'utf8')
     .replace("{{ (token or '')|tojson }}", JSON.stringify(TOKEN))
-    .replace("{{ (step or '')|tojson }}", JSON.stringify(step || ''));
+    .replace("{{ (step or '')|tojson }}", JSON.stringify(step || ''))
+    .replace("{{ (defects or [])|tojson }}", JSON.stringify(['Missing pieces', 'Broken', 'Box damage', 'Replacement', 'Other']));
 }
 
 (async () => {
@@ -110,11 +111,27 @@ function page(step) {
     // 2. The details. A longer clip goes up as a note, which is the kind that gets translated.
     await dictate('details', 'scratched');
     assert.deepEqual(calls.dictation, ['name', 'note+en'], 'the details ask for English');
+    // "lid is scratched" lights Bad + Other by itself, like Item Prep's bubbles would be tapped.
+    await phone.waitForFunction(() => document.querySelector('#statusBubbles [data-status="bad"]').classList.contains('active'),
+                                null, { timeout: 5000 });
+    assert.deepEqual(await phone.$$eval('#defectBubbles button.active', els => els.map(el => el.dataset.defect)), ['Other']);
+    const readVerdict = text => phone.evaluate(t => readVerdict(t), text);
+    assert.deepEqual(await readVerdict(''), { status: 'good', defects: [] }, 'nothing said is GOOD');
+    assert.deepEqual(await readVerdict('Brand new, no scratches, nothing is missing.'), { status: 'good', defects: [] });
+    assert.deepEqual(await readVerdict('The charger is missing and the screen is cracked. Box is torn.'),
+                     { status: 'bad', defects: ['Missing pieces', 'Broken', 'Box damage'] });
+    assert.deepEqual(await readVerdict('Customer return, works fine.'), { status: 'return', defects: [] });
+    assert.deepEqual(await readVerdict('This is a replacement unit.'), { status: 'bad', defects: ['Replacement'] });
+    // A tap wins: Good clears the defects, and the choice is what goes up.
+    await phone.click('#statusBubbles [data-status="return"]');
+    await phone.click('#defectBubbles [data-defect="Box damage"]');
 
     // 3. The camera opens by itself, and the shutter is the whole of that screen.
     await phone.click('#detailsNext');
     await phone.waitForFunction(() => document.getElementById('live').classList.contains('on'), null, { timeout: 20000 });
     assert.equal(calls.steps.at(-1).description, 'Jug is clean, lid is scratched');
+    assert.equal(calls.steps.at(-1).prepStatus, 'return');
+    assert.deepEqual(calls.steps.at(-1).defects, ['Other', 'Box damage']);
     assert.ok(await phone.$eval('#liveDone', el => el.disabled), 'nothing photographed yet');
     assert.ok((await phone.textContent('#liveNote')).includes('shutter'));
 

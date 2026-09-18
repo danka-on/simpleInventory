@@ -300,6 +300,79 @@ class NewItemTestCase(unittest.TestCase):
         self.assertEqual(verdict['condition'], 'USED_GOOD')
         self.assertIn('Cracked corner', verdict['conditionDescription'])
 
+    def submit_with(self, upc, step):
+        draft = self.create()['draft']
+        self.phone(draft['token'], '/step', {'title': 'Ninja blender', 'stage': 'details'})
+        shown = self.phone(draft['token'], '/step', {**step, 'stage': 'photos'})['draft']
+        self.panel(f"/api/lister/new/{draft['id']}/barcode", {'barcode': upc, 'kind': 'generated'})
+        body = self.panel(f"/api/lister/new/{draft['id']}/submit", {'actor': 'Dan'}, expect=201)
+        upc = body['upc']
+        status = self.sql('bol.db', 'SELECT status, reason, note FROM items_prep_status WHERE upc = ?', (upc,))
+        notes = [r['note'] for r in self.sql('bol.db', 'SELECT note FROM items_prep_notes WHERE upc = ? ORDER BY id', (upc,))]
+        return shown, body, status, notes
+
+    def test_saying_nothing_about_it_passes_it_good_and_new(self):
+        shown, body, status, notes = self.submit_with('777000000051', {'description': ''})
+        self.assertEqual((shown['prepStatus'], shown['defects'], shown['prepStatusChosen']), ('good', [], ''))
+        self.assertEqual(body['verdict'], {'status': 'good', 'reason': ''})
+        self.assertEqual(body['upc'], '777000000051', 'a good unit keeps its own barcode')
+        self.assertEqual([(r['status'], r['reason']) for r in status], [('good', '')])
+        self.assertEqual(notes, [])
+        # Item Prep passing a unit good with nothing said about it is what makes the listing New.
+        self.assertEqual(lister_routes.condition_from_notes(notes, prep_status='good')['condition'], 'NEW')
+
+    def test_defect_bubbles_make_it_bad_and_used(self):
+        shown, body, status, notes = self.submit_with('777000000052', {
+            'description': 'Lid is cracked and the manual is not there.', 'prepStatus': 'bad',
+            'defects': ['Broken', 'missing pieces', 'Not a defect']})
+        self.assertEqual((shown['prepStatus'], shown['defects']), ('bad', ['Missing pieces', 'Broken']))
+        # Items to List shows BAD only on a suffixed barcode, so it is filed the way Prep + files it.
+        self.assertEqual((body['upc'], body['baseUpc']), ('777000000052-1', '777000000052'))
+        suffix = self.sql('bol.db', 'SELECT lot_number, bol_number, item_description FROM bol_items WHERE upc = ?',
+                          ('777000000052-1',))
+        self.assertEqual(suffix, [{'lot_number': None, 'bol_number': 'CUSTOM', 'item_description': 'Ninja blender'}])
+        queued = self.sql('listagent.db', 'SELECT upc, source FROM listing_queue WHERE upc LIKE ?', ('777000000052%',))
+        self.assertEqual(queued, [{'upc': '777000000052-1', 'source': 'lister-new'}])
+        self.assertEqual([(r['status'], r['reason'], r['note']) for r in status],
+                         [('bad', 'Missing pieces | Broken', 'Lid is cracked and the manual is not there.')])
+        self.assertEqual(notes, ['Defect: Missing pieces, Broken', 'Lid is cracked and the manual is not there.'])
+        self.assertEqual(lister_routes.condition_from_notes(notes, prep_status='bad')['condition'], 'USED_GOOD')
+
+    def test_a_defect_alone_means_bad_and_return_keeps_its_word(self):
+        shown = self.submit_with('777000000053', {'defects': ['Replacement']})[0]
+        self.assertEqual((shown['prepStatus'], shown['defects']), ('bad', ['Replacement']))
+        shown, _body, status, _notes = self.submit_with('777000000054', {'prepStatus': 'return'})
+        self.assertEqual(shown['prepStatus'], 'return')
+        self.assertEqual([(r['status'], r['reason']) for r in status], [('return', '')])
+        # Tapping Good after a defect drops the defect instead of arguing with it.
+        shown = self.submit_with('777000000055', {'prepStatus': 'good', 'defects': ['Broken']})[0]
+        self.assertEqual((shown['prepStatus'], shown['defects']), ('good', []))
+
+    def test_the_finder_trail_says_it_came_from_lister_new(self):
+        from finder_trail import collect_trail
+
+        body = self.submit_with('777000000056', {'prepStatus': 'bad', 'defects': ['Broken']})[1]
+        self.assertEqual(body['draft']['filedUpc'], '777000000056-1')
+
+        def connect(name):
+            return closing(sqlite3.connect(self.root / name))
+
+        for searched in ('777000000056-1', '777000000056'):
+            trail = collect_trail(self.root, connect, searched)
+            self.assertEqual(trail['identity']['origin'], 'lister-new', searched)
+            created = [e for e in trail['events'] if e['kind'] == 'created']
+            self.assertEqual([e['title'] for e in created], ['Added via Lister + NEW'], searched)
+            self.assertIn('filed as 777000000056-1', created[0]['detail'])
+            self.assertEqual(created[0]['category'], 'prep')
+        self.assertNotEqual(collect_trail(self.root, connect, '777000000099')['identity']['origin'], 'lister-new')
+
+    def test_an_unknown_status_is_refused(self):
+        draft = self.create()['draft']
+        res = self.client.post(f"/api/lister/new/t/{draft['token']}/step", json={'prepStatus': 'shiny'},
+                               base_url='https://pi.example')
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('status must be one of', res.get_json()['error'])
+
     def test_an_item_with_no_name_is_not_submittable(self):
         draft = self.create()['draft']
         self.panel(f"/api/lister/new/{draft['id']}/barcode", {'barcode': '777000000043', 'kind': 'generated'})

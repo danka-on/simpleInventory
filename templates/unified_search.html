@@ -16,7 +16,7 @@
       --k-added: #059669; --k-pulled: #dc2626; --k-moved: #d97706; --k-adjusted: #7c3aed; --k-cleared: #b45309;
       --k-deleted: #be123c; --k-archived: #be123c; --k-undo: #64748b; --k-sold: #2563eb; --k-returned: #9333ea;
       --k-matched: #0891b2; --k-received: #475569; --k-bol: #64748b; --k-prep: #ea580c; --k-prep_status: #ea580c;
-      --k-prep_note: #ea580c; --k-fba: #0f172a; --k-listed: #0284c7;
+      --k-prep_note: #ea580c; --k-fba: #0f172a; --k-listed: #0284c7; --k-created: #7c3aed;
     }
     html.ss-theme-night {
       --bg: #0b1220; --panel: #111a2e; --panel-2: #172238; --ink: #e2e8f0; --ink-2: #cbd5e1; --muted: #94a3b8;
@@ -28,7 +28,7 @@
       --k-added: #34d399; --k-pulled: #f87171; --k-moved: #fbbf24; --k-adjusted: #a78bfa; --k-cleared: #f59e0b;
       --k-deleted: #fb7185; --k-archived: #fb7185; --k-undo: #94a3b8; --k-sold: #60a5fa; --k-returned: #c084fc;
       --k-matched: #22d3ee; --k-received: #94a3b8; --k-bol: #94a3b8; --k-prep: #fb923c; --k-prep_status: #fb923c;
-      --k-prep_note: #fb923c; --k-fba: #e2e8f0; --k-listed: #38bdf8;
+      --k-prep_note: #fb923c; --k-fba: #e2e8f0; --k-listed: #38bdf8; --k-created: #a78bfa;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; }
@@ -113,6 +113,7 @@
     .identity .upc-row code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; color: var(--ink); background: var(--panel-2); padding: 1px 6px; border-radius: 5px; }
     .chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--panel-2); color: var(--ink-2); border: 1px solid var(--line); }
     .chip.custom { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+    .chip.lister-new { background: var(--k-created); color: #fff; border-color: transparent; }
     .chip.family { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
     .identity .links { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
     .text-btn { padding: 3px 9px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--panel); color: var(--ink-2); font-size: 12px; font-weight: 600; text-decoration: none; cursor: pointer; }
@@ -951,6 +952,7 @@ function renderDashboard() {
           <code>${esc(trail.upc_display || formatUpcDisplay(upc))}</code>
           <button type="button" class="text-btn" data-copy="${attrEsc(upc)}">Copy UPC</button>
           ${identity.custom ? '<span class="chip custom">custom item</span>' : ''}
+          ${identity.origin === 'lister-new' ? '<span class="chip lister-new" title="Described on a phone and submitted from the Lister side panel">Added via Lister + NEW</span>' : ''}
           ${dash.family ? '<span class="chip family">showing related UPCs</span>' : ''}
           ${lots.map(lot => `<span class="chip">LOT ${esc(lot)}</span>`).join('')}
         </div>

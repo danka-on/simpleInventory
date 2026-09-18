@@ -29,12 +29,13 @@ CATEGORY = {
     'sold': 'sales', 'returned': 'sales', 'matched': 'sales',
     'received': 'bol', 'bol': 'bol',
     'prep': 'prep', 'prep_status': 'prep', 'prep_note': 'prep',
-    'fba': 'fba', 'listed': 'listings',
+    'fba': 'fba', 'listed': 'listings', 'created': 'prep',
 }
 DATABASES = {
     'searchRack.db': 'Warehouse and FBA prep', 'rackhistory.db': 'Rack history',
     'sold.db': 'Sold history and returns', 'preplog.db': 'Prep history', 'bol.db': 'Prep details and BOL',
     'rawbol.db': 'Imported BOL', 'deleted.db': 'Deleted inventory', 'listinglog.db': 'Listing history',
+    'listagent.db': 'Lister + NEW',
 }
 SNAPSHOT_KEYS = {'barcode', 'upc', 'source_upc', 'item_barcode', 'product_upc'}
 
@@ -217,7 +218,7 @@ def collect_trail(base_dir, connect_db, upc, family=False):
     snapshot_matches = _snapshot_matcher(matches)
     result = {
         'upc': upc, 'upc_display': display_upc(upc), 'family': family,
-        'identity': {'title': '', 'image': '', 'aliases': [], 'lots': [], 'custom': False},
+        'identity': {'title': '', 'image': '', 'aliases': [], 'lots': [], 'custom': False, 'origin': ''},
         'stock': [], 'events': [], 'flags': [], 'unavailable': [], 'errors': [],
         'ledger': {
             'received': 0, 'shelf_adds': 0, 'pulled': 0, 'moves': 0, 'adjustments': 0, 'sold_units': 0,
@@ -618,6 +619,33 @@ def collect_trail(base_dir, connect_db, upc, family=False):
                 f'{platform or "Listing"} {action or "activity"}' + ('' if success else ' failed'),
                 detail=detail, status='ok' if success else 'failed', upc=_text(row.get('upc')), url=_text(row.get('url'))))
     read('listinglog.db', listings)
+
+    # --- Where it came from: the Lister's "+ NEW" button ---------------------------------------
+    def lister_new(conn):
+        if 'lister_new_items' not in _tables(conn):
+            return
+        columns = _columns(conn, 'lister_new_items')
+        where = where_for(columns, 'upc', 'filed_upc')
+        if not where or 'status' not in columns:
+            return
+        for row in _rows(conn, 'lister_new_items', f"({where}) AND status = 'submitted'", order='id DESC', limit=50):
+            identity['origin'] = 'lister-new'
+            filed = _text(row.get('filed_upc')) or _text(row.get('upc'))
+            status = _text(row.get('prep_status')).lower()
+            detail = ' · '.join(part for part in [
+                f'status {status}' if status else '', _text(row.get('defects')),
+                f'filed as {display_upc(filed)}' if filed and filed != _text(row.get('upc')) else '',
+                f'by {_text(row.get("actor"))}' if _text(row.get('actor')) else '',
+            ] if part)
+            events.append(_event(
+                'created', 'listagent.db:lister_new_items', row, row.get('submitted_at') or row.get('updated_at'),
+                'Added via Lister + NEW', detail=detail, status=status, note=_text(row.get('description')),
+                upc=filed))
+            if _text(row.get('title')):
+                fallback_title.append(_text(row.get('title')))
+    # Only a Pi that runs the Lister has this file; its absence is not worth a "not available" note.
+    if (base_dir / 'listagent.db').is_file():
+        read('listagent.db', lister_new)
 
     # --- Aliases (confirmed alternate names) ---------------------------------------------------
     try:

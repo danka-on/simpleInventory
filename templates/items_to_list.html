@@ -2187,6 +2187,12 @@ function render(results){
     if(status==='good') pill = '<span class="status-box" style="background:#2ecc71" title="Good">good</span>';
     if(status==='bad') pill = '<span class="status-box" style="background:#e74c3c" title="Bad">bad</span>';
     if(status==='return') pill = '<span class="status-box" style="background:#8b4513" title="Return">return</span>';
+    // Items described on a phone and submitted from the Lister's "+ NEW" button carry a mark, so
+    // they can be told apart here and traced in unified search.
+    const queueEntry = listingAgentQueueState[queueUpc] || null;
+    const originBadge = (queueEntry && String(queueEntry.source || '').toLowerCase() === 'lister-new')
+      ? '<span class="status-box origin-lister-new" style="background:#7c3aed" title="Added through the Lister + NEW button">+ NEW</span>'
+      : '';
     
     // DEBUG: Log marketplace data for first item
     if (rowIndex === 0) {
@@ -2373,6 +2379,7 @@ function render(results){
     html += `<td style="width:64px;text-align:center">${diagLink}</td>`+
       `<td><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">`+
             `<div>${pill}</div>`+
+            originBadge+
           `</div></td>`+
             notesMediaCell+
             `<td>${esc(defectDisplay)}</td>`+

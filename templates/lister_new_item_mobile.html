@@ -64,6 +64,18 @@
   .status[data-tone="bad"] { color: var(--nb-bad); }
   .status[data-tone="ok"] { color: var(--nb-good); }
 
+  /* Item Prep's status and defect bubbles, same words and colours. */
+  .bubbleLabel { margin: 16px 0 8px; font-size: 13px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--nb-muted); }
+  .bubbles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bubbles button { border: 2px solid var(--nb-line); background: var(--nb-soft); color: var(--nb-ink); border-radius: 999px;
+    padding: 12px 18px; font-size: 16px; font-weight: 600; line-height: 1; }
+  #statusBubbles button { flex: 1; padding: 14px 10px; font-size: 17px; }
+  #statusBubbles button.active[data-status="good"] { background: #2ecc71; border-color: #2ecc71; color: #fff; }
+  #statusBubbles button.active[data-status="bad"] { background: #e74c3c; border-color: #e74c3c; color: #fff; }
+  #statusBubbles button.active[data-status="return"] { background: #8b4513; border-color: #8b4513; color: #fff; }
+  #defectBubbles button.active { background: #00b894; border-color: #00b894; color: #fff; }
+  .bubbleHint { min-height: 18px; margin-top: 8px; font-size: 13px; color: var(--nb-muted); }
+
   .shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; margin-top: 14px; }
   .shots img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; border: 1px solid var(--nb-line); background: var(--nb-soft); }
 
@@ -117,6 +129,15 @@
       <textarea id="detailsInput" placeholder="Tap the microphone, or type it" autocapitalize="sentences" spellcheck="true"></textarea>
       <button id="detailsMic" class="mic" type="button" data-state="idle">🎤 <span id="detailsMicLabel">Tap and say the details</span></button>
       <div class="status" id="detailsStatus"></div>
+      <div class="bubbleLabel">Status</div>
+      <div class="bubbles" id="statusBubbles">
+        <button type="button" data-status="good" aria-pressed="false">Good</button>
+        <button type="button" data-status="bad" aria-pressed="false">Bad</button>
+        <button type="button" data-status="return" aria-pressed="false">Return</button>
+      </div>
+      <div class="bubbleLabel">Defects</div>
+      <div class="bubbles" id="defectBubbles"></div>
+      <div class="bubbleHint" id="bubbleHint"></div>
       <div class="row">
         <button id="detailsBack" type="button">Back</button>
         <button id="detailsNext" class="go" type="button">Next</button>
@@ -170,6 +191,7 @@
 <script>
   const TOKEN = {{ (token or '')|tojson }};
   const START_STEP = {{ (step or '')|tojson }};
+  const DEFECTS = {{ (defects or [])|tojson }};
   const $ = id => document.getElementById(id);
   const api = path => '/api/lister/new/t/' + encodeURIComponent(TOKEN) + path;
 
@@ -328,6 +350,92 @@
     }
     micState(which, 'idle');
   }
+
+  // ---- Status and defect bubbles ------------------------------------------
+  // Filled in from what was said until somebody taps one; after that, what was said can only add
+  // to it. Nothing said at all is GOOD.
+
+  const verdict = { status: 'good', defects: new Set(), touched: false };
+
+  // Phrases that deny a flaw ("no scratches", "nothing is missing") are cut out before looking.
+  const FLAW = 'missing|broken|damaged?|damages|scratch\\w*|dent\\w*|stain\\w*|marks?|defects?|problems?|issues?|cracks?|cracked|chips?|chipped|tears?|torn|scuffs?|scuffed|used|opened';
+  const DENIALS = [
+    new RegExp('\\b(no|nothing|never|zero|without any|free of|free from)\\s+(\\w+\\s+){0,2}?(' + FLAW + ')\\b', 'g'),
+    new RegExp('\\b(not|isn\'t|aren\'t|wasn\'t|is not|are not|was not)\\s+(\\w+\\s+)?(' + FLAW + ')\\b', 'g'),
+  ];
+  const SPOTTERS = [
+    ['Missing pieces', /\b(missing|incomplete|not included|isn't included|not in the box|not there|lacks?|lacking)\b/],
+    ['Broken', /\b(broken|broke|cracked|cracks?|shattered|snapped|doesn't work|does not work|not working|won't (turn on|work|power on)|defective|faulty)\b/],
+    ['Box damage', /\b(box|package|packaging|carton)\b[^.;]{0,30}\b(damaged|damage|torn|ripped|crushed|dented|squashed|wet|opened|open)\b|\b(damaged|torn|ripped|crushed|dented|squashed|opened|open)\s+(box|package|packaging|carton)\b/],
+    ['Replacement', /\breplacement\b/],
+  ];
+  const OTHER_FLAW = /\b(scratch\w*|dent|dents|dented|stain\w*|worn|dirty|chip|chips|chipped|tear|torn|ripped|marks?|scuff\w*|used|damage[ds]?|faded|bent|loose|smells?)\b/;
+  const RETURN_WORDS = /\b(return|returned|customer return|send (it )?back)\b/;
+
+  function readVerdict(text) {
+    let said = ' ' + String(text || '').toLowerCase().replace(/[\u2018\u2019]/g, "'") + ' ';
+    for (const denial of DENIALS) said = said.replace(denial, ' ');
+    const defects = SPOTTERS.filter(([, pattern]) => pattern.test(said)).map(([name]) => name);
+    if (!defects.length && OTHER_FLAW.test(said)) defects.push('Other');
+    const status = RETURN_WORDS.test(said) ? 'return' : (defects.length ? 'bad' : 'good');
+    return { status, defects: defects.filter(name => DEFECTS.includes(name)) };
+  }
+
+  function renderVerdict() {
+    for (const button of $('statusBubbles').children) {
+      const on = button.dataset.status === verdict.status;
+      button.classList.toggle('active', on);
+      button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    for (const button of $('defectBubbles').children) {
+      const on = verdict.defects.has(button.dataset.defect);
+      button.classList.toggle('active', on);
+      button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+  }
+
+  function autoVerdict() {
+    const text = $('detailsInput').value.trim();
+    const read = readVerdict(text);
+    if (verdict.touched) {
+      // A tap is a decision; speech may add a defect it names, never take one away.
+      for (const name of read.defects) verdict.defects.add(name);
+      if (verdict.status === 'good' && read.status !== 'good') verdict.status = read.status;
+    } else {
+      verdict.status = read.status;
+      verdict.defects = new Set(read.defects);
+    }
+    $('bubbleHint').textContent = text ? 'Picked from what you said. Tap to change.' : '';
+    renderVerdict();
+  }
+
+  for (const name of DEFECTS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.defect = name;
+    button.textContent = name;
+    button.setAttribute('aria-pressed', 'false');
+    $('defectBubbles').appendChild(button);
+  }
+  $('statusBubbles').onclick = event => {
+    const button = event.target.closest('button[data-status]');
+    if (!button) return;
+    verdict.touched = true;
+    verdict.status = button.dataset.status;
+    if (verdict.status === 'good') verdict.defects.clear();
+    $('bubbleHint').textContent = '';
+    renderVerdict();
+  };
+  $('defectBubbles').onclick = event => {
+    const button = event.target.closest('button[data-defect]');
+    if (!button) return;
+    verdict.touched = true;
+    const name = button.dataset.defect;
+    if (verdict.defects.has(name)) verdict.defects.delete(name); else verdict.defects.add(name);
+    if (verdict.defects.size && verdict.status === 'good') verdict.status = 'bad';
+    $('bubbleHint').textContent = '';
+    renderVerdict();
+  };
 
   // ---- Camera ----------------------------------------------------------
 
@@ -490,6 +598,8 @@
   $('titleMic').onclick = () => toggleMic('title');
   $('detailsMic').onclick = () => toggleMic('details');
   $('titleInput').oninput = () => { $('titleNext').disabled = !$('titleInput').value.trim(); };
+  let verdictTimer = 0;
+  $('detailsInput').oninput = () => { clearTimeout(verdictTimer); verdictTimer = setTimeout(autoVerdict, 250); };
   $('titleNext').onclick = async () => {
     $('titleNext').disabled = true;
     try {
@@ -504,7 +614,8 @@
   $('detailsNext').onclick = async () => {
     $('detailsNext').disabled = true;
     try {
-      await post('/step', { description: $('detailsInput').value, stage: 'photos' });
+      await post('/step', { description: $('detailsInput').value, prepStatus: verdict.status,
+                            defects: Array.from(verdict.defects), stage: 'photos' });
       show('photos');
     } catch (error) {
       setStatus('detailsStatus', error.message, 'bad');
@@ -532,6 +643,11 @@
     }
     $('titleInput').value = draft.title || '';
     $('detailsInput').value = draft.description || '';
+    // What was saved last time is somebody's decision already; keep it rather than re-reading.
+    verdict.status = draft.prepStatus || 'good';
+    verdict.defects = new Set(draft.defects || []);
+    verdict.touched = !!draft.prepStatusChosen;
+    renderVerdict();
     $('titleNext').disabled = !$('titleInput').value.trim();
     $('liveWho').textContent = draft.title || 'New item';
     if (draft.title) $('photosSub').textContent = draft.title;

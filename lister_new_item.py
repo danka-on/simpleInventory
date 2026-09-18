@@ -33,6 +33,10 @@ from lister_routes import ListerError, MUTATION_HEADER
 
 # Where the phone is in the intake flow. The panel shows it, and the phone page opens on it.
 STAGES = ('title', 'details', 'photos', 'done')
+# The Item Prep diagnostic page's status and defect bubbles, same words, so the verdict reads the
+# same whichever screen set it.
+PREP_STATUSES = ('good', 'bad', 'return')
+PREP_DEFECTS = ('Missing pieces', 'Broken', 'Box damage', 'Replacement', 'Other')
 MAX_PHOTO_BYTES = 25_000_000
 PHOTO_TYPES = {'image/jpeg': '.jpg', 'image/png': '.png', 'image/webp': '.webp', 'image/heic': '.jpg'}
 
@@ -107,6 +111,13 @@ class NewItems:
             )
         ''')
         cur.execute('CREATE INDEX IF NOT EXISTS idx_lister_new_items_status ON lister_new_items(status, updated_at)')
+        cur.execute('PRAGMA table_info(lister_new_items)')
+        have = {r[1] for r in cur.fetchall()}
+        # filed_upc: the barcode the unit was actually filed under (base-N for BAD/RETURN), which is
+        # what the Finder trail and unified search match to say "Added via Lister + NEW".
+        for column in ('prep_status', 'defects', 'filed_upc'):
+            if column not in have:
+                cur.execute(f"ALTER TABLE lister_new_items ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         cur.execute('''
             CREATE TABLE IF NOT EXISTS lister_new_item_photos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -152,9 +163,13 @@ class NewItems:
             'token': draft['token'],
             'upc': _text(draft.get('upc')),
             'upcKind': _text(draft.get('upc_kind')),
+            'filedUpc': _text(draft.get('filed_upc')),
             'title': _text(draft.get('title')),
             'titleSource': _text(draft.get('title_source')),
             'description': _text(draft.get('description')),
+            'prepStatus': self._verdict(draft)[0],
+            'prepStatusChosen': _text(draft.get('prep_status')),
+            'defects': self._verdict(draft)[1],
             'stage': _text(draft.get('stage')) or 'title',
             'status': _text(draft.get('status')) or 'draft',
             'actor': _text(draft.get('actor')),
@@ -174,6 +189,21 @@ class NewItems:
             'ready': bool(_text(draft.get('upc')) and _text(draft.get('title'))),
             'missing': self._missing(draft),
         }
+
+    @staticmethod
+    def _defects(value):
+        items = value if isinstance(value, (list, tuple)) else str(value or '').split('|')
+        wanted = {_text(item).lower() for item in items if _text(item)}
+        return [defect for defect in PREP_DEFECTS if defect.lower() in wanted]
+
+    @classmethod
+    def _verdict(cls, draft):
+        """(status, defects). Nobody choosing means GOOD, unless a defect was picked, which is BAD."""
+        defects = cls._defects(draft.get('defects'))
+        status = _text(draft.get('prep_status')).lower()
+        if status not in PREP_STATUSES:
+            status = 'bad' if defects else 'good'
+        return status, (defects if status != 'good' else [])
 
     @staticmethod
     def _missing(draft):
@@ -378,8 +408,16 @@ class NewItems:
                 result['linkError'] = self.lister.safe_error(e, 'lister:new-item-link')
         return result
 
-    def set_fields(self, draft_id, *, title=None, description=None, source='typed', base_url='http://localhost/'):
+    def set_fields(self, draft_id, *, title=None, description=None, source='typed', base_url='http://localhost/',
+                   prep_status=None, defects=None):
         fields = {}
+        if prep_status is not None:
+            prep_status = _text(prep_status).lower()
+            if prep_status and prep_status not in PREP_STATUSES:
+                raise NewItemError('status must be one of ' + ', '.join(PREP_STATUSES))
+            fields['prep_status'] = prep_status
+        if defects is not None:
+            fields['defects'] = ' | '.join(self._defects(defects))
         if title is not None:
             fields['title'] = _text(title, 200)
             fields['title_source'] = _text(source, 20) or 'typed'
@@ -551,17 +589,22 @@ class NewItems:
 
         thumbnail = self._save_thumbnail(upc, photos)
         self._write_identity(upc, title, thumbnail)
-        images = self._write_prep_photos(upc, photos)
-        notes = self._write_prep_notes(upc, draft, photos)
+        # Items to List only shows BAD and RETURN on a suffixed barcode (the base one is the good
+        # bucket), so a flawed unit gets the next free base-N, exactly as Prep + files it.
+        status = self._verdict(draft)[0]
+        target = upc if status == 'good' else self._write_suffix_row(upc, title, thumbnail)
+        images = self._write_prep_photos(target, photos, status)
+        notes = self._write_prep_notes(target, draft, photos, status)
+        verdict = self._write_prep_status(target, draft)
 
         queued = {}
         if callable(self.add_to_queue):
-            row, _created = self.add_to_queue(upc, title=title, source='lister-new', added_mode='my')
+            row, _created = self.add_to_queue(target, title=title, source='lister-new', added_mode='my')
             queued = {'id': (row or {}).get('id'), 'status': (row or {}).get('status')}
 
         with self._open() as conn:
             cur = conn.cursor()
-            self._touch(cur, draft['id'], status='submitted', stage='done', submitted_at=_now(),
+            self._touch(cur, draft['id'], status='submitted', stage='done', submitted_at=_now(), filed_upc=target,
                         actor=_text(actor, 80) or _text(draft.get('actor'), 80))
             conn.commit()
         self._drop_link(draft)
@@ -570,7 +613,8 @@ class NewItems:
                 self.bump_data_version()
             except Exception:
                 pass
-        return {'upc': upc, 'title': title, 'photos': images, 'notes': notes, 'queued': queued,
+        return {'upc': target, 'baseUpc': upc, 'title': title, 'photos': images, 'notes': notes,
+                'queued': queued, 'verdict': verdict,
                 'thumbnail': thumbnail, **self.get(draft['id'], base_url=base_url)}
 
     def _save_thumbnail(self, upc, photos):
@@ -624,14 +668,54 @@ class NewItems:
                                VALUES (?, ?, ?, NULL, 'CUSTOM', datetime('now'))''', (upc, title, image_url))
             conn.commit()
 
-    def _write_prep_photos(self, upc, photos):
+    @staticmethod
+    def _row_status(upc, status):
+        """Items to List's asset scope: a suffixed barcode is its own unit, a base one is per status."""
+        return '' if '-' in upc else status
+
+    def _next_suffix(self, cur, upc):
+        """First base-N nothing has used yet (same probe as Prep +): a reused suffix would adopt an
+        older unit's photos and notes."""
+        for number in range(1, 501):
+            candidate = f'{upc}-{number}'
+            taken = False
+            for table in ('bol_items', 'items_prep_status', 'items_prep_images', 'items_prep_notes', 'items_prep_media'):
+                try:
+                    if cur.execute(f'SELECT 1 FROM {table} WHERE upc = ? COLLATE NOCASE LIMIT 1', (candidate,)).fetchone():
+                        taken = True
+                        break
+                except sqlite3.Error:
+                    continue
+            if not taken:
+                return candidate
+        raise NewItemError(f'No free entry number left for {upc}. Use a different barcode.')
+
+    def _write_suffix_row(self, upc, title, image_url):
+        with self.db('bol.db') as conn:
+            cur = conn.cursor()
+            self._ensure_bol_items(cur)
+            self._ensure_prep_tables(cur)
+            target = self._next_suffix(cur, upc)
+            cur.execute('PRAGMA table_info(bol_items)')
+            have = {r[1] for r in cur.fetchall()}
+            row = {'upc': target, 'item_description': title, 'image_url': image_url, 'lot_number': None,
+                   'bol_number': 'CUSTOM', 'import_date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                   'original_qty': 1, 'unchecked_qty': 0, 'good_qty': 0, 'bad_qty': 1, 'quantity': 1}
+            row = {key: value for key, value in row.items() if key in have}
+            cur.execute(f"INSERT INTO bol_items ({', '.join(row)}) VALUES ({', '.join('?' for _ in row)})",
+                        tuple(row.values()))
+            conn.commit()
+        return target
+
+    def _write_prep_photos(self, upc, photos, status=''):
         """Both copies join the unit's prep photos, original first, so the listing panel can offer
         either one and Item Prep shows what the phone actually saw."""
         rows, now = [], datetime.datetime.now(datetime.UTC).isoformat()
+        scope = self._row_status(upc, status)
         for photo in photos:
             for path in (photo.get('image_path'), photo.get('marked_path')):
                 if _text(path):
-                    rows.append((upc, '', _text(path), now, 0))
+                    rows.append((upc, scope, _text(path), now, 0))
         if not rows:
             return 0
         with self.db('bol.db') as conn:
@@ -642,11 +726,15 @@ class NewItems:
             conn.commit()
         return len(rows)
 
-    def _write_prep_notes(self, upc, draft, photos):
+    def _write_prep_notes(self, upc, draft, photos, status=''):
         """The dictated details and every damage note, as prep notes. That is the same well the
         listing panel reads its condition and condition description out of, so a circled scratch
         ends up in the eBay listing without anybody retyping it."""
         notes = []
+        status, defects = self._verdict(draft)
+        if defects:
+            # "Defect" is one of the listing's flaw words, so a picked bubble alone makes it Used.
+            notes.append('Defect: ' + ', '.join(defects))
         description = _text(draft.get('description'), 4000)
         if description:
             notes.append(description)
@@ -661,9 +749,27 @@ class NewItems:
             cur = conn.cursor()
             self._ensure_prep_tables(cur)
             cur.executemany('INSERT INTO items_prep_notes (upc, row_status, note, created_at) VALUES (?, ?, ?, ?)',
-                            [(upc, '', note, now) for note in notes])
+                            [(upc, self._row_status(upc, status), note, now) for note in notes])
             conn.commit()
         return len(notes)
+
+    def _write_prep_status(self, upc, draft):
+        """Item Prep's verdict row for the unit, the one the listing panel reads: GOOD with nothing
+        said about it lists as New, BAD carries its defects as the reason."""
+        status, defects = self._verdict(draft)
+        reason = ' | '.join(defects) or ('Other' if status == 'bad' else '')
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        with self.db('bol.db') as conn:
+            cur = conn.cursor()
+            self._ensure_prep_tables(cur)
+            cur.execute('''INSERT INTO items_prep_status (upc, lot_number, status, reason, note, quantity, updated_at)
+                           VALUES (?, '', ?, ?, ?, 1, ?)
+                           ON CONFLICT(upc, lot_number) DO UPDATE SET
+                               status = excluded.status, reason = excluded.reason,
+                               note = excluded.note, updated_at = excluded.updated_at''',
+                        (upc, status, reason, _text(draft.get('description'), 2000), now))
+            conn.commit()
+        return {'status': status, 'reason': reason}
 
     @staticmethod
     def _ensure_bol_items(cur):
@@ -682,6 +788,10 @@ class NewItems:
         cur.execute('''CREATE TABLE IF NOT EXISTS items_prep_notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT, upc TEXT NOT NULL, row_status TEXT, note TEXT NOT NULL,
             created_at TEXT)''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS items_prep_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, upc TEXT NOT NULL, lot_number TEXT NOT NULL DEFAULT '',
+            status TEXT, reason TEXT, note TEXT, updated_at TEXT, location TEXT, pictureposition TEXT,
+            quantity INTEGER DEFAULT 1, UNIQUE(upc, lot_number))''')
 
 
 def register(app, lister, deps):
@@ -771,7 +881,8 @@ def register(app, lister, deps):
             data = request.get_json(silent=True) or {}
             return jsonify({'success': True, **new_items.set_fields(
                 draft_id, title=data.get('title'), description=data.get('description'),
-                source=_text(data.get('source'), 20) or 'typed', base_url=base_url())})
+                source=_text(data.get('source'), 20) or 'typed', base_url=base_url(),
+                prep_status=data.get('prepStatus'), defects=data.get('defects'))})
         except Exception as e:
             return failure(e, 'lister:new-item-fields')
 
@@ -804,7 +915,7 @@ def register(app, lister, deps):
 
     def new_item_page(token):
         return render_template('lister_new_item_mobile.html', token=_text(token, 64),
-                               step=_text(request.args.get('step'), 20))
+                               step=_text(request.args.get('step'), 20), defects=PREP_DEFECTS)
 
     def api_new_phone_get(token):
         try:
@@ -816,11 +927,12 @@ def register(app, lister, deps):
         try:
             phone_guard()
             data = request.get_json(silent=True) or {}
-            if 'stage' in data and 'title' not in data and 'description' not in data:
+            if 'stage' in data and not {'title', 'description', 'prepStatus', 'defects'} & set(data):
                 return jsonify({'success': True, **new_items.set_stage(token, data.get('stage'), base_url=base_url())})
             result = new_items.set_fields(
                 new_items.draft_id_for_token(token), title=data.get('title'),
-                description=data.get('description'), source='voice', base_url=base_url())
+                description=data.get('description'), source='voice', base_url=base_url(),
+                prep_status=data.get('prepStatus'), defects=data.get('defects'))
             if _text(data.get('stage')) in STAGES:
                 result = new_items.set_stage(token, data.get('stage'), base_url=base_url())
             return jsonify({'success': True, **result})
