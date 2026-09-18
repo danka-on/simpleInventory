@@ -185,6 +185,10 @@
     .ev .title { font-weight: 600; font-size: 13px; line-height: 1.35; }
     .ev .meta { font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
     .ev .title .loc { font-size: 12px; padding: 1px 7px; vertical-align: 1px; }
+    .ev[data-open-url] { cursor: pointer; border-radius: 8px; margin: 0 -6px; padding-left: 6px; padding-right: 6px; }
+    .ev[data-open-url]:hover { background: var(--panel-2); }
+    .ev[data-open-url]:hover .title { color: var(--accent); }
+    .ev[data-open-url] .title::after { content: ' ↗'; color: var(--muted); font-weight: 500; }
     .ev.undone { opacity: .5; } .ev.undone .title { text-decoration: line-through; }
     @media (max-width: 600px) { .ev { grid-template-columns: 76px 12px minmax(0, 1fr); } .identity { flex-direction: column; } .identity img { width: 72px; height: 72px; } }
 
@@ -487,6 +491,7 @@ searchClear.addEventListener('click', () => { searchInput.value = ''; searchClea
 familyToggle.addEventListener('change', () => { if (dash.upc) openItem(dash.upc, {forced: true}); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { closeImgPopup(); closeLocPopup(); return; }
+  if (e.key === 'Enter' && document.activeElement?.matches?.('.ev[data-open-url]')) { window.open(document.activeElement.dataset.openUrl, '_blank', 'noopener'); return; }
   if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) { e.preventDefault(); searchInput.focus(); searchInput.select(); }
 });
 
@@ -894,9 +899,41 @@ function renderDashboard() {
     }
     return html;
   };
+  // Where each activity row opens. Receiving (the LOT row) has nowhere better to go, so it stays plain.
+  const rackHistoryHref = '/searchrack?' + new URLSearchParams({db: 'searchRack', q: upc, open_history: '1', history_search: upc});
+  const eventHref = (e) => {
+    const order = text(e.order_id) || text(pick(e.record || {}, 'order_id'));
+    switch (e.kind) {
+      case 'added': case 'pulled': case 'moved': case 'adjusted': case 'cleared': case 'deleted': case 'archived': case 'undo':
+        return rackHistoryHref;
+      case 'sold': case 'matched':
+        return link('/searchrack', {db: 'sold', q: order || upc});
+      case 'returned':
+        return link('/searchrack', {db: 'returns', q: order || upc});
+      case 'prep': case 'prep_note':
+        return openSourceUrl('processed', upc);
+      case 'fba':
+        return '/fba-prep';
+      case 'listed': {
+        const platform = text(pick(e.record || {}, 'platform')).toLowerCase();
+        if (platform.includes('ebay')) {
+          const url = text(e.url) || ebay.map(r => text(pick(r, 'url'))).find(u => /^https?:\/\//i.test(u));
+          return url || openSourceUrl('ebay', upc);
+        }
+        if (platform.includes('amazon')) {
+          const asin = text(pick(e.record || {}, 'asin')) || amazon.map(r => text(pick(r, 'asin'))).find(Boolean);
+          return asin ? `https://www.amazon.com/dp/${encodeURIComponent(asin)}` : openSourceUrl('amazon', upc);
+        }
+        return '';
+      }
+      default: return '';
+    }
+  };
+  const link = (path, query) => path + '?' + new URLSearchParams(query);
   const activity = recent.length ? recent.map(e => {
+    const href = eventHref(e);
     const detail = e.kind === 'listed' && !/quantity \d/.test(e.detail || '') ? [e.detail, listedQty(e)].filter(Boolean).join(' · ') : e.detail;
-    return `<div class="ev ${e.undone ? 'undone' : ''}" style="--k:var(--k-${attrEsc(e.kind)})">
+    return `<div class="ev ${e.undone ? 'undone' : ''}" style="--k:var(--k-${attrEsc(e.kind)})"${href ? ` data-open-url="${attrEsc(href)}" role="link" tabindex="0"` : ''}>
       <div class="t">${esc(fmtDate(e.ts))}</div><div class="dot" title="${attrEsc(e.kind)}"></div>
       <div class="body"><div class="title">${eventTitle(e)}</div>${detail || e.undone || e.pending ? `<div class="meta">${e.undone ? '<span class="pill">undone</span>' : ''}${e.pending ? '<span class="pill bad">not applied</span>' : ''}${detail ? `<span>${esc(detail)}</span>` : ''}</div>` : ''}</div>
     </div>`;
