@@ -1195,11 +1195,9 @@
     state.pendingSearch = { upc: item.upc, platform };
     const onStore = state.page?.store === platform && state.tab?.id;
     // Already on the store's first page: type the UPC and search right here (no reload).
-    if (onStore && state.page.kind === 'listing-start') {
+    if (onStore && (state.page.kind === 'listing-start' || state.page.kind === 'product-search')) {
       bindTab(item.upc, platform);
-      // The first click of the double-click has usually searched already.
-      if (state.searched.has(tabKey('search|' + item.upc))) { state.pendingSearch = null; return; }
-      await maybeAutoSearch();
+      await maybeAutoSearch({ force: true });
       return;
     }
     const url = START_URLS[platform](item.baseUpc || item.upc);
@@ -1807,15 +1805,16 @@
       el.className = 'item';
       el.dataset.upc = it.upc;
       el.innerHTML = `<span class="stripe"></span>${it.thumb ? '<img alt="" loading="lazy">' : '<div class="noimg"></div>'}`
-        + '<div class="body"><div class="title"></div><div class="sub"></div></div>'
-        + '<span class="state"><span class="bolt-slot"></span><button class="start" type="button" aria-label="Start">\u25b6</button>'
+        + '<div class="body"><div class="title"></div><div class="sub"></div><div class="go"></div></div>'
+        + '<span class="state"><span class="bolt-slot"></span><button class="inspect" type="button">Details</button>'
         + '<button class="remove" type="button" aria-label="Remove">\u00d7</button></span>';
       return el;
     };
     const patchRow = (el, it) => {
-      const cls = `item${it.upc === state.currentUpc ? ' current' : ''}${isBlocked(it) ? ' blocked' : ''}${it.status === 'listed' ? ' listed' : ''}`;
+      const armed = it.upc === state.armedUpc && it.upc === state.currentUpc;
+      const cls = `item${it.upc === state.currentUpc ? ' current' : ''}${armed ? ' armed' : ''}${isBlocked(it) ? ' blocked' : ''}${it.status === 'listed' ? ' listed' : ''}`;
       if (el.className !== cls) el.className = cls;
-      const tip = `${it.title} \u2014 click to open it, \u25b6 to start on ${storeName(state.platform)}`;
+      const tip = armed ? `Click again to list it on ${storeName(state.platform)}` : `${it.title} \u2014 click to select, click again to list`;
       if (el.title !== tip) el.title = tip;
       // The picture is only touched when the picture itself changed, so it never reloads.
       const pic = el.children[1];
@@ -1825,12 +1824,14 @@
       const body = el.children[2];
       const text = it.title || '(no title)';
       if (body.firstElementChild.textContent !== text) body.firstElementChild.textContent = text;
-      setHtml(body.lastElementChild, `<span class="upc">${upcHtml(it)}</span>${signalsOf(it).join('')}`);
+      setHtml(body.children[1], `<span class="upc">${upcHtml(it)}</span>${signalsOf(it).join('')}`);
+      // The selected row carries its own next step, so the second click has an obvious target.
+      setHtml(body.children[2], armed ? `Click again to list on ${storeName(state.platform)} →` : '');
       const right = el.children[3];
       setHtml(right.firstElementChild, boltOf(it));
-      const start = right.children[1];
-      start.dataset.start = it.upc;
-      start.title = `Open ${storeName(state.platform)} and search this UPC`;
+      const inspect = right.children[1];
+      inspect.dataset.open = it.upc;
+      inspect.title = 'Look at this item: photos, notes, stock';
       const remove = right.lastElementChild;
       remove.hidden = it.status !== 'queued';
       remove.dataset.skip = it.upc;
@@ -1855,35 +1856,33 @@
       list.onclick = event => {
         const skip = event.target.closest('button[data-skip]');
         if (skip) { event.stopPropagation(); const it = state.items.find(x => x.upc === skip.dataset.skip); if (it) void skipItem(it); return; }
-        // The row's play button opens the store on this item. It replaces the double-click, which
-        // cannot finish any more: the first click hands the panel over to the item view.
-        const play = event.target.closest('button[data-start]');
-        if (play) { event.stopPropagation(); pickItem(play.dataset.start); void startOn(state.platform); return; }
+        // Details opens the item view without starting anything.
+        const open = event.target.closest('button[data-open]');
+        if (open) { event.stopPropagation(); pickItem(open.dataset.open); return; }
         const el = event.target.closest('.item');
         if (!el || event.target.closest('a, button')) return;
-        // Double-click = start this item on the store. Compared with the previous click rather than
-        // with a native dblclick, which a re-render during the gap could still swallow.
-        const now = Date.now();
-        const again = state.lastItemClick && state.lastItemClick.upc === el.dataset.upc && now - state.lastItemClick.at < 450;
-        state.lastItemClick = again ? null : { upc: el.dataset.upc, at: now };
-        if (again) { void startOn(state.platform); return; }
-        pickItem(el.dataset.upc);
+        // First click selects and highlights the row; a click on the selected row lists it.
+        if (state.armedUpc === el.dataset.upc && state.currentUpc === el.dataset.upc) { void startOn(state.platform); return; }
+        pickItem(el.dataset.upc, { stay: true });
       };
     }
   }
 
-  // Opening a queue row: this item becomes the one the panel is working, and the item view takes over.
-  function pickItem(upc) {
+  // Picking a queue row: this item becomes the one the panel is working. Details (open) hands the
+  // panel to the item view; a plain row click (stay) only selects it, ready for the second click.
+  function pickItem(upc, { stay = false } = {}) {
     if (!upc) return;
-    state.currentUpc = upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); state.promptDraft = null; remember();
-    setView('item');
+    const changed = state.currentUpc !== upc;
+    state.armedUpc = upc;
+    if (changed) { state.currentUpc = upc; state.report = null; state.guide = null; state.selectedPhotos = new Set(); state.promptDraft = null; remember(); }
+    if (!stay) setView('item');
     renderItems(); renderConfirm();
-    void loadDetail(upc).then(() => maybeAssist());
+    if (changed || !stay) void loadDetail(upc).then(() => maybeAssist());
     void preloadItem(upc);
     if (state.page?.store) bindTab(upc, state.platform);
-    // Picked while the store's search page is open: search this UPC right away. Opening a row is now
-    // how you open an item, so arm it only when that page is actually in front - otherwise a search
-    // page opened an hour later would run off and search on its own.
+    if (stay) return;
+    // Opened while the store's search page is open: search this UPC right away. Arm it only when that
+    // page is actually in front - otherwise a search page opened an hour later would search on its own.
     if (state.page?.kind === 'listing-start' || state.page?.kind === 'product-search') {
       state.pendingSearch = { upc, platform: state.platform };
       void maybeAutoSearch({ force: true });

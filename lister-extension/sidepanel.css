@@ -164,7 +164,7 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .list { display: flex; flex-direction: column; gap: 1px; padding: 5px 6px; max-height: 58vh; overflow: auto; }
 /* Fixed columns and a fixed height: a signal or the preload bolt arriving after the row is on
    screen changes what it says, never where anything sits. */
-.item { display: grid; grid-template-columns: 3px 44px minmax(0, 1fr) 46px; gap: 9px; align-items: center; min-height: 58px; padding: 7px 6px 7px 0; border-radius: 9px; cursor: pointer; }
+.item { display: grid; grid-template-columns: 3px 44px minmax(0, 1fr) 104px; gap: 9px; align-items: center; min-height: 58px; padding: 7px 6px 7px 0; border-radius: 9px; cursor: pointer; }
 .item .body { min-width: 0; }
 .item:hover { background: var(--card-2); }
 .item .stripe { align-self: stretch; border-radius: 999px; background: transparent; }
@@ -191,8 +191,13 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .item .bolt.on { color: var(--green); }
 .item .bolt.off { opacity: .35; }
 .item .bolt.warn { color: var(--amber); }
-.item .start { width: 32px; height: 32px; padding: 0; border-radius: 50%; line-height: 1; font-size: 13px; color: var(--green); background: var(--green-soft); border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; }
-.item .start:hover { background: var(--green); color: var(--green-ink); filter: none; }
+.item .inspect { height: 28px; padding: 0 10px; border-radius: 8px; font-size: 12px; font-weight: 600; color: var(--muted); background: transparent; border: 1px solid var(--line); white-space: nowrap; }
+.item .inspect:hover { color: var(--ink); background: var(--card); filter: none; }
+/* Selected row: a clear ring and its own "click again" line, the whole row is the button. */
+.item.armed { background: var(--green-soft); box-shadow: inset 0 0 0 2px var(--green); }
+.item .go:empty { display: none; }
+.item .go { margin-top: 6px; padding: 7px 10px; border-radius: 8px; background: var(--green); color: var(--green-ink); font-weight: 700; font-size: 13px; text-align: center; }
+.item.armed:hover .go { filter: brightness(1.08); }
 .item .remove { width: 22px; height: 22px; padding: 0; border-radius: 50%; line-height: 1; font-size: 14px; color: var(--faint); background: transparent; border-color: transparent; opacity: 0; }
 .item:hover .remove, .item .remove:focus-visible { opacity: 1; }
 .item .remove:hover { background: var(--red-soft); color: var(--red); }
