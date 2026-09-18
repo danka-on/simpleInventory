@@ -1,217 +1,234 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
     <title>Shelf Manager - Sweet Shelves</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link rel="stylesheet" href="{{ url_for('static', filename='shelf-creator.css') }}?v=7">
+    <link rel="stylesheet" href="{{ url_for('static', filename='shelf-creator.css') }}?v=8">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <h1><i class="fas fa-box"></i> <span data-i18n="shelf_manager">Shelf Manager</span></h1>
-        
-        <!-- List View -->
+
+        <!-- Browse: locations, then the shelves in one location -->
         <div id="list-view" class="view active">
-            <div class="action-bar">
-                <div class="action-left">
-                    <button class="back-btn btn btn-exit" id="back-btn">
-                        <i class="fas fa-arrow-left"></i> <span id="back-btn-text" data-i18n="exit">Exit</span>
-                    </button>
-                    <button class="btn btn-primary" id="print-qr-btn" style="display: none;">
-                        <i class="fas fa-qrcode"></i> Print QR (<span id="selected-count">0</span>)
-                    </button>
-                    <button class="btn btn-info" id="move-group-btn" style="display: none;">
-                        <i class="fas fa-folder-open"></i> Move
-                    </button>
-                    <button class="btn btn-secondary" id="select-all-btn" style="display: none;">
-                        <i class="fas fa-check-double"></i> Select All
-                    </button>
-                    <button class="btn btn-danger" id="delete-selected-btn" style="display: none;">
-                        <i class="fas fa-trash"></i> Delete (<span id="delete-count">0</span>)
+            <header class="sm-header">
+                <button class="back-btn" id="back-btn" type="button">
+                    <i class="fas fa-arrow-left"></i> <span id="back-btn-text">Tools</span>
+                </button>
+                <div class="sm-title">
+                    <div class="sm-crumb" id="view-crumb">Shelf Manager</div>
+                    <h1 id="view-title">Locations</h1>
+                </div>
+            </header>
+
+            <div class="sm-toolbar">
+                <div class="shelf-search-bar" role="search">
+                    <i class="fas fa-search" aria-hidden="true"></i>
+                    <input id="shelf-search-input" type="search"
+                           placeholder="Find a shelf, e.g. or1s3"
+                           autocomplete="off" autocapitalize="off" spellcheck="false"
+                           aria-label="Search shelves and locations">
+                    <button class="search-clear" id="clear-shelf-search-btn" type="button" style="display:none;" aria-label="Clear search">
+                        <i class="fas fa-times-circle"></i>
                     </button>
                 </div>
-                <div style="flex:1; text-align:center; display:flex; align-items:center; justify-content:center; gap:8px;">
-                    <h2 id="view-title" style="margin:0; font-size:1.2rem; color:#333;" data-i18n="groups">Groups</h2>
-                </div>
-                <div class="action-right">
-                    <div id="sort-controls" style="display:none; align-items:center; gap:5px;">
-                        <select id="shelf-sort" style="padding:6px;border-radius:6px;border:1px solid #ddd;">
-                            <option value="name" selected>Name (natural order)</option>
-                            <option value="created">Created (newest)</option>
-                            <option value="items">Items (desc)</option>
+                <div class="sm-tools">
+                    <div id="sort-controls" style="display:none;">
+                        <select id="shelf-sort" aria-label="Sort shelves">
+                            <option value="name" selected>By rack</option>
+                            <option value="created">Newest first</option>
+                            <option value="items">Most items first</option>
                         </select>
-                        <button id="apply-sort-btn" class="btn btn-primary" style="padding:6px 10px;">Sort</button>
+                        <button id="apply-sort-btn" type="button">Sort</button>
                     </div>
-                    <button class="btn btn-select" id="select-mode-btn" style="display:none;">
+                    <button class="btn btn-select" id="select-mode-btn" type="button" style="display:none;">
                         <i class="fas fa-check-square"></i> Select
                     </button>
-                    <button class="btn btn-success" id="add-btn">
-                        <i class="fas fa-plus"></i> Add
+                    <button class="btn btn-primary" id="add-btn" type="button">
+                        <i class="fas fa-plus"></i> <span id="add-btn-text">New location</span>
                     </button>
                 </div>
-            </div>
-            <div class="shelf-search-bar" role="search">
-                <i class="fas fa-search" aria-hidden="true"></i>
-                <input id="shelf-search-input" type="search"
-                       placeholder="Search shelf code or location group…"
-                       autocomplete="off" autocapitalize="off" spellcheck="false"
-                       aria-label="Search shelves and location groups">
-                <button class="btn btn-secondary" id="clear-shelf-search-btn" type="button" style="display:none;">
-                    <i class="fas fa-times"></i> Clear
-                </button>
             </div>
             <div id="shelf-search-summary" class="shelf-search-summary" aria-live="polite"></div>
             <div id="shelf-list" class="shelf-grid">
-                <div class="loading">
-                    <i class="fas fa-spinner fa-spin"></i> Loading...
-                </div>
+                <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading…</div>
             </div>
         </div>
-        
-        <!-- Add/Edit View -->
+
+        <!-- Add / edit one shelf -->
         <div id="add-view" class="view">
+            <header class="sm-header">
+                <button class="back-btn" id="cancel-btn" type="button">
+                    <i class="fas fa-arrow-left"></i> Back
+                </button>
+                <div class="sm-title">
+                    <div class="sm-crumb" id="form-crumb">Shelf Manager</div>
+                    <h1 id="form-title">New shelf</h1>
+                </div>
+            </header>
+
             <div class="form-card">
-                <h2 id="form-title" data-i18n="add_new_shelf">Add New Shelf</h2>
-                
-                <div class="form-group">
-                    <label for="shelf-code" data-i18n="shelf_code">Shelf Code</label>
-                    <input type="text" id="shelf-code" placeholder="e.g., gr1s1, or2s3" autocomplete="off">
-                    <div id="code-validation" class="validation-message"></div>
+                <div class="form-step">
+                    <div class="step-title"><span class="step-num">1</span> Shelf code</div>
+                    <div class="form-group">
+                        <input type="text" id="shelf-code" placeholder="e.g. or1s3" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Shelf code">
+                        <div id="code-validation" class="validation-message"></div>
+                    </div>
                 </div>
-                <div class="form-group" id="original-only-group" style="margin-top:-6px;">
-                    <label style="display:flex;align-items:center;gap:10px;font-weight:600;cursor:pointer;">
-                        <input type="checkbox" id="original-only" style="width:18px;height:18px;">
-                        <span>Original</span>
+
+                <div class="form-step">
+                    <div class="step-title"><span class="step-num">2</span> <span id="photo-step-title">Photo of the shelf</span></div>
+
+                    <div class="photo-choices" id="photo-choices">
+                        <button class="btn btn-primary" id="start-camera-btn" type="button">
+                            <i class="fas fa-camera"></i> Take photo
+                        </button>
+                        <button class="btn btn-soft" id="gallery-btn" type="button">
+                            <i class="fas fa-images"></i> Choose photo
+                        </button>
+                    </div>
+
+                    <div id="camera-section" style="display: none;">
+                        <div id="camera-container">
+                            <video id="camera-video" autoplay playsinline></video>
+                            <canvas id="camera-preview"></canvas>
+                            <button class="capture-btn" id="capture-btn" type="button" style="display: none;" aria-label="Take the picture">
+                                <i class="fas fa-camera"></i>
+                            </button>
+                        </div>
+                        <div class="btn-group" id="camera-controls" style="display: none;">
+                            <button class="btn btn-secondary" id="retake-btn" type="button">
+                                <i class="fas fa-redo"></i> Retake
+                            </button>
+                            <button class="btn btn-primary" id="continue-btn" type="button">
+                                <i class="fas fa-check"></i> Use this photo
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="upload-section" style="display: none;">
+                        <div class="upload-area" id="upload-area">
+                            <input type="file" id="file-input" accept="image/*" style="display: none;">
+                        </div>
+                    </div>
+
+                    <div id="editor-container">
+                        <canvas id="editor-canvas"></canvas>
+                        <div class="editor-hint">
+                            <i class="fas fa-hand-pointer"></i> Drag to draw a box around the shelf
+                        </div>
+                        <div class="editor-controls">
+                            <button class="btn btn-secondary" id="redraw-rect-btn" type="button">
+                                <i class="fas fa-sync-alt"></i> Redraw box
+                            </button>
+                            <button class="btn btn-secondary" id="replace-image-btn" type="button" style="display: none;">
+                                <i class="fas fa-camera-retro"></i> Different photo
+                            </button>
+                        </div>
+                    </div>
+
+                    <label class="original-only" id="original-only-group">
+                        <input type="checkbox" id="original-only">
+                        <span>Only save the clean photo
+                            <small>No box is drawn. Keeps the shelf's current picture if it already has one.</small>
+                        </span>
                     </label>
-                    <div style="margin-top:6px;font-size:0.9rem;color:#667085;">
-                        Save the clean photo to originals for later markup. Existing shelf image stays unchanged unless this shelf does not have one yet.
-                    </div>
                 </div>
-                
-                <!-- Camera Section (Mobile) -->
-                <div id="camera-section" style="display: none;">
-                    <div id="camera-container">
-                        <video id="camera-video" autoplay playsinline></video>
-                        <canvas id="camera-preview"></canvas>
-                        <button class="capture-btn" id="capture-btn" style="display: none;">
-                            <i class="fas fa-camera"></i>
-                        </button>
-                    </div>
-                    <div class="btn-group" id="camera-controls" style="display: none;">
-                        <button class="btn btn-secondary" id="retake-btn">
-                            <i class="fas fa-redo"></i> Retake
-                        </button>
-                        <button class="btn btn-success" id="continue-btn">
-                            <i class="fas fa-arrow-right"></i> Continue
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Gallery / file upload -->
-                <div id="upload-section" style="display: none;">
-                    <div class="upload-area" id="upload-area">
-                        <i class="fas fa-cloud-upload-alt" style="font-size: 3rem; color: var(--primary); margin-bottom: 10px;"></i>
-                        <p>Click to choose an image</p>
-                        <input type="file" id="file-input" accept="image/*" style="display: none;">
-                    </div>
-                </div>
-                
-                <!-- Rectangle Editor -->
-                <div id="editor-container">
-                    <canvas id="editor-canvas"></canvas>
-                    <div class="editor-controls" style="margin-top: 10px; text-align: center;">
-                        <button class="btn btn-secondary" id="redraw-rect-btn" type="button">
-                            <i class="fas fa-sync-alt"></i> Redraw Box
-                        </button>
-                    </div>
-                    <div class="editor-hint">
-                        <i class="fas fa-hand-pointer"></i> Drag to draw a rectangle around the shelf area
-                    </div>
-                </div>
-                
+
                 <div class="btn-group">
-                    <button class="btn btn-secondary" id="cancel-btn">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
-                    <button class="btn btn-warning" id="replace-image-btn" style="display: none;">
-                        <i class="fas fa-camera-retro"></i> Replace Image
-                    </button>
-                    <button class="btn btn-primary" id="start-camera-btn" style="display: none;">
-                        <i class="fas fa-camera"></i> Take Photo
-                    </button>
-                    <button class="btn btn-primary" id="gallery-btn">
-                        <i class="fas fa-images"></i> Choose from Gallery
-                    </button>
-                    <button class="btn btn-success" id="save-btn" disabled>
-                        <i class="fas fa-save"></i> Save Shelf
+                    <button class="btn btn-success" id="save-btn" type="button" disabled>
+                        <i class="fas fa-save"></i> Save shelf
                     </button>
                 </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal for Enlarged Image -->
-    <div id="image-modal" class="modal">
-        <div class="modal-content">
-            <button class="modal-close" id="modal-close-btn">
-                <i class="fas fa-times"></i> Close
-            </button>
-            <img id="modal-image" src="" alt="Shelf">
-            <div class="modal-actions">
-                <button class="btn btn-info" id="view-items-btn">
-                    <i class="fas fa-list"></i> View Items
-                </button>
-                <button class="btn btn-primary" id="edit-shelf-btn">
-                    <i class="fas fa-edit"></i> Edit
-                </button>
-                <button class="btn btn-secondary" id="duplicate-shelf-btn">
-                    <i class="fas fa-copy"></i> Duplicate
-                </button>
-                <button class="btn btn-warning" id="clear-inventory-btn" title="Clear all items linked to this shelf">
-                    <i class="fas fa-broom"></i> Clear All Inventory
-                </button>
-                <button class="btn btn-danger" id="delete-shelf-btn">
-                    <i class="fas fa-trash"></i> Delete
-                </button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Modal for Creating Group -->
-    <div id="create-group-modal" class="modal">
-        <div class="modal-content" style="max-width: 400px;">
-            <h3 data-i18n="create_new_group">Create New Group</h3>
-            <div class="form-group">
-                <label for="new-group-name" data-i18n="group_name">Group Name</label>
-                <input type="text" id="new-group-name" placeholder="e.g., Aisle 1, Warehouse B">
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" id="cancel-group-btn">Cancel</button>
-                <button class="btn btn-success" id="save-group-btn">Create</button>
             </div>
         </div>
     </div>
 
-    <!-- Modal for Moving Shelves -->
-    <div id="move-group-modal" class="modal">
-        <div class="modal-content" style="max-width: 400px;">
-            <h3 data-i18n="move_to_group">Move to Group</h3>
-            <p>Select a destination group for <span id="move-count">0</span> shelves:</p>
-            <div class="form-group">
-                <select id="move-group-select" style="width:100%; padding:10px; font-size:1.1rem;">
-                    <!-- Options populated by JS -->
-                </select>
+    <!-- While selecting shelves -->
+    <div class="select-bar" id="select-bar" role="toolbar" aria-label="Selected shelves">
+        <span class="sel-count" id="sel-count-text">Tap shelves to select them</span>
+        <button class="btn btn-secondary" id="select-all-btn" type="button" style="display: none;">
+            <i class="fas fa-check-double"></i> All
+        </button>
+        <button class="btn btn-secondary" id="print-qr-btn" type="button" style="display: none;">
+            <i class="fas fa-qrcode"></i> <span>Print QR (<span id="selected-count">0</span>)</span>
+        </button>
+        <button class="btn btn-info" id="move-group-btn" type="button" style="display: none;">
+            <i class="fas fa-folder-open"></i> Move
+        </button>
+        <button class="btn btn-danger" id="delete-selected-btn" type="button" style="display: none;">
+            <i class="fas fa-trash"></i> <span>Delete (<span id="delete-count">0</span>)</span>
+        </button>
+        <button class="btn btn-secondary" id="select-done-btn" type="button">Done</button>
+    </div>
+
+    <!-- One shelf -->
+    <div id="image-modal" class="modal">
+        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+            <div class="sheet-head">
+                <div>
+                    <h3 id="modal-title">Shelf</h3>
+                    <div class="sheet-sub" id="modal-sub"></div>
+                </div>
+                <button class="modal-close" id="modal-close-btn" type="button" aria-label="Close">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
+            <img id="modal-image" src="" alt="Shelf">
             <div class="modal-actions">
-                <button class="btn btn-secondary" id="cancel-move-btn">Cancel</button>
-                <button class="btn btn-primary" id="confirm-move-btn">Move</button>
+                <button class="btn btn-primary" id="view-items-btn" type="button">
+                    <i class="fas fa-list"></i> <span id="view-items-text">See items</span>
+                </button>
+                <button class="btn btn-soft" id="edit-shelf-btn" type="button">
+                    <i class="fas fa-pen"></i> Edit
+                </button>
+                <div class="sheet-more">
+                    <button class="btn btn-secondary" id="duplicate-shelf-btn" type="button">
+                        <i class="fas fa-copy"></i> Duplicate
+                    </button>
+                    <button class="btn btn-warning" id="clear-inventory-btn" type="button" title="Take this shelf off every item on it">
+                        <i class="fas fa-broom"></i> Empty shelf
+                    </button>
+                    <button class="btn btn-danger" id="delete-shelf-btn" type="button">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
             </div>
         </div>
     </div>
-    
-    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=17"></script>
+
+    <!-- New location -->
+    <div id="create-group-modal" class="modal">
+        <div class="modal-content">
+            <h3>New location</h3>
+            <div class="form-group">
+                <input type="text" id="new-group-name" placeholder="e.g. Garage, Office" aria-label="Location name">
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-group-btn" type="button">Cancel</button>
+                <button class="btn btn-primary" id="save-group-btn" type="button">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Move shelves -->
+    <div id="move-group-modal" class="modal">
+        <div class="modal-content">
+            <h3>Move <span id="move-count">0</span> shelves to…</h3>
+            <div class="form-group">
+                <select id="move-group-select" aria-label="Destination location"></select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancel-move-btn" type="button">Cancel</button>
+                <button class="btn btn-primary" id="confirm-move-btn" type="button">Move</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='shelf-creator.js') }}?v=18"></script>
     <script src="/static/i18n.js"></script>
 </body>
 </html>

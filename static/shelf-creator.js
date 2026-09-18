@@ -156,6 +156,8 @@ function updateShelfFormActionVisibility() {
     const hint = document.querySelector('.editor-hint');
     const originalOnlyGroup = document.getElementById('original-only-group');
 
+    const photoChoices = document.getElementById('photo-choices');
+    if (photoChoices) photoChoices.style.display = editorReady ? 'none' : 'flex';
     if (replaceBtn) replaceBtn.style.display = editorReady ? 'inline-flex' : 'none';
     if (galleryBtn) galleryBtn.style.display = editorReady ? 'none' : 'inline-flex';
     if (startCameraBtn && editorReady) startCameraBtn.style.display = 'none';
@@ -167,7 +169,7 @@ function updateShelfFormActionVisibility() {
             : 'Clean original unavailable. Replace the image to draw a new box.';
     }
     if (originalOnlyGroup) {
-        originalOnlyGroup.style.display = (!state.isEditing || state.editSourceIsClean) ? 'block' : 'none';
+        originalOnlyGroup.style.display = (!state.isEditing || state.editSourceIsClean) ? '' : 'none';
     }
 }
 
@@ -180,9 +182,9 @@ function resetSelectionActionVisibility() {
 
     if (selectBtn) {
         selectBtn.innerHTML = '<i class="fas fa-check-square"></i> Select';
-        selectBtn.classList.remove('btn-warning');
-        selectBtn.classList.add('btn-secondary');
+        selectBtn.classList.remove('on');
     }
+    document.body.classList.remove('selecting');
     if (selectAllBtn) selectAllBtn.style.display = 'none';
     if (printBtn) printBtn.style.display = 'none';
     if (moveBtn) moveBtn.style.display = 'none';
@@ -249,7 +251,26 @@ function setupEventListeners() {
     document.getElementById('print-qr-btn').addEventListener('click', printQRCodes);
     document.getElementById('move-group-btn').addEventListener('click', showMoveModal);
     document.getElementById('select-all-btn').addEventListener('click', selectAllShelves);
-    
+    const selectDoneBtn = document.getElementById('select-done-btn');
+    if (selectDoneBtn) selectDoneBtn.addEventListener('click', () => { if (state.selectMode) toggleSelectMode(); });
+
+    // Close any dialog by tapping the dimmed background or pressing Escape.
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', event => {
+            if (event.target === modal) modal.classList.remove('active');
+        });
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        const open = document.querySelector('.modal.active');
+        if (open) open.classList.remove('active');
+        else if (state.selectMode) toggleSelectMode();
+    });
+    const newGroupInput = document.getElementById('new-group-name');
+    if (newGroupInput) newGroupInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') createGroup();
+    });
+
     const deleteSelectedBtn = document.getElementById('delete-selected-btn');
     deleteSelectedBtn.addEventListener('click', deleteSelectedShelves);
     deleteSelectedBtn.addEventListener('touchend', (e) => {
@@ -337,6 +358,8 @@ function setupEventListeners() {
         e.preventDefault();
         renderShelves(); // Re-render with sort
     });
+    const sortSelect = document.getElementById('shelf-sort');
+    if (sortSelect) sortSelect.addEventListener('change', () => renderShelves());
 
     const shelfSearchInput = document.getElementById('shelf-search-input');
     const clearShelfSearchBtn = document.getElementById('clear-shelf-search-btn');
@@ -372,14 +395,18 @@ function renderMain() {
     const backText = document.getElementById('back-btn-text');
     const sortControls = document.getElementById('sort-controls');
     const selectBtn = document.getElementById('select-mode-btn');
-    
+    const crumb = document.getElementById('view-crumb');
+    const addText = document.getElementById('add-btn-text');
+
     if (state.currentGroupId === null) {
         // Show Groups
         state.selectMode = false;
         state.selectedShelves.clear();
         resetSelectionActionVisibility();
-        title.textContent = 'Groups';
-        backText.textContent = 'Exit';
+        title.textContent = 'Locations';
+        if (crumb) crumb.textContent = 'Shelf Manager';
+        if (addText) addText.textContent = 'New location';
+        backText.textContent = 'Tools';
         backBtn.onclick = () => window.location.href = '/tools';
         sortControls.style.display = 'none';
         selectBtn.style.display = 'none';
@@ -388,15 +415,17 @@ function renderMain() {
         // Show Shelves in Group
         if (!state.selectMode) resetSelectionActionVisibility();
         const group = state.groups.find(g => g.id === state.currentGroupId);
-        title.textContent = group ? group.name : 'Unknown Group';
-        backText.textContent = 'Groups';
+        title.textContent = group ? groupDisplayName(group) : 'Unknown location';
+        if (crumb) crumb.textContent = 'Locations';
+        if (addText) addText.textContent = 'New shelf';
+        backText.textContent = 'Locations';
         backBtn.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
             handleBackClick();
         };
-        sortControls.style.display = 'flex';
-        selectBtn.style.display = 'inline-block';
+        sortControls.style.display = 'block';
+        selectBtn.style.display = 'inline-flex';
         renderShelves();
     }
 }
@@ -454,14 +483,33 @@ function shelfCardHtml(shelf) {
     if (isSelected) classes.push('selected');
     if (state.selectMode) classes.push('selecting');
     if (shelf.has_image === false) classes.push('missing-image');
-    const countVal = typeof shelf.count !== 'undefined' ? shelf.count : 0;
+    const countVal = parseInt(shelf.count, 10) || 0;
     return `
         <div class="${classes.join(' ')}" data-code="${escapeHtml(shelf.code)}">
-            <span class="shelf-count" title="View items">${countVal}</span>
+            <span class="shelf-check"><i class="fas fa-check"></i></span>
+            <span class="shelf-count ${countVal ? '' : 'empty'}" title="${countVal ? 'See the items on this shelf' : 'Empty'}"><i class="fas fa-box"></i>${countVal}</span>
             <img src="${escapeHtml(getShelfImageUrl(shelf))}" alt="${escapeHtml(shelf.code)}" loading="lazy">
             <div class="shelf-code">${escapeHtml(shelf.code)}</div>
         </div>
     `;
+}
+
+function groupDisplayName(group) {
+    if (!group) return '';
+    return group.id === 1 ? 'Unsorted' : String(group.name || '');
+}
+
+/**
+ * The rack a shelf code belongs to, for section headings: or1s3b4 -> OR1, gr2s1 -> GR2,
+ * ofloor3 -> OFLOOR. Anything else lands in "Other".
+ */
+function rackOfCode(code) {
+    const text = String(code || '').trim().toLowerCase();
+    let match = text.match(/^([a-z]+\d+)[a-z]+\d/);
+    if (match) return match[1].toUpperCase();
+    match = text.match(/^([a-z]+)\d+$/);
+    if (match) return match[1].toUpperCase();
+    return 'Other';
 }
 
 function attachShelfCardHandlers(container) {
@@ -483,16 +531,26 @@ function renderGroups() {
         renderGroupedShelfSearch(container);
         return;
     }
-    container.className = 'shelf-grid';
+    container.className = 'shelf-grid group-grid';
     setShelfSearchSummary('');
-    
+
     // Sort groups: non-default first, then default (id=1) last
     const sortedGroups = state.groups.slice().sort((a, b) => {
         if (a.id === 1) return 1;  // Default group goes last
         if (b.id === 1) return -1; // Default group goes last
         return compareLocationCodes(a.name, b.name);
     });
-    
+
+    if (!sortedGroups.some(g => g.id !== 1 || state.shelves.some(s => s.group_id === g.id))) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-warehouse"></i>
+                <p>No locations yet. A location is a room or area, like Garage or Office.</p>
+                <button class="btn btn-primary" type="button" onclick="handleAddClick()"><i class="fas fa-plus"></i> New location</button>
+            </div>`;
+        return;
+    }
+
     container.innerHTML = sortedGroups.map(g => {
         // Count shelves in this group
         const shelvesInGroup = state.shelves.filter(s => s.group_id === g.id);
@@ -508,18 +566,24 @@ function renderGroups() {
         const totalItems = shelvesInGroup.reduce((sum, shelf) => sum + (shelf.count || 0), 0);
         
         return `
-        <div class="shelf-item group-card" data-group-id="${Number(g.id)}">
+        <div class="group-card ${isDefaultGroup ? 'unsorted' : ''}" data-group-id="${Number(g.id)}" role="button" tabindex="0">
             <div class="group-icon">
-                <i class="fas ${isDefaultGroup ? 'fa-box-open' : 'fa-folder'}"></i>
+                <i class="fas ${isDefaultGroup ? 'fa-box-open' : 'fa-warehouse'}"></i>
             </div>
-            <div class="shelf-code">${escapeHtml(g.name)}</div>
-            <div class="group-count">${shelfCount} shelves • ${totalItems} items</div>
-            ${!isDefaultGroup ? `<button class="delete-group-btn" onclick="deleteGroup(event, ${g.id})"><i class="fas fa-trash"></i></button>` : ''}
+            <div style="min-width:0;">
+                <div class="group-name">${escapeHtml(groupDisplayName(g))}</div>
+                <div class="group-count">${shelfCountLabel(shelfCount)} · ${totalItems} item${totalItems === 1 ? '' : 's'}</div>
+            </div>
+            <i class="fas fa-chevron-right group-arrow"></i>
+            ${!isDefaultGroup ? `<button class="delete-group-btn" type="button" title="Delete this location" aria-label="Delete location ${escapeHtml(g.name)}" onclick="deleteGroup(event, ${g.id})"><i class="fas fa-trash"></i></button>` : ''}
         </div>
         `;
     }).join('');
     container.querySelectorAll('.group-card').forEach(card => {
         card.addEventListener('click', () => handleGroupClick(Number(card.dataset.groupId)));
+        card.addEventListener('keydown', event => {
+            if (event.key === 'Enter' && event.target === card) handleGroupClick(Number(card.dataset.groupId));
+        });
     });
 }
 
@@ -541,7 +605,7 @@ function renderGroupedShelfSearch(container) {
         sections.push(`
             <section class="shelf-search-section">
                 <div class="shelf-search-section-header">
-                    <strong><i class="fas fa-folder"></i> ${escapeHtml(group.name)}</strong>
+                    <strong><i class="fas fa-warehouse"></i> ${escapeHtml(groupDisplayName(group))}</strong>
                     <span>${shelfCountLabel(shelves.length)}</span>
                 </div>
                 <div class="shelf-grid">${shelves.map(shelfCardHtml).join('')}</div>
@@ -563,7 +627,7 @@ function renderGroupedShelfSearch(container) {
     container.innerHTML = sections.join('');
     attachShelfCardHandlers(container);
     setShelfSearchSummary(
-        `${shelfCountLabel(totalMatches)} matching in ${sections.length} location group${sections.length === 1 ? '' : 's'}`
+        `${shelfCountLabel(totalMatches)} found in ${sections.length} location${sections.length === 1 ? '' : 's'}`
     );
 }
 
@@ -604,16 +668,41 @@ function renderShelves() {
         container.innerHTML = `
             <div class="empty-state">
                 <i class="fas ${searching ? 'fa-search' : 'fa-box-open'}"></i>
-                <p>${searching ? `No shelves match “${escapeHtml(state.shelfSearchQuery)}” in this location.` : 'No shelves in this group. Click + to add one!'}</p>
+                <p>${searching ? `No shelves match “${escapeHtml(state.shelfSearchQuery)}” here.` : 'No shelves here yet.'}</p>
+                ${searching ? '' : '<button class="btn btn-primary" type="button" onclick="showAddView()"><i class="fas fa-plus"></i> New shelf</button>'}
             </div>
         `;
         setShelfSearchSummary(searching ? `0 of ${allGroupShelves.length} shelves` : '');
         return;
     }
-    
-    container.innerHTML = shelves.map(shelfCardHtml).join('');
-    attachShelfCardHandlers(container);
+
     const searching = normalizedShelfSearchTerms().length > 0;
+    // Sorted by name, a big location reads better split into racks (OR1, OR2, GR1 …).
+    const racks = [];
+    if (sortBy === 'name' && !searching && shelves.length > 12) {
+        shelves.forEach(shelf => {
+            const rack = rackOfCode(shelf.code);
+            let section = racks.find(item => item.rack === rack);
+            if (!section) racks.push(section = {rack, shelves: []});
+            section.shelves.push(shelf);
+        });
+        racks.sort((a, b) => (a.rack === 'Other') - (b.rack === 'Other') || compareLocationCodes(a.rack, b.rack));
+    }
+    if (racks.length > 1) {
+        container.className = 'rack-sections';
+        container.innerHTML = racks.map(section => {
+            const items = section.shelves.reduce((sum, shelf) => sum + (parseInt(shelf.count, 10) || 0), 0);
+            return `
+            <section class="rack-section">
+                <div class="rack-head"><strong>${escapeHtml(section.rack)}</strong>
+                    <span>${shelfCountLabel(section.shelves.length)} · ${items} item${items === 1 ? '' : 's'}</span></div>
+                <div class="shelf-grid">${section.shelves.map(shelfCardHtml).join('')}</div>
+            </section>`;
+        }).join('');
+    } else {
+        container.innerHTML = shelves.map(shelfCardHtml).join('');
+    }
+    attachShelfCardHandlers(container);
     setShelfSearchSummary(searching ? `${shelves.length} of ${allGroupShelves.length} shelves` : '');
     
     updatePrintButton();
@@ -689,7 +778,7 @@ function createGroup() {
  */
 function deleteGroup(e, groupId) {
     e.stopPropagation();
-    if (!confirm('Delete this group? Shelves inside will be moved to "Default Group".')) return;
+    if (!confirm('Delete this location? Its shelves are kept and moved to "Unsorted".')) return;
     
     fetch('/api/delete_group', {
         method: 'POST',
@@ -724,7 +813,7 @@ function showMoveModal() {
         return;
     }
     select.innerHTML = targets.map(g =>
-        `<option value="${Number(g.id)}">${escapeHtml(g.name)}</option>`
+        `<option value="${Number(g.id)}">${escapeHtml(groupDisplayName(g))}</option>`
     ).join('');
     
     document.getElementById('move-count').textContent = state.selectedShelves.size;
@@ -774,6 +863,11 @@ function onCountClick(e, code) {
         if (e.preventDefault) e.preventDefault();
     }
     if (!code) return false;
+    const shelf = state.shelves.find(s => s.code === code);
+    if (!shelf || !(parseInt(shelf.count, 10) > 0)) {
+        enlargeShelf(code);
+        return false;
+    }
     window.location.href = `/searchrack?q=${encodeURIComponent(code)}`;
     return false;
 }
@@ -804,23 +898,22 @@ function toggleSelectMode() {
     const selectAllBtn = document.getElementById('select-all-btn');
     const deleteBtn = document.getElementById('delete-selected-btn');
     
+    document.body.classList.toggle('selecting', state.selectMode);
     if (state.selectMode) {
         btn.innerHTML = '<i class="fas fa-times"></i> Cancel';
-        btn.classList.add('btn-warning');
-        btn.classList.remove('btn-secondary');
-        selectAllBtn.style.display = 'inline-block';
+        btn.classList.add('on');
+        selectAllBtn.style.display = 'inline-flex';
     } else {
         btn.innerHTML = '<i class="fas fa-check-square"></i> Select';
-        btn.classList.remove('btn-warning');
-        btn.classList.add('btn-secondary');
+        btn.classList.remove('on');
         // Clear selections when exiting select mode
         state.selectedShelves.clear();
         selectAllBtn.style.display = 'none';
         deleteBtn.style.display = 'none';
-        updatePrintButton();
     }
-    
+
     renderShelves();
+    updatePrintButton();
 }
 
 /**
@@ -846,11 +939,15 @@ function updatePrintButton() {
     const moveBtn = document.getElementById('move-group-btn');
     const deleteBtn = document.getElementById('delete-selected-btn');
     const count = state.selectedShelves.size;
-    
+    const countText = document.getElementById('sel-count-text');
+    if (countText) {
+        countText.textContent = count ? `${count} selected` : 'Tap shelves to select them';
+    }
+
     if (count > 0) {
-        printBtn.style.display = 'inline-block';
-        moveBtn.style.display = 'inline-block';
-        deleteBtn.style.display = 'inline-block';
+        printBtn.style.display = 'inline-flex';
+        moveBtn.style.display = 'inline-flex';
+        deleteBtn.style.display = 'inline-flex';
         document.getElementById('selected-count').textContent = count;
         document.getElementById('delete-count').textContent = count;
     } else {
@@ -932,10 +1029,26 @@ function enlargeShelf(code) {
     }
     
     document.getElementById('modal-image').src = getShelfImageUrl(shelf);
-    const hasInventory = (parseInt(shelf.count, 10) || 0) > 0;
+    const itemCount = parseInt(shelf.count, 10) || 0;
+    const hasInventory = itemCount > 0;
+    const group = state.groups.find(g => g.id === shelf.group_id);
+    const title = document.getElementById('modal-title');
+    const sub = document.getElementById('modal-sub');
+    if (title) title.textContent = code;
+    if (sub) {
+        sub.textContent = [
+            hasInventory ? `${itemCount} item${itemCount === 1 ? '' : 's'} on it` : 'Empty',
+            group ? groupDisplayName(group) : ''
+        ].filter(Boolean).join(' · ');
+    }
+    const viewItemsText = document.getElementById('view-items-text');
+    if (viewItemsText) viewItemsText.textContent = `See ${itemCount} item${itemCount === 1 ? '' : 's'}`;
     const viewItemsBtn = document.getElementById('view-items-btn');
+    const editBtn = document.getElementById('edit-shelf-btn');
     const clearInventoryBtn = document.getElementById('clear-inventory-btn');
     if (viewItemsBtn) viewItemsBtn.style.display = hasInventory ? 'inline-flex' : 'none';
+    // With nothing to see, Edit takes the whole row.
+    if (editBtn) editBtn.style.gridColumn = hasInventory ? '' : '1 / -1';
     if (clearInventoryBtn) clearInventoryBtn.style.display = hasInventory ? 'inline-flex' : 'none';
     document.getElementById('image-modal').classList.add('active');
 }
@@ -969,7 +1082,8 @@ function editShelf() {
     state.currentShelfCode = code;
     state.codeValid = true;
     state.validationRequestToken += 1;
-    document.getElementById('form-title').textContent = `Edit Shelf: ${code}`;
+    document.getElementById('form-title').textContent = `Edit ${code}`;
+    setFormCrumb(shelf.group_id);
     document.getElementById('shelf-code').value = code;
     const originalOnlyCheckbox = document.getElementById('original-only');
     if (originalOnlyCheckbox) originalOnlyCheckbox.checked = false;
@@ -1102,27 +1216,28 @@ function showAddView() {
     console.log('Showing add view');
     document.getElementById('list-view').classList.remove('active');
     document.getElementById('add-view').classList.add('active');
-    document.getElementById('form-title').textContent = 'Add New Shelf';
+    document.getElementById('form-title').textContent = 'New shelf';
+    setFormCrumb(state.currentGroupId);
     state.isEditing = false;
     resetForm();
-    
-    // Show appropriate input method
-    if (state.isMobile) {
-        document.getElementById('camera-section').style.display = 'block';
-        document.getElementById('upload-section').style.display = 'none';
-        document.getElementById('start-camera-btn').style.display = 'block';
-    } else {
-        document.getElementById('camera-section').style.display = 'none';
-        document.getElementById('upload-section').style.display = 'block';
-        document.getElementById('start-camera-btn').style.display = 'none';
-        setupUploadArea();
-    }
+
+    // Both ways in are always offered: Take photo (camera) and Choose photo (file picker).
+    document.getElementById('camera-section').style.display = 'block';
+    document.getElementById('upload-section').style.display = 'none';
+    document.getElementById('start-camera-btn').style.display = 'inline-flex';
     updateShelfFormActionVisibility();
     
     // Focus on shelf code input
     setTimeout(() => {
         document.getElementById('shelf-code').focus();
     }, 100);
+}
+
+function setFormCrumb(groupId) {
+    const crumb = document.getElementById('form-crumb');
+    if (!crumb) return;
+    const group = state.groups.find(g => g.id === groupId);
+    crumb.textContent = group ? groupDisplayName(group) : 'Shelf Manager';
 }
 
 /**
@@ -2434,12 +2549,33 @@ function printQRCodes() {
 // UTILITY FUNCTIONS
 // ============================================================================
 
+let toastTimer = null;
+function showToast(msg, kind) {
+    let toast = document.getElementById('sm-toast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'sm-toast';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.addEventListener('click', () => toast.classList.remove('show'));
+        document.body.appendChild(toast);
+    }
+    const icon = kind === 'err' ? 'fa-exclamation-triangle' : 'fa-check-circle';
+    toast.className = `sm-toast ${kind}`;
+    toast.innerHTML = `<i class="fas ${icon}" style="margin-top:2px;"></i><div>${escapeHtml(msg)}</div>`;
+    // Force a frame so the slide-in runs even when a toast is already showing.
+    void toast.offsetWidth;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), kind === 'err' ? 7000 : 3000);
+}
+
 function showError(msg) {
-    alert('❌ ' + msg);
+    showToast(String(msg || 'Something went wrong'), 'err');
 }
 
 function showSuccess(msg) {
-    alert('✅ ' + msg);
+    showToast(String(msg || 'Done'), 'ok');
 }
 
 // ============================================================================
