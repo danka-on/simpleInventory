@@ -142,7 +142,9 @@ def _telegram_send_message(chat_id, text, disable_notification=True):
                 'text': str(text or ''),
                 'disable_notification': bool(disable_notification)
             },
-            timeout=20
+            # (connect, read): the Pi's IPv6 route to Telegram stalls about one connect in twenty,
+            # and a short connect timeout falls back to IPv4 in seconds instead of hanging 20.
+            timeout=(4, 20)
         )
         data = resp.json() if resp.content else {}
         if not resp.ok or not data.get('ok'):

@@ -132,6 +132,16 @@ def _absolute(url, base_url):
     return value
 
 
+def _thumb_url(url, base_url, width=240):
+    """A list thumbnail the side panel can load. Our own photos (a + NEW item's picture is a
+    /static/custom_items phone photo) are site-relative, which an extension page cannot resolve,
+    and full size; they go through the server's resizer instead."""
+    value = _text(url)
+    if value.startswith('/static/'):
+        value = '/static-thumb/' + value[len('/static/'):] + '?w=' + str(width)
+    return _absolute(value, base_url)
+
+
 def mobile_photos_url(upc, base_url, *, camera=True, back=True, token=''):
     """The phone camera page for one unit. camera=1 opens the camera by itself; the QR code keeps
     a Back link, the Telegram message does not, because there the URL is the whole message."""
@@ -1426,7 +1436,7 @@ class Lister:
                 'baseUpc': _base_upc(upc),
                 'suffixed': is_suffixed(upc),
                 'title': _text(row.get('title'), 200),
-                'thumb': thumbs.get(upc, ''),
+                'thumb': _thumb_url(thumbs.get(upc, ''), base_url),
                 'addedAt': row.get('added_at') or '',
                 'source': row.get('source') or '',
                 'platform': platform,
@@ -1889,7 +1899,7 @@ class Lister:
             try:
                 response = requests.post(f'https://api.telegram.org/bot{token_value}/deleteMessage',
                                          json={'chat_id': str(row.get('chat_id') or ''), 'message_id': message_id},
-                                         timeout=15)
+                                         timeout=(4, 15))
                 if response.ok and (response.json() or {}).get('ok'):
                     deleted += 1
             except Exception:

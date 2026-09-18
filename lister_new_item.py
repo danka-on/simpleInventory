@@ -22,6 +22,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import threading
 
 from pathlib import Path
 from urllib.parse import quote
@@ -247,7 +248,9 @@ class NewItems:
             draft = self._fetch(cur, draft_id=draft_id)
             self._touch(cur, draft['id'], status='cancelled', stage='done')
             conn.commit()
-        self._drop_link(draft)
+        # Taking the Telegram message down is a round trip to Telegram the panel never waits on:
+        # "Start over" opens the next item straight after this answers.
+        self._drop_link_later(draft)
         return self.get(draft_id, base_url=base_url)
 
     # -- the phone link ----------------------------------------------------------------------
@@ -262,6 +265,19 @@ class NewItems:
             return int((self.lister.photo_link_opened(token) or {}).get('deleted') or 0)
         except Exception:
             return 0
+
+    def _drop_link_later(self, draft):
+        """_drop_link on its own thread. The database helpers keep their connections on flask.g, so
+        the thread gets an app context of its own; a host without one just does it inline."""
+        app = getattr(self.lister, 'app', None)
+        if not app or not _text(draft.get('link_token')):
+            self._drop_link(draft)
+            return
+
+        def run():
+            with app.app_context():
+                self._drop_link(draft)
+        threading.Thread(target=run, daemon=True, name='lister-new-drop-link').start()
 
     def send_link(self, draft_id, *, base_url='http://localhost/', replace=True, to_email=''):
         with self._open() as conn:

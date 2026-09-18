@@ -1022,6 +1022,17 @@ class ListerTestCase(unittest.TestCase):
         row = self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]
         self.assertEqual(row['thumb'], 'https://slimages.macys.com/is/image/MCY/24513711')
 
+    def test_a_queue_thumbnail_of_our_own_is_a_full_small_url(self):
+        """A + NEW item's picture is a phone photo under /static/custom_items. Handed over as a bare
+        /static path, the extension page resolved it against itself and showed a broken image."""
+        with closing(sqlite3.connect(self.root / 'bol.db')) as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS bol_items (id INTEGER PRIMARY KEY, upc TEXT, image_url TEXT)')
+            conn.execute("INSERT INTO bol_items (upc, image_url) VALUES (?, ?)",
+                         (UPC.lstrip('0'), f'/static/custom_items/{UPC}.jpg'))
+            conn.commit()
+        row = self.client.get('/api/lister/queue?platform=ebay').get_json()['items'][0]
+        self.assertEqual(row['thumb'], f'http://localhost/static-thumb/custom_items/{UPC}.jpg?w=240')
+
     def test_the_photo_proxy_takes_the_http_link_the_bol_gave_us(self):
         """The fallback is what a refused picture falls back to; rejecting the BOL's own http link
         made it a dead end and left the broken image on screen."""

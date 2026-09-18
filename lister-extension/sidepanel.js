@@ -53,7 +53,7 @@
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, sessions: [], lastForm: null, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
     // "+ NEW": the draft the phone is filling from the other end.
-    newItem: { id: null, draft: null, barcodeDraft: '', timer: null },
+    newItem: { id: null, draft: null, barcodeDraft: '', timer: null, opening: false, linking: null },
   };
 
   const $ = id => document.getElementById(id);
@@ -2282,20 +2282,34 @@
     setView('new');
     if (newDraft() && newDraft().status === 'draft') { renderNew(); newPoll(); return; }
     const done = busy('Opening a new item…');
+    state.newItem.opening = true;
+    renderNew();
     try {
-      const data = await api('/api/lister/new', { method: 'POST', body: {} });
+      // The draft opens without the phone link, so the card is ready to scan at once; the link is a
+      // round trip to Telegram and goes out beside it.
+      const data = await api('/api/lister/new', { method: 'POST', body: { send: false } });
       state.newItem.draft = data.draft;
       state.newItem.id = data.draft.id;
       state.newItem.barcodeDraft = '';
       remember();
-      if (data.linkError) toast('The phone was not sent a link: ' + data.linkError, true);
-      else if (data.link) toast('Photo link sent to ' + (data.link.sent || []).join(', ') + everyoneHint(data.link));
+      state.newItem.linking = newSendLink(data.draft.id);
     } catch (error) {
       toast(error.message, true);
     }
+    state.newItem.opening = false;
     done();
     renderNew();
     newPoll();
+  }
+
+  async function newSendLink(id) {
+    try {
+      const data = await api('/api/lister/new/' + id + '/link', { method: 'POST', body: {} });
+      if (newDraft() && newDraft().id === id && data.draft) { state.newItem.draft = data.draft; renderNew(); }
+      toast('Photo link sent to ' + (data.sent || []).join(', ') + everyoneHint(data));
+    } catch (error) {
+      if (newDraft() && newDraft().id === id) toast('The phone was not sent a link: ' + error.message, true);
+    }
   }
 
   // The phone fills the same draft from the other end, so the card has to keep looking.
@@ -2327,6 +2341,8 @@
   }
 
   async function newSetBarcode(barcode, kind) {
+    // A known code swaps the phone's first link for a camera one, so that first link has to be out.
+    if (state.newItem.linking) await state.newItem.linking;
     const data = await newPost('/barcode', { barcode, kind: kind || 'scanned' }, 'Saving the barcode…');
     if (!data) return false;
     state.newItem.barcodeDraft = '';
@@ -2384,6 +2400,8 @@
       const ok = await confirmModal({ title: 'Start over with a blank item?', text: 'What is on this card now, and the photos the phone sent, is thrown away. A used barcode stays reserved.', okLabel: 'Start over' });
       if (!ok) return;
     }
+    // Closing the old draft is one quick write; its Telegram message comes down on the server
+    // after the answer, so nothing here waits on Telegram.
     if (draft) await newPost('/cancel', {}, 'Clearing the old item…');
     clearTimeout(state.newItem.timer);
     state.newItem.draft = null;
@@ -2568,7 +2586,9 @@
     if (state.view !== 'new') return;
     const draft = newDraft();
     if (!draft) {
-      setHtml($('newHead'), '<div class="card"><strong>No new item open</strong><p class="muted small">Press + NEW again to start one.</p></div>');
+      setHtml($('newHead'), state.newItem.opening
+        ? '<div class="card"><strong>Opening a new item…</strong></div>'
+        : '<div class="card"><strong>No new item open</strong><p class="muted small">Press + NEW again to start one.</p></div>');
       setHtml($('newPhone'), '');
       setHtml($('newPhotos'), '');
       renderActionBar();

@@ -31,7 +31,7 @@ const draft = {
     channel: 'msedge', headless: false,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { create: 0, barcode: [], fields: [], mark: [], submit: [], link: 0, generate: 0, print: [], cancel: 0 };
+  const calls = { create: 0, barcode: [], fields: [], mark: [], submit: [], link: 0, generate: 0, print: [], cancel: 0, createBodies: [] };
   let current = { ...draft };
   try {
     await context.route('https://pi.nexuscentralhq.org/**', async route => {
@@ -46,6 +46,7 @@ const draft = {
 
       if (url.pathname === '/api/lister/new' && request.method() === 'POST') {
         calls.create += 1;
+        calls.createBodies.push(request.postDataJSON());
         current = { ...draft };
         return json({ success: true, draft: current, link: { kind: 'intake', stage: 'title', sent: ['Danka'], errors: [] } }, 201);
       }
@@ -101,6 +102,10 @@ const draft = {
     await panel.click('#storeNew');
     await panel.waitForSelector('#newBarcode');
     assert.equal(calls.create, 1, 'pressing + NEW opens exactly one draft');
+    // The draft opens without waiting on Telegram; the phone link goes out on its own call.
+    assert.equal(calls.createBodies[0].send, false, 'the draft does not wait for the phone link');
+    for (let i = 0; i < 50 && calls.link < 1; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.link, 1, 'the phone link goes out beside the draft');
     assert.equal(await panel.$eval('#storeNew', el => el.getAttribute('aria-selected')), 'true');
     assert.ok(await panel.$eval('#listCard', el => el.hidden), 'the queue steps aside while a new item is open');
     assert.ok((await panel.textContent('#newPhone')).includes('The phone has the link'));
@@ -142,6 +147,8 @@ const draft = {
     await panel.waitForSelector('#newBarcode', { timeout: 10000 });
     assert.equal(calls.cancel, 1, 'the old draft is thrown away');
     assert.equal(calls.create, 2, 'and a fresh one opens');
+    for (let i = 0; i < 50 && calls.link < 2; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.link, 2, 'with a fresh phone link');
     assert.equal(await panel.$eval('#newTitle', el => el.value), '', 'nothing of the old item is left');
 
     // 3. A scanner types the code and presses Enter. The server already knows the name, so the
