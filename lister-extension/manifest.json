@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sweet Shelves Lister",
-  "version": "0.2.60",
+  "version": "0.2.61",
   "description": "List the Sweet Shelves queue on eBay and Amazon: UPC search, auto-fill, guided fields, prep notes and photos, then link the live listing back to the warehouse. Also reads the Facebook Marketplace inbox (never personal chats) for new buyer messages.",
   "icons": {
     "16": "icons/icon16.png",
