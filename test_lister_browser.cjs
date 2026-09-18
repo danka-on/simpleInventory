@@ -382,6 +382,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#addPhoto');
 
     // "+ Photo link" sends the same camera page through the Telegram bot instead of showing a QR code.
+    assert.ok(await panel.$eval('#photoLink', el => el.nextElementSibling?.id === 'addPhoto' && el.classList.contains('phone-btn') && el.textContent.includes('Phone')), 'the blue Phone button sits left of QR');
     await panel.click('#photoLink');
     await panel.waitForFunction(() => document.getElementById('toast')?.textContent.includes('Camera link sent'));
     assert.deepEqual(calls.photoLink, [{ upc: UPC + '-1' }]);
@@ -519,24 +520,25 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(calls.generate[0].values.notes.includes('scratched on the back'), 'the voice note text feeds the AI prompt');
     await store.waitForFunction(() => Array.from(document.querySelectorAll('#ss-lister-guide [data-ss-row] sup')).some(s => s.title.includes('generated with AI')), null, { timeout: 10000 });
     const titleRowText = await store.$$eval('#ss-lister-guide [data-ss-row]', els => { const row = els.find(e => e.textContent.trim().startsWith('Title')); return (row?.querySelector('sup')?.title || '') + ' | ' + row?.textContent.replace(/\s+/g, ' ').trim(); });
-    assert.ok(await store.$eval('#ss-lister-guide', el => el.style.left === '16px' && el.style.right === ''), 'the overlay starts on the left');
+    assert.ok(await store.$eval('#ss-lister-guide', el => el.style.right === '0px' && el.style.bottom === '0px' && el.style.left === ''), 'the overlay starts docked bottom-right, against the side panel');
     // Dragging the HUD by its header remembers the spot for this browser (localStorage + chrome.storage.local).
     const head = await store.$('#ss-lister-guide [data-ss="head"]');
     const box = await head.boundingBox();
     await store.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await store.mouse.down();
-    await store.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 - 90, { steps: 6 });
+    await store.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2 - 90, { steps: 6 });
     await store.mouse.up();
     const dragged = await store.$eval('#ss-lister-guide', el => ({ left: parseFloat(el.style.left), top: parseFloat(el.style.top), bottom: el.style.bottom }));
-    assert.ok(dragged.left > 16 && dragged.bottom === 'auto', 'the HUD moved with the pointer: ' + JSON.stringify(dragged));
-    const savedPos = await store.evaluate(() => JSON.parse(localStorage.getItem('ss-lister-guide-pos') || 'null'));
+    assert.ok(dragged.left >= 0 && dragged.bottom === 'auto', 'the HUD moved with the pointer: ' + JSON.stringify(dragged));
+    const savedPos = await store.evaluate(() => JSON.parse(localStorage.getItem('ss-lister-guide-pos-v2') || 'null'));
     assert.ok(savedPos && Math.round(savedPos.left) === Math.round(dragged.left) && Math.round(savedPos.top) === Math.round(dragged.top),
       'the dragged position is saved for this browser: ' + JSON.stringify(savedPos));
     // Put it back where it was so the HUD does not sit over the fields the rest of this test clicks.
-    await store.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 - 90);
+    await store.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2 - 90);
     await store.mouse.down();
     await store.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
     await store.mouse.up();
+    await store.waitForFunction(() => Array.from(document.querySelectorAll('[data-ss-ai-badge]')).some(t => t.textContent.includes('Added AI generated title') && t.style.display !== 'none'), null, { timeout: 10000 });
     assert.ok(titleRowText.includes('generated with AI') && !titleRowText.includes('automatically'), 'a manual AI run is marked, without "(automatically)": ' + titleRowText);
     assert.ok(titleRowText.split(' | ')[1].includes('AI'), 'the mark is one superscript on the row, not a line of its own: ' + titleRowText);
     // Re-reading the page while the guide is up must not throw (0.2.2 did: "reading 'length'").

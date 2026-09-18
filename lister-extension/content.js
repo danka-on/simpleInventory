@@ -233,9 +233,9 @@
     }
   }
 
-  function fill({ values = {}, store = '', targets = null, aspects = {}, learned = {}, includeDescription = true } = {}) {
+  function fill({ values = {}, store = '', targets = null, aspects = {}, learned = {}, includeDescription = true, aiFields = {} } = {}) {
     const before = { x: window.scrollX, y: window.scrollY, active: document.activeElement };
-    try { return fillNow({ values, store, targets, aspects, learned, includeDescription }); }
+    try { return fillNow({ values, store, targets, aspects, learned, includeDescription, aiFields }); }
     finally {
       // Automatic work must not move the page around: put the scroll and the focus back.
       window.scrollTo(before.x, before.y);
@@ -244,7 +244,7 @@
     }
   }
 
-  function fillNow({ values = {}, store = '', targets = null, aspects = {}, learned = {}, includeDescription = true } = {}) {
+  function fillNow({ values = {}, store = '', targets = null, aspects = {}, learned = {}, includeDescription = true, aiFields = {} } = {}) {
     const elements = collect();
     const descriptors = elements.map(describe);
     const report = { filled: [], skipped: [], unmatched: [], aspects: [], fieldCount: elements.length };
@@ -276,6 +276,7 @@
       try { ok = setField(el, value, { html }); } catch (error) { report.skipped.push({ target, reason: String(error && error.message || error) }); continue; }
       (ok ? report.filled : report.skipped).push({ target, value: clip(value), label: descriptor.labelText || descriptor.ariaLabel || descriptor.name || descriptor.placeholder, score: hit.score, learned: Boolean(hit.learned), reason: ok ? '' : 'field type not supported' });
       if (ok) flash(el);
+      if (ok && (target === 'title' || target === 'description') && aiFields && aiFields[target]) markAi(el, 'Added AI generated ' + target);
     }
 
     // Condition: a <select> or combobox whose label says condition.
@@ -536,6 +537,81 @@
     return files;
   }
 
+  // -- "added AI" badges on the store page -----------------------------------------------------------
+  // What the Lister put on the page that AI wrote (title, description, photos) wears a violet tag, so a
+  // glance at the listing says what to double-check before it goes live. Tags follow scroll and resize.
+  const aiBadges = new Map();  // page element -> { tag, inside }
+  let aiBadgeTimer = 0;
+  let aiPhotoTrack = null;     // { before: Set of <img> on the page before our first send, flags: [ai?] per sent file }
+
+  function markAi(el, text, inside = false) {
+    if (!el || !el.isConnected) return;
+    let badge = aiBadges.get(el);
+    if (!badge) {
+      const tag = document.createElement('div');
+      tag.dataset.ssAiBadge = '1';
+      tag.style.cssText = 'position:absolute;z-index:2147483646;background:#7c3aed;color:#fff;font:700 10.5px/1.25 system-ui,sans-serif;padding:3px 8px;border-radius:999px;box-shadow:0 3px 10px rgba(0,0,0,.28);pointer-events:none;white-space:nowrap';
+      document.documentElement.appendChild(tag);
+      badge = { tag, inside };
+      aiBadges.set(el, badge);
+    }
+    badge.tag.textContent = '✨ ' + text;
+    placeAiBadges();
+    startAiBadges();
+  }
+
+  function startAiBadges() {
+    if (aiBadgeTimer) return;
+    aiBadgeTimer = setInterval(() => { trackAiPhotos(); placeAiBadges(); }, 800);
+    window.addEventListener('scroll', placeAiBadges, true);
+    window.addEventListener('resize', placeAiBadges);
+  }
+
+  function unmarkAi(el) {
+    const badge = aiBadges.get(el);
+    if (badge) { badge.tag.remove(); aiBadges.delete(el); }
+  }
+
+  function placeAiBadges() {
+    for (const [el, badge] of aiBadges) {
+      if (!el.isConnected) { unmarkAi(el); continue; }
+      const r = el.getBoundingClientRect();
+      if (!r.width || !r.height) { badge.tag.style.display = 'none'; continue; }
+      badge.tag.style.display = '';
+      if (badge.inside) {
+        // Photos: inside the thumbnail's top-left corner.
+        badge.tag.style.left = (r.left + window.scrollX + 4) + 'px';
+        badge.tag.style.top = (r.top + window.scrollY + 4) + 'px';
+      } else {
+        // Fields: sitting on the top edge at the right, clear of the text being typed.
+        badge.tag.style.left = Math.max(4, r.right + window.scrollX - badge.tag.offsetWidth - 8) + 'px';
+        badge.tag.style.top = Math.max(0, r.top + window.scrollY - badge.tag.offsetHeight / 2) + 'px';
+      }
+    }
+  }
+
+  // The uploader shows the sent files as new thumbnails in the order they went in; the store may swap a
+  // preview for its hosted copy, so the thumbnails are matched to the sent files again on every tick.
+  function trackAiPhotos() {
+    if (!aiPhotoTrack) return;
+    const fresh = Array.from(document.querySelectorAll('img')).filter(img => {
+      if (aiPhotoTrack.before.has(img) || img.closest('#ss-lister-guide')) return false;
+      const r = img.getBoundingClientRect();
+      return r.width >= 40 && r.height >= 40;
+    });
+    const want = new Set();
+    fresh.slice(0, aiPhotoTrack.flags.length).forEach((img, i) => { if (aiPhotoTrack.flags[i]) want.add(img); });
+    for (const [el, badge] of aiBadges) if (badge.inside && !want.has(el)) unmarkAi(el);
+    for (const img of want) markAi(img, 'Added AI photo', true);
+  }
+
+  function noteSentPhotos(entries) {
+    const flags = (entries || []).map(e => Boolean(e && e.ai));
+    if (!aiPhotoTrack) aiPhotoTrack = { before: new Set(document.querySelectorAll('img')), flags: [] };
+    aiPhotoTrack.flags.push(...flags);
+    if (flags.some(Boolean)) startAiBadges();  // the thumbnails show up a moment later; the ticker tags them
+  }
+
   function addPhotos({ files: entries = [] } = {}) {
     const files = toFiles(entries);
     if (!files.length) return { ok: false, reason: 'no photos to add' };
@@ -547,6 +623,7 @@
         input.files = transfer.files;
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
+        noteSentPhotos(entries);
         return { ok: true, method: 'file-input', count: files.length, multiple: Boolean(input.multiple) };
       } catch (error) {
         return { ok: false, reason: 'the page refused the files: ' + (error.message || error) };
@@ -557,6 +634,7 @@
       for (const type of ['dragenter', 'dragover', 'drop']) {
         zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
       }
+      noteSentPhotos(entries);
       return { ok: true, method: 'drop', count: files.length };
     }
     return { ok: false, reason: 'no photo uploader found on this page. Drag the photo onto the page instead.' };
@@ -791,7 +869,7 @@
 
   // The HUD's dragged position is remembered for this browser: localStorage answers instantly on the next
   // page, chrome.storage.local carries it across stores/tabs and survives the site's storage being cleared.
-  const GUIDE_POS_KEY = 'ss-lister-guide-pos';
+  const GUIDE_POS_KEY = 'ss-lister-guide-pos-v2'; // v2 drops spots saved before the HUD docked on the side panel
   let guidePos = null;
 
   function readGuidePos(raw) {
@@ -807,6 +885,8 @@
     panel.style.left = Math.max(0, Math.min(pos.left, window.innerWidth - 80)) + 'px';
     panel.style.top = Math.max(0, Math.min(pos.top, window.innerHeight - 60)) + 'px';
     panel.style.bottom = 'auto';
+    panel.style.right = 'auto';
+    panel.style.borderRadius = '13px';
   }
 
   function saveGuidePos(pos) {
@@ -941,7 +1021,8 @@
     if (guide.panel) return guide.panel;
     const panel = document.createElement('div');
     panel.id = 'ss-lister-guide';
-    panel.style.cssText = `position:fixed;left:16px;bottom:16px;z-index:2147483647;width:min(300px,calc(100vw - 32px));max-height:min(70vh,560px);display:flex;flex-direction:column;background:${guideTheme.bg};color:${guideTheme.text};font:13px/1.4 system-ui,sans-serif;border-radius:13px;box-shadow:${guideTheme.shadow};overflow:hidden`;
+    panel.style.cssText = `position:fixed;right:0;bottom:0;z-index:2147483647;width:min(300px,100vw);max-height:min(70vh,560px);display:flex;flex-direction:column;background:${guideTheme.bg};color:${guideTheme.text};font:13px/1.4 system-ui,sans-serif;border-radius:13px 0 0 0;box-shadow:${guideTheme.shadow};overflow:hidden`;
+    // Starts docked bottom-right, against the Lister side panel, until the user drags it.
     // Wherever the user dragged it last stays put for this browser (the header is the drag handle).
     try { guidePos = guidePos || readGuidePos(localStorage.getItem(GUIDE_POS_KEY)); } catch { /* private mode */ }
     applyGuidePos(panel, guidePos);
@@ -996,6 +1077,8 @@
         panel.style.left = Math.max(0, Math.min(e.clientX - offset.x, window.innerWidth - rect.width)) + 'px';
         panel.style.top = Math.max(0, Math.min(e.clientY - offset.y, window.innerHeight - 40)) + 'px';
         panel.style.bottom = 'auto';
+        panel.style.right = 'auto';
+        panel.style.borderRadius = '13px';
       };
       const up = () => {
         document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up);
@@ -1064,6 +1147,9 @@
     const open = guide.rows.filter(r => !r.done);
     const requiredOpen = open.filter(r => r.required);
     const current = guide.rows[guide.index];
+    for (const row of guide.rows) {
+      if (row.done && row.kind === 'field' && (row.target === 'title' || row.target === 'description') && guide.options.aiFields?.[row.target]) markAi(guide.elements[row.index], 'Added AI generated ' + row.target);
+    }
     const panel = guidePanel();
     const total = guide.rows.length;
     const allSet = Boolean(total) && !open.length;

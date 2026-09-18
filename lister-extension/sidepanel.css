@@ -491,3 +491,8 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 .edstage { margin-top: 8px; background: var(--card-2); border-radius: 10px; padding: 6px; }
 .edstage canvas { width: 100%; height: auto; display: block; border-radius: 6px; touch-action: none; cursor: crosshair; }
 .edtools { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+
+/* Phone photos: the obvious way in - blue pill with a phone icon, left of QR. */
+button.tiny.phone-btn { display: inline-flex; align-items: center; gap: 4px; background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 700; padding: 4px 10px; box-shadow: 0 2px 6px rgba(37, 99, 235, .35); }
+button.tiny.phone-btn:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+button.tiny.phone-btn .phone-ico { font-size: 13px; line-height: 1; }

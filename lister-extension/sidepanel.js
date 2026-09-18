@@ -987,7 +987,7 @@
     try {
       const store = state.page.store;
       const learned = state.learned[store + ':' + (state.page.kind || '')] || {};
-      const result = await pageMessage({ type: 'fill', options: { values: values(info), store, aspects: info.fields.aspects || {}, learned, includeDescription: store === 'ebay' } });
+      const result = await pageMessage({ type: 'fill', options: { values: values(info), store, aspects: info.fields.aspects || {}, learned, includeDescription: store === 'ebay', aiFields: aiFieldsFor(info) } });
       state.report = result.report;
       state.fillSessions[state.tab.id] = item.upc;
       const filled = (result.report.filled || []).map(f => f.target);
@@ -1365,7 +1365,8 @@
     const done = busy('Sending photos to the page…');
     try {
       const files = [];
-      for (const url of urls) { const f = await photoFile(url); files.push({ name: f.name, type: f.type, base64: f.base64 }); }
+      const aiUrls = new Set((info?.photos || []).filter(p => p.source === 'ai').map(p => p.url));
+      for (const url of urls) { const f = await photoFile(url); files.push({ name: f.name, type: f.type, base64: f.base64, ai: aiUrls.has(url) }); }
       const result = await pageMessage({ type: 'add-photos', options: { files } });
       toast(result.ok ? `Sent ${result.count} photo${result.count === 1 ? '' : 's'} to the page (${result.method})` : result.reason, !result.ok);
       if (result.ok) markPhotosUsed(urls);
@@ -1702,10 +1703,15 @@
   }
 
   // Put one value on the store page (after an AI text or a note was applied) without a full re-fill.
+  // Which texts AI wrote for this item: the page tags those fields "Added AI generated …".
+  function aiFieldsFor(info) {
+    return { ...(info?.fields?.generated || {}), ...(state.aiGenerated[info?.upc] || {}) };
+  }
+
   async function pushValue(info, target) {
     if (!state.page?.store || !(state.page.kind === 'listing-form' || state.page.kind === 'offer-form')) return false;
     try {
-      const result = await pageMessage({ type: 'fill', options: { values: values(info), store: state.page.store, targets: [target], aspects: {}, learned: state.learned[state.page.store + ':' + (state.page.kind || '')] || {} } });
+      const result = await pageMessage({ type: 'fill', options: { values: values(info), store: state.page.store, targets: [target], aspects: {}, learned: state.learned[state.page.store + ':' + (state.page.kind || '')] || {}, aiFields: aiFieldsFor(info) } });
       return (result.report.filled || []).some(f => f.target === target);
     } catch { return false; }
   }
@@ -1995,8 +2001,8 @@
 
       <div class="sect">
         <div class="sect-h"><span class="lbl">Photos</span><span class="n">${photos.length}${state.usedPhotos.size ? ` \u00b7 ${state.usedPhotos.size} sent` : ''}</span><span class="sp"></span>
+          <button id="photoLink" class="tiny phone-btn" type="button" title="Telegram the camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : '<span class="phone-ico" aria-hidden="true">\ud83d\udcf1</span>Phone'}</button>
           <button id="addPhoto" class="tiny" type="button" title="Show a QR code for the phone camera page">${QR_ICON}${state.qrOpen ? 'Hide QR' : 'QR'}</button>
-          <button id="photoLink" class="tiny" type="button" title="Telegram the same camera link to the phone \u2014 no scanning" ${state.photoLinkBusy ? 'disabled' : ''}>${state.photoLinkBusy ? '<span class="spin"></span>' : 'Phone'}</button>
           <button id="photoRefresh" class="tiny" type="button" title="Reload photos (after taking new ones on the phone)">\u21bb</button></div>
         ${state.qrOpen ? `<div class="qr"><img src="${esc(serverBase() + '/api/lister/qr?text=' + encodeURIComponent(info.mobilePhotosUrl))}" alt="QR code for the phone photo page"><div class="small">Scan with the phone \u2014 it opens straight into the camera. Press \u21bb when the photos are in.<br><a href="${esc(info.mobilePhotosUrl)}" target="_blank" rel="noopener">open the page</a></div></div>` : ''}
         ${photos.length ? `<div class="photos">${photos.map(tile).join('')}</div>` : '<div class="muted small">No photos yet. Use QR or Phone to shoot some.</div>'}
