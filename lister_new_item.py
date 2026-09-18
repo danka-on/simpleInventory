@@ -118,7 +118,8 @@ class NewItems:
         have = {r[1] for r in cur.fetchall()}
         # filed_upc: the barcode the unit was actually filed under (base-N for BAD/RETURN), which is
         # what the Finder trail and unified search match to say "Added via Lister + NEW".
-        for column in ('prep_status', 'defects', 'filed_upc'):
+        # verdict_source: 'phone' when read from the dictated details, 'panel' when tapped there.
+        for column in ('prep_status', 'defects', 'filed_upc', 'verdict_source'):
             if column not in have:
                 cur.execute(f"ALTER TABLE lister_new_items ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
         cur.execute('''
@@ -172,6 +173,7 @@ class NewItems:
             'description': _text(draft.get('description')),
             'prepStatus': self._verdict(draft)[0],
             'prepStatusChosen': _text(draft.get('prep_status')),
+            'verdictSource': _text(draft.get('verdict_source')),
             'defects': self._verdict(draft)[1],
             'defectChoices': list(PREP_DEFECTS),
             'stage': _text(draft.get('stage')) or 'title',
@@ -419,7 +421,9 @@ class NewItems:
         return result
 
     def set_fields(self, draft_id, *, title=None, description=None, source='typed', base_url='http://localhost/',
-                   prep_status=None, defects=None):
+                   prep_status=None, defects=None, verdict_auto=False):
+        """verdict_auto: the phone read the status and defects out of the details; a choice somebody
+        tapped on the panel is not overwritten by that reading."""
         fields = {}
         if prep_status is not None:
             prep_status = _text(prep_status).lower()
@@ -441,7 +445,14 @@ class NewItems:
             draft = self._fetch(cur, draft_id=draft_id)
             if _text(draft.get('status')) != 'draft':
                 raise NewItemError('That draft is already finished.', 409)
-            self._touch(cur, draft['id'], **fields)
+            if 'prep_status' in fields or 'defects' in fields:
+                if verdict_auto and _text(draft.get('verdict_source')) == 'panel':
+                    fields.pop('prep_status', None)
+                    fields.pop('defects', None)
+                else:
+                    fields['verdict_source'] = 'phone' if verdict_auto else 'panel'
+            if fields:
+                self._touch(cur, draft['id'], **fields)
             conn.commit()
         return self.get(draft_id, base_url=base_url)
 
@@ -944,7 +955,8 @@ def register(app, lister, deps):
             result = new_items.set_fields(
                 new_items.draft_id_for_token(token), title=data.get('title'),
                 description=data.get('description'), source='voice', base_url=base_url(),
-                prep_status=data.get('prepStatus'), defects=data.get('defects'))
+                prep_status=data.get('prepStatus'), defects=data.get('defects'),
+                verdict_auto=bool(data.get('verdictAuto')))
             if _text(data.get('stage')) in STAGES:
                 result = new_items.set_stage(token, data.get('stage'), base_url=base_url())
             return jsonify({'success': True, **result})

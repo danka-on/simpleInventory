@@ -385,6 +385,24 @@ class NewItemTestCase(unittest.TestCase):
         self.assertEqual(self.panel(f"/api/lister/new/{draft['id']}", method='GET')['draft']['defectChoices'],
                          ['Missing pieces', 'Broken', 'Box damage', 'Replacement', 'Other'])
 
+    def test_a_panel_choice_beats_the_phones_reading(self):
+        draft = self.create()['draft']
+        token = draft['token']
+        # The phone's reading of the details fills the verdict while nobody has chosen.
+        shown = self.phone(token, '/step', {'description': 'lid is scratched', 'prepStatus': 'bad',
+                                            'defects': ['Other'], 'verdictAuto': True})['draft']
+        self.assertEqual((shown['prepStatus'], shown['defects'], shown['verdictSource']), ('bad', ['Other'], 'phone'))
+        # A tap on the panel decides...
+        shown = self.panel(f"/api/lister/new/{draft['id']}/fields", {'prepStatus': 'return', 'defects': ['Box damage']})['draft']
+        self.assertEqual((shown['prepStatus'], shown['verdictSource']), ('return', 'panel'))
+        # ...and a later reading on the phone saves its words but leaves that choice alone.
+        shown = self.phone(token, '/step', {'description': 'all good actually', 'prepStatus': 'good',
+                                            'defects': [], 'verdictAuto': True})['draft']
+        self.assertEqual(shown['description'], 'all good actually')
+        self.assertEqual((shown['prepStatus'], shown['defects']), ('return', ['Box damage']))
+        # Skip: only the step moves.
+        self.assertEqual(self.phone(token, '/step', {'stage': 'photos'})['draft']['stage'], 'photos')
+
     def test_an_unknown_status_is_refused(self):
         draft = self.create()['draft']
         res = self.client.post(f"/api/lister/new/t/{draft['token']}/step", json={'prepStatus': 'shiny'},

@@ -111,10 +111,9 @@ function page(step) {
     // 2. The details. A longer clip goes up as a note, which is the kind that gets translated.
     await dictate('details', 'scratched');
     assert.deepEqual(calls.dictation, ['name', 'note+en'], 'the details ask for English');
-    // "lid is scratched" lights Bad + Other by itself, like Item Prep's bubbles would be tapped.
-    await phone.waitForFunction(() => document.querySelector('#statusBubbles [data-status="bad"]').classList.contains('active'),
-                                null, { timeout: 5000 });
-    assert.deepEqual(await phone.$$eval('#defectBubbles button.active', els => els.map(el => el.dataset.defect)), ['Other']);
+    // The bubbles live on the side panel only; the phone reads the words in the background.
+    assert.equal(await phone.$('#statusBubbles'), null, 'no bubbles on the phone');
+    assert.equal(await phone.$('#defectBubbles'), null);
     const readVerdict = text => phone.evaluate(t => readVerdict(t), text);
     assert.deepEqual(await readVerdict(''), { status: 'good', defects: [] }, 'nothing said is GOOD');
     assert.deepEqual(await readVerdict('Brand new, no scratches, nothing is missing.'), { status: 'good', defects: [] });
@@ -122,16 +121,15 @@ function page(step) {
                      { status: 'bad', defects: ['Missing pieces', 'Broken', 'Box damage'] });
     assert.deepEqual(await readVerdict('Customer return, works fine.'), { status: 'return', defects: [] });
     assert.deepEqual(await readVerdict('This is a replacement unit.'), { status: 'bad', defects: ['Replacement'] });
-    // A tap wins: Good clears the defects, and the choice is what goes up.
-    await phone.click('#statusBubbles [data-status="return"]');
-    await phone.click('#defectBubbles [data-defect="Box damage"]');
 
     // 3. The camera opens by itself, and the shutter is the whole of that screen.
     await phone.click('#detailsNext');
     await phone.waitForFunction(() => document.getElementById('live').classList.contains('on'), null, { timeout: 20000 });
     assert.equal(calls.steps.at(-1).description, 'Jug is clean, lid is scratched');
-    assert.equal(calls.steps.at(-1).prepStatus, 'return');
-    assert.deepEqual(calls.steps.at(-1).defects, ['Other', 'Box damage']);
+    // "lid is scratched" goes up as Bad + Other, marked as the phone's reading.
+    assert.equal(calls.steps.at(-1).prepStatus, 'bad');
+    assert.deepEqual(calls.steps.at(-1).defects, ['Other']);
+    assert.equal(calls.steps.at(-1).verdictAuto, true);
     assert.ok(await phone.$eval('#liveDone', el => el.disabled), 'nothing photographed yet');
     assert.ok((await phone.textContent('#liveNote')).includes('shutter'));
 
@@ -162,7 +160,34 @@ function page(step) {
     await again.goto(`${ORIGIN}/items-to-list/new-item/${TOKEN}?step=title&start=1`);
     await again.waitForFunction(() => !document.getElementById('stepTitle').hidden, null, { timeout: 20000 });
     assert.equal(await again.$eval('#titleInput', el => el.value), 'Ninja blender 1000 watt black', 'the name is there to redo');
+
+    // Skip moves on without saying anything; a step bar jumps to its step and keeps what was typed.
+    await again.click('#titleSkip');
+    await again.waitForFunction(() => !document.getElementById('stepDetails').hidden, null, { timeout: 10000 });
+    assert.deepEqual(calls.steps.at(-1), { stage: 'details' }, 'Skip saves nothing but the step');
+    await again.fill('#detailsInput', 'The box is crushed');
+    await again.click('#steps [data-step="photos"]');
+    await again.waitForFunction(() => !document.getElementById('stepPhotos').hidden, null, { timeout: 10000 });
+    assert.deepEqual(calls.steps.at(-1), { description: 'The box is crushed', prepStatus: 'bad', defects: ['Box damage'],
+                                           verdictAuto: true, stage: 'photos' }, 'the bar kept the typed details');
+    await again.waitForFunction(() => document.getElementById('live').classList.contains('on'), null, { timeout: 20000 });
+    await again.click('#liveSkip');
+    await again.waitForFunction(() => !document.getElementById('stepDone').hidden, null, { timeout: 10000 });
+    assert.equal(calls.steps.at(-1).stage, 'done');
+    assert.ok(!(await again.$eval('#live', el => el.classList.contains('on'))), 'the camera is let go of');
     await again.close();
+
+    // The bars go backwards too.
+    const back = await context.newPage();
+    await back.goto(`${ORIGIN}/items-to-list/new-item/${TOKEN}?step=photos`);
+    await back.waitForFunction(() => !document.getElementById('stepPhotos').hidden, null, { timeout: 20000 });
+    await back.click('#liveClose');
+    await back.click('#steps [data-step="title"]');
+    await back.waitForFunction(() => !document.getElementById('stepTitle').hidden, null, { timeout: 10000 });
+    assert.ok(!(await back.$eval('#live', el => el.classList.contains('on'))));
+    await back.click('#steps [data-step="details"]');
+    await back.waitForFunction(() => !document.getElementById('stepDetails').hidden, null, { timeout: 10000 });
+    await back.close();
 
     assert.deepEqual(broken, [], 'the page threw nothing');
     console.log('lister new-item phone page test passed');
