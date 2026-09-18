@@ -587,11 +587,18 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const dt = new DataTransfer();
       dt.setData('application/x-sweetshelves-photo', JSON.stringify({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/dragged.jpg', name: 'dragged.jpg', type: 'image/jpeg', base64: '/9j/4AAQ' }));
       const zone = document.querySelector('.uploader-dropzone');
+      // Like eBay's dropzone: dragenter/dragleave counting switches a "drop here" state that hides the grid.
+      window.zoneDepth = 0;
+      zone.addEventListener('dragenter', () => { window.zoneDepth++; });
+      zone.addEventListener('dragleave', () => { window.zoneDepth = Math.max(0, window.zoneDepth - 1); });
+      zone.addEventListener('drop', () => { window.zoneDepth = 0; });
+      zone.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
       zone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
       zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
     });
     await store.waitForFunction(() => Array.isArray(window.photoNames) && window.photoNames.includes('dragged.jpg'), null, { timeout: 15000 });
     await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('Dropped dragged.jpg'), null, { timeout: 10000 });
+    assert.equal(await store.evaluate(() => window.zoneDepth), 0, 'the page uploader is not left in its drag-over state after our drop');
     // ...and when the bytes were not cached before the drag, the page script asks the panel for them.
     await store.evaluate(() => {
       const dt = new DataTransfer();

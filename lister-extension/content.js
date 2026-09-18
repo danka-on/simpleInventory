@@ -701,11 +701,33 @@
     return true;
   }
 
+  // The page's own uploader must never see our drag. eBay's dropzone counts dragenter/dragleave to
+  // switch into a "drop here" state that hides the photo grid; we swallow the drop, so if it saw the
+  // enter it never saw the end, and the new photo only showed ("1/25") after a page refresh.
+  function releasePageDrag(target) {
+    for (const node of [target, document.body, document.documentElement, document]) {
+      if (!node || !node.dispatchEvent) continue;
+      try {
+        node.dispatchEvent(new DragEvent('dragleave', { bubbles: true, cancelable: true, relatedTarget: null }));
+      } catch { /* ignore */ }
+    }
+    try { document.dispatchEvent(new DragEvent('dragend', { bubbles: true })); } catch { /* ignore */ }
+  }
+
   function installDropBridge() {
     const isOurs = event => Array.from(event.dataTransfer?.types || []).includes(PHOTO_MIME);
-    document.addEventListener('dragover', event => { if (isOurs(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }, true);
-    document.addEventListener('dragenter', event => { if (isOurs(event)) event.preventDefault(); }, true);
-    document.addEventListener('drop', event => { if (isOurs(event)) void handlePhotoDrop(event); }, true);
+    const hide = event => { event.stopImmediatePropagation(); event.stopPropagation(); };
+    window.addEventListener('dragenter', event => { if (isOurs(event)) { event.preventDefault(); hide(event); } }, true);
+    window.addEventListener('dragover', event => { if (isOurs(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; hide(event); } }, true);
+    window.addEventListener('dragleave', event => { if (isOurs(event)) hide(event); }, true);
+    window.addEventListener('drop', event => {
+      if (!isOurs(event)) return;
+      const target = event.target;
+      void handlePhotoDrop(event);
+      hide(event);
+      // Clear any drag state a listener registered before ours already picked up.
+      setTimeout(() => releasePageDrag(target), 0);
+    }, true);
   }
   installDropBridge();
 
