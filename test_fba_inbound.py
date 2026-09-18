@@ -536,6 +536,14 @@ class FbaInboundHelpersTest(unittest.TestCase):
         self.assertFalse(_fba_listing_measurement_status(payload, dict(saved, length_in=6), 'US')['listing_ready'])
         payload['issues'] = [{'severity': 'ERROR', 'message': 'Approval required'}]
         self.assertFalse(_fba_listing_measurement_status(payload, saved, 'US')['listing_ready'])
+        payload['issues'] = [{'severity': 'ERROR', 'message': 'Description missing',
+                              'attributeNames': ['product_description']}]
+        status = _fba_listing_measurement_status(payload, saved, 'US')
+        self.assertTrue(status['listing_ready'])
+        self.assertIn('Description missing', status['listing_warnings'][0])
+        payload['issues'] = [{'severity': 'ERROR', 'message': 'Bad weight',
+                              'attributeNames': ['item_package_weight']}]
+        self.assertFalse(_fba_listing_measurement_status(payload, saved, 'US')['listing_ready'])
         payload['issues'] = []
         del payload['attributes']['item_package_weight']
         self.assertFalse(_fba_listing_measurement_status(payload, saved, 'US')['listing_ready'])

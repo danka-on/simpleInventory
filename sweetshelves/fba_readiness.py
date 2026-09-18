@@ -2030,8 +2030,16 @@ def _fba_listing_measurement_status(payload, saved, marketplace_id):
         if isinstance(rows, list)
     }
     package = _fba_catalog_measurement_reference_from_payload({'attributes': attributes})['package']
-    errors = [_fba_listing_issue_message(issue) for issue in payload.get('issues', [])
-              if isinstance(issue, dict) and str(issue.get('severity', '')).upper() == 'ERROR']
+    # An error Amazon pins to other attributes (e.g. product_description) is a
+    # listing problem, not a measurement one; FBA judges it when the plan is retried.
+    measurement_attributes = {'item_package_dimensions', 'item_package_weight'}
+    errors, warnings = [], []
+    for issue in payload.get('issues', []):
+        if not isinstance(issue, dict) or str(issue.get('severity', '')).upper() != 'ERROR':
+            continue
+        names = {str(name) for name in issue.get('attributeNames') or []}
+        (warnings if names and not names & measurement_attributes else errors).append(
+            _fba_listing_issue_message(issue))
     factors = {'inches': 1, 'centimeters': 1 / 2.54, 'millimeters': 1 / 25.4,
                'pounds': 1, 'ounces': 1 / 16, 'kilograms': 2.20462262185, 'grams': .00220462262185}
     matches = []
@@ -2047,6 +2055,7 @@ def _fba_listing_measurement_status(payload, saved, marketplace_id):
         except (TypeError, ValueError, OverflowError):
             matches.append(False)
     return {'listing_ready': all(matches) and not errors, 'listing_errors': errors,
+            'listing_warnings': warnings,
             'listing_package': package}
 
 
