@@ -49,42 +49,62 @@
     return pieces;
   }
 
-  function collect() {
-    const byId = new Map();
-    for (const link of document.querySelectorAll('a[href]')) {
-      const href = link.getAttribute('href') || '';
-      const match = href.match(THREAD_RE);
-      if (!match) continue;
-      let row = link;
-      // Some layouts put the whole row inside the link, others only the avatar.
-      if (linesOf(link).length < 2) {
-        const up = link.closest('[role="row"], [role="listitem"], [role="gridcell"]');
-        if (up) row = up;
-      }
-      const lines = linesOf(row);
-      const previous = byId.get(match[1]);
-      if (previous && previous.lines.join(' ').length >= lines.join(' ').length) continue;
-      const image = row.querySelector('img[src^="https://"]');
-      byId.set(match[1], {
-        threadId: match[1],
-        href: new URL(href, location.href).href,
-        lines,
-        label: clean(link.getAttribute('aria-label')).slice(0, 300),
-        bold: boldPieces(row),
-        img: image ? image.src : '',
-      });
-      if (byId.size >= MAX_ROWS) break;
-    }
-    return [...byId.values()];
+  // Facebook keeps its Messenger dropdown, chat pop-ups and the contacts column on every page,
+  // including the Marketplace inbox. Those list ALL chats, so only the page's own content is read.
+  const OUTSIDE = '[role="dialog"], [role="complementary"], [role="banner"], [role="navigation"], ' +
+    '[aria-label="Chats"], [aria-label="Messenger"], [aria-label="Contacts"], [data-pagelet*="Chat"], [data-pagelet*="Messenger"]';
+  const CANDIDATES = 'a[href], [role="button"], [role="link"], [role="row"], [role="listitem"], [role="gridcell"]';
+  const AGE_RE = /(^|\s·\s)(just now|now|yesterday|\d{1,2}\s?(m|min|h|hr|d|w|wk|mo|y|yr)|(mon|tue|wed|thu|fri|sat|sun)[a-z]*|(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]* \d{1,2})$/i;
+
+  function inboxArea() {
+    return document.querySelector('[role="main"]');
   }
 
-  // When nothing matches, say what the page did have, so the reader can be fixed from the Pi.
+  // A chat row: a clickable block with a picture and 2-8 lines, one of which ends in an age ("2h", "Mon").
+  function looksLikeChat(element, lines) {
+    return lines.length >= 2 && lines.length <= 8 && element.querySelector('img, svg image') &&
+      lines.some(line => AGE_RE.test(line) || line.includes(' · '));
+  }
+
+  function collect() {
+    const area = inboxArea();
+    if (!area) return [];
+    const found = [];
+    for (const element of area.querySelectorAll(CANDIDATES)) {
+      if (element.closest(OUTSIDE)) continue;
+      const lines = linesOf(element);
+      if (!looksLikeChat(element, lines)) continue;
+      // Keep the innermost block that still is a whole row (drops the list around the rows).
+      if ([...element.querySelectorAll(CANDIDATES)].some(inner => looksLikeChat(inner, linesOf(inner)))) continue;
+      const link = element.matches('a[href]') ? element : element.querySelector('a[href]') || element.closest('a[href]');
+      const href = link ? link.getAttribute('href') || '' : '';
+      const match = href.match(THREAD_RE);
+      const image = element.querySelector('img[src^="https://"]');
+      found.push({
+        threadId: match ? match[1] : '',
+        href: href ? new URL(href, location.href).href : '',
+        lines,
+        label: clean(element.getAttribute('aria-label')).slice(0, 300),
+        bold: boldPieces(element),
+        img: image ? image.src : '',
+        area: 'marketplace-inbox',
+      });
+      if (found.length >= MAX_ROWS) break;
+    }
+    return found;
+  }
+
+  // When nothing matches, describe the page's content area (not the Messenger parts), so the
+  // reader can be fixed from the Pi.
   function probe() {
-    const rows = document.querySelectorAll('[role="row"], [role="listitem"]');
+    const area = inboxArea();
+    const blocks = area ? [...area.querySelectorAll(CANDIDATES)].filter(el => !el.closest(OUTSIDE)) : [];
     return {
-      threadLinks: document.querySelectorAll('a[href*="/t/"]').length,
-      rowElements: rows.length,
-      sample: [...rows].slice(0, 3).map(linesOf),
+      hasMain: Boolean(area),
+      blocks: blocks.length,
+      sample: blocks.map(el => ({ tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
+        href: (el.getAttribute('href') || '').replace(/\d{5,}/g, '#').slice(0, 80), lines: linesOf(el).slice(0, 4),
+        img: Boolean(el.querySelector('img')) })).filter(one => one.lines.length >= 2).slice(0, 8),
       title: document.title.slice(0, 120),
     };
   }

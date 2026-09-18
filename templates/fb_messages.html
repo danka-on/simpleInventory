@@ -95,6 +95,7 @@
     let text = (reader.stale ? 'Reader is quiet: last checked ' : 'Reader is on: checked ') + ago(reader.minutesAgo) +
       ' · ' + (reader.rows || 0) + ' chats seen';
     if (reader.stale) text += '. Is Chrome open on the PC?';
+    else if (reader.droppedPersonal && !Number(reader.rows)) text += ' (this Lister version also saw personal chats, which were ignored — update the Lister extension)';
     else if (reader.noRowsOnPage) text += ' (no chats found on the inbox page — is Facebook signed in in that Chrome?)';
     else if (Number(reader.rawRows) > 0 && Number(reader.rows) === 0) text += ' (rows found but none could be read — the page layout may have changed)';
     if (reader.alertError) text += ' · Telegram: ' + reader.alertError;

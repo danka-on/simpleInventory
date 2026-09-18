@@ -19,6 +19,7 @@ dependencies come in through register(app, deps).
 """
 
 import datetime
+import hashlib
 import json
 import re
 import sqlite3
@@ -44,6 +45,12 @@ NOISE = {'·', '•', 'unread', 'mark as read', 'mark as unread', 'active now', 
          'pending', 'available'}
 ME_PREFIXES = ('you:', 'you sent', 'you replied', 'you reacted', 'you marked', 'you changed',
                'you unsent', 'you named', 'you created')
+INBOX_URL = 'https://www.facebook.com/marketplace/inbox/'
+# Rows the reader found inside the Marketplace list itself. Readers before 0.2.60 also picked up
+# Messenger's dropdown / chat pop-ups (every personal chat), so rows without this mark are dropped.
+MARKETPLACE_AREA = 'marketplace-inbox'
+# Bumped when stored chats must be thrown away (2: 0.2.59 had mixed personal chats in).
+SCHEMA = '2'
 THREAD_RE = re.compile(r'/(?:messages|marketplace)/t/(\d{5,})')
 
 
@@ -121,10 +128,13 @@ def parse_row(row):
         if piece and snippet and piece != header and (piece in snippet or snippet.startswith(piece[:40])):
             unread = True
             break
+    if not thread_id and (name or item):
+        # The Marketplace list has no per-chat link; the buyer + listing pair names the chat.
+        thread_id = 'mp-' + hashlib.sha1(f'{name.strip().lower()}|{item.strip().lower()}'.encode('utf-8')).hexdigest()[:16]
     return {
         'thread_id': thread_id,
         'href': href if href.startswith('https://www.facebook.com/') else
-                ('https://www.facebook.com/messages/t/' + thread_id if thread_id else ''),
+                ('https://www.facebook.com/messages/t/' + thread_id if thread_id.isdigit() else INBOX_URL),
         'name': _text(name, 120),
         'item': _text(item, 200),
         'snippet': _text(snippet, 500),
@@ -192,6 +202,13 @@ class FbMarketplace:
                 value TEXT
             );
         ''')
+        if self._state(conn, 'schema') != SCHEMA:
+            # Chats stored by an older reader cannot be trusted (0.2.59 mixed personal chats in).
+            conn.execute('DELETE FROM fb_threads')
+            conn.execute('DELETE FROM fb_messages')
+            conn.execute("DELETE FROM fb_reader_state WHERE key = 'baseline_at'")
+            self._set_state(conn, 'schema', SCHEMA)
+            conn.commit()
         return conn
 
     @staticmethod
@@ -210,9 +227,12 @@ class FbMarketplace:
         role = _text(data.get('role'), 20).lower()
         role = role if role in ('selling', 'buying') else ''
         now = _now()
-        parsed, seen = [], set()
+        parsed, seen, dropped = [], set(), 0
         for row in rows[:MAX_ROWS]:
             if not isinstance(row, dict):
+                continue
+            if row.get('area') != MARKETPLACE_AREA:
+                dropped += 1  # not from the Marketplace list: a personal Messenger chat, never stored
                 continue
             thread = parse_row(row)
             if thread['thread_id'] and thread['thread_id'] not in seen:
@@ -264,7 +284,8 @@ class FbMarketplace:
                 self._set_state(conn, 'last_capture_version', _text(data.get('version'), 20))
                 # Kept for fixing the parser when Facebook changes the page: what the first rows looked like.
                 self._set_state(conn, 'last_capture_sample', json.dumps(rows[:4], ensure_ascii=False)[:8000])
-                probe = data.get('probe') if not rows else None
+                probe = data.get('probe') if not parsed else None
+                self._set_state(conn, 'last_capture_dropped', dropped)
                 self._set_state(conn, 'last_capture_probe', json.dumps(probe, ensure_ascii=False)[:4000] if probe else '')
                 conn.commit()
             finally:
@@ -272,7 +293,7 @@ class FbMarketplace:
         if alerts:
             # Telegram can stall for seconds (IPv6 connects on the Pi); never make the reader wait on it.
             threading.Thread(target=self._send_alerts, args=(alerts, email), daemon=True).start()
-        return {'threads': len(parsed), 'new_threads': new_threads, 'changed': changed,
+        return {'threads': len(parsed), 'dropped': dropped, 'new_threads': new_threads, 'changed': changed,
                 'alerts': len(alerts), 'baseline': not baseline and bool(parsed)}
 
     def _targets(self, email):
@@ -336,7 +357,7 @@ class FbMarketplace:
                     bucket.append({'snippet': row['snippet'], 'fromMe': bool(row['from_me']), 'seenAt': row['seen_at']})
             state = {key: self._state(conn, key) for key in (
                 'last_capture_at', 'last_capture_rows', 'last_capture_raw', 'last_capture_role', 'last_capture_version',
-                'last_alert_error', 'last_alert_sent_at', 'baseline_at', 'last_capture_probe')}
+                'last_alert_error', 'last_alert_sent_at', 'baseline_at', 'last_capture_probe', 'last_capture_dropped')}
         finally:
             conn.close()
         threads = []
@@ -357,6 +378,7 @@ class FbMarketplace:
             'version': state['last_capture_version'], 'alertError': state['last_alert_error'],
             'lastAlertAt': state['last_alert_sent_at'], 'baselineAt': state['baseline_at'],
             'noRowsOnPage': bool(state['last_capture_probe']),
+            'droppedPersonal': int(state['last_capture_dropped'] or 0),
         }
         return {'threads': threads, 'reader': reader}
 

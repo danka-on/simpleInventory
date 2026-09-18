@@ -15,7 +15,7 @@ LISTER = {'X-Sweet-Shelves-Lister': '1', 'Cf-Access-Authenticated-User-Email': '
 
 def row(thread_id, *lines, bold=()):
     return {'threadId': thread_id, 'href': f'https://www.facebook.com/marketplace/t/{thread_id}/',
-            'lines': list(lines), 'bold': list(bold)}
+            'lines': list(lines), 'bold': list(bold), 'area': 'marketplace-inbox'}
 
 
 class ParseRowTests(unittest.TestCase):
@@ -133,6 +133,32 @@ class CaptureTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(self.client.post('/api/fb-marketplace/threads/1/handled', json={},
                                           headers={'Sec-Fetch-Site': 'cross-site'}).status_code, 403)
+
+    def test_personal_messenger_chats_are_never_stored(self):
+        messenger = {'threadId': '5555555', 'href': 'https://www.facebook.com/messages/t/5555555/',
+                     'lines': ['Mom', 'Dinner at 7? · 1h']}  # no Marketplace mark: from the Messenger pop-up
+        status, data = self.capture([messenger, row('1111111', 'Jane · Lamp', 'Hi · 3h')])
+        self.assertEqual((status, data['threads'], data['dropped']), (200, 1, 1))
+        names = [t['name'] for t in self.client.get('/api/fb-marketplace/threads').get_json()['threads']]
+        self.assertEqual(names, ['Jane'])
+
+    def test_rows_without_a_chat_link_are_keyed_by_buyer_and_listing(self):
+        plain = {'lines': ['Jane · Lamp', 'Hi · 3h'], 'area': 'marketplace-inbox'}
+        self.capture([plain])
+        data = self.capture([dict(plain, lines=['Jane · Lamp', 'Is it still there? · now'])])[1]
+        self.assertEqual((data['new_threads'], data['alerts']), (0, 1))
+        thread = self.client.get('/api/fb-marketplace/threads').get_json()['threads'][0]
+        self.assertTrue(thread['threadId'].startswith('mp-'))
+        self.assertEqual(thread['href'], 'https://www.facebook.com/marketplace/inbox/')
+
+    def test_chats_from_the_old_reader_are_wiped_once(self):
+        self.capture([row('1111111', 'Jane · Lamp', 'Hi · 3h')])
+        conn = self.market.connect()
+        conn.execute("UPDATE fb_reader_state SET value = '1' WHERE key = 'schema'")
+        conn.commit()
+        conn.close()
+        self.assertEqual(self.client.get('/api/fb-marketplace/threads').get_json()['threads'], [])
+        self.assertTrue(self.capture([row('1111111', 'Jane · Lamp', 'Hi · 3h')])[1]['baseline'])
 
     def test_empty_inbox_keeps_the_probe_and_page_renders(self):
         status, data = self.capture([], role='')
