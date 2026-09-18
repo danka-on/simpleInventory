@@ -1332,6 +1332,18 @@
       "subdomain": ""
     },
     {
+      "rule": "/static-thumb/<path:filename>",
+      "endpoint": "static_thumb",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/inventory-age-summary",
       "endpoint": "api_inventory_age_summary",
       "methods": [

@@ -69,6 +69,7 @@ from . import telegram as ss_telegram
 from . import warehouse_locations as ss_warehouse_locations
 from . import warehouse_maps as ss_warehouse_maps
 from . import listing_reconciliation as ss_listing_reconciliation
+from . import static_thumbs as ss_static_thumbs
 from . import warehouse_nameless as ss_warehouse_nameless
 from . import prep_fallback_lookup as ss_prep_fallback_lookup
 from . import warehouse_receiving as ss_warehouse_receiving
@@ -199,6 +200,7 @@ def register_routes():
     ss_runtime.app.route('/api/warehouse/nameless-items/name', methods=['POST'])(ss_warehouse_nameless.api_name_nameless_item)
     ss_runtime.app.route('/listing-reconciliation')(ss_listing_reconciliation.listing_reconciliation_page)
     ss_runtime.app.route('/api/listing-reconciliation', methods=['GET', 'POST'])(ss_listing_reconciliation.api_listing_reconciliation)
+    ss_runtime.app.route('/static-thumb/<path:filename>', methods=['GET'])(ss_static_thumbs.static_thumb)
     ss_runtime.app.route('/api/inventory-age-summary', methods=['GET'])(ss_analytics.api_inventory_age_summary)
     ss_runtime.app.route('/api/inventory-age/rescan', methods=['POST'])(ss_analytics.api_inventory_age_rescan)
     ss_runtime.app.route('/api/inventory-seller-analytics', methods=['GET'])(ss_analytics.api_inventory_seller_analytics)

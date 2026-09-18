@@ -338,6 +338,42 @@ function storeName(store){ return store === 'ebay' ? 'eBay' : store === 'amazon'
 function missingImg(){
     return 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="100%" height="100%" fill="#e2e8f0" rx="8"/></svg>');
 }
+// eBay sync stores "No image" and pandas leaves "nan"; neither is a picture.
+function usableImage(value){
+    const image = String(value || '').trim();
+    return image && !/^(?:nan|none|null|undefined|n\/?a|no\s*image)$/i.test(image) ? image : '';
+}
+// ~240px copy for the 80-104px boxes; the enlarged preview still uses the full photo.
+function thumbUrl(url){
+    let m = url.match(/^https?:\/\/m\.media-amazon\.com\/images\/I\/([^/.]+)(?:\.[^/]*)?\.(jpe?g|png|gif|webp)$/i);
+    if (m) return `https://m.media-amazon.com/images/I/${m[1]}._SL240_.${m[2]}`;
+    m = url.match(/^https?:\/\/i\.ebayimg\.com\/images\/g\/([^/]+)\/s-l\d+\.(jpe?g|png|webp)$/i);
+    if (m) return `https://i.ebayimg.com/images/g/${m[1]}/s-l300.${m[2]}`;
+    m = url.match(/^https?:\/\/i\.ebayimg\.com\/\d+\/s\/[^/]+\/z\/([^/]+)\/\$_\d+\.(jpe?g|png)(?:\?.*)?$/i);
+    if (m) return `https://i.ebayimg.com/images/g/${m[1]}/s-l300.${m[2].toLowerCase()}`;
+    m = url.match(/^https?:\/\/(slimages\.macys\.com|images\.bloomingdales\.com)\/is\/image\/([^?#]+)$/i);
+    if (m) return `https://${m[1]}/is/image/${m[2]}?wid=240&hei=240&fit=fit`;
+    m = url.match(/^\/static\/(.+\.(?:jpe?g|png|webp))$/i);
+    if (m) return `/static-thumb/${m[1]}?w=240`;
+    return url;
+}
+function thumbImg(image, className){
+    const cls = className ? ` class="${className}"` : '';
+    const full = usableImage(image);
+    if (!full) return `<img${cls} src="${missingImg()}" alt="">`;
+    return `<img${cls} src="${esc(thumbUrl(full))}" data-full-src="${esc(full)}" alt="" loading="lazy" onerror="thumbFailed(this)">`;
+}
+// A small copy that will not load falls back to the full photo, then to the blank tile.
+function thumbFailed(img){
+    const full = img.dataset.fullSrc || '';
+    if (full && !img.dataset.triedFull && img.getAttribute('src') !== full) {
+        img.dataset.triedFull = '1';
+        img.src = full;
+        return;
+    }
+    img.onerror = null;
+    img.src = missingImg();
+}
 function finderUrl(l){
     const params = new URLSearchParams({
         listing_store: l.store, listing_key: l.listing_key, listing_id: l.listing_id,
@@ -450,7 +486,7 @@ function rackLines(l){
 function suggestionBlocks(l){
     return `<div class="suggestions">` + l.suggestions.map(s => `
         <div class="suggestion">
-            <img src="${esc(s.image || '') || missingImg()}" alt="" loading="lazy" onerror="this.src='${missingImg()}'">
+            ${thumbImg(s.image)}
             <div>
                 <div class="name">${esc(s.title || '(untitled rack row)')}</div>
                 <div class="why"><code>${esc(s.barcode)}</code> · ${s.location ? esc(s.location) : 'no location'} · qty ${s.quantity} · ${esc(s.reason)}</div>
@@ -495,7 +531,7 @@ function renderListing(l){
     const open = !['accounted','handled'].includes(l.state) && status !== 'reviewed';
     const showPill = state.tab === 'all' || searchingAllTabs();
     return `<div class="panel item" data-store="${esc(l.store)}" data-key="${esc(l.listing_key)}" data-status="${esc(status)}">
-        <img class="thumb" src="${esc(l.image || '') || missingImg()}" alt="" loading="lazy" onerror="this.src='${missingImg()}'">
+        ${thumbImg(l.image, 'thumb')}
         <div class="body">
             <div class="head">
                 <h3 class="title">${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(title)}</a>` : esc(title)}</h3>
@@ -517,8 +553,8 @@ function renderListing(l){
 
 const imagePreview = document.getElementById('imagePreview');
 function openImagePreview(thumbnail){
-    const src = thumbnail.currentSrc || thumbnail.src;
-    if (!src || src.startsWith('data:')) return;
+    const src = thumbnail.dataset.fullSrc || thumbnail.currentSrc || thumbnail.src;
+    if (!src || src.startsWith('data:') || thumbnail.getAttribute('src').startsWith('data:')) return;
     const preview = document.getElementById('previewImage');
     preview.src = src;
     preview.alt = thumbnail.closest('.suggestion')?.querySelector('.name')?.textContent
