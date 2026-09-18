@@ -528,6 +528,12 @@
       return `${window.location.origin}/static/${raw}`;
     }
 
+    // Grid tiles get a resized copy (prep photos are up to 8 MB); the viewer keeps the full photo.
+    function uploadedThumbSrc(src){
+      const m = String(src || '').match(/^(?:https?:\/\/([^/]+))?\/static\/(.+\.(?:jpe?g|png|webp))$/i);
+      return m && (!m[1] || m[1] === window.location.host) ? `/static-thumb/${m[2]}?w=480` : src;
+    }
+
     function buildFallbackBackHref(){
       const params = new URLSearchParams();
       params.set('upc', UPC);
@@ -559,7 +565,9 @@
         if(!src) return;
         const d = document.createElement('div');
         d.className = 'thumb';
-        d.innerHTML = `<img src="${esc(src)}" alt="" />`;
+        d.innerHTML = `<img src="${esc(uploadedThumbSrc(src))}" alt="" loading="lazy" />`;
+        const tile = d.querySelector('img');
+        tile.addEventListener('error', () => { if(tile.getAttribute('src') !== src) tile.src = src; }, { once: true });
         d.addEventListener('click', () => openImageModalFromList(uploadedItems.map(buildUploadedSrc).filter(Boolean), idx));
         grid.appendChild(d);
       });

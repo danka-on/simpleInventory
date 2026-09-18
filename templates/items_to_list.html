@@ -855,6 +855,36 @@
 <script>
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
+
+// Resized copies instead of full photos (Amazon up to 2400px, prep photos up to 8 MB).
+// px is the longest side wanted; local photos go through /static-thumb.
+function itemsThumbUrl(url, px){
+  const image = String(url || '').trim();
+  if (!image || image.startsWith('data:')) return image;
+  const big = px > 240;
+  let m = image.match(/^https?:\/\/m\.media-amazon\.com\/images\/I\/([^/.]+)(?:\.[^/]*)?\.(jpe?g|png|gif|webp)$/i);
+  if (m) return `https://m.media-amazon.com/images/I/${m[1]}._SL${big ? 640 : 120}_.${m[2]}`;
+  m = image.match(/^https?:\/\/i\.ebayimg\.com\/images\/g\/([^/]+)\/s-l\d+\.(jpe?g|png|webp)$/i);
+  if (m) return `https://i.ebayimg.com/images/g/${m[1]}/s-l${big ? 640 : 140}.${m[2]}`;
+  m = image.match(/^https?:\/\/i\.ebayimg\.com\/\d+\/s\/[^/]+\/z\/([^/]+)\/\$_\d+\.(jpe?g|png)(?:\?.*)?$/i);
+  if (m) return `https://i.ebayimg.com/images/g/${m[1]}/s-l${big ? 640 : 140}.${m[2].toLowerCase()}`;
+  m = image.match(/^https?:\/\/(slimages\.macys\.com|images\.bloomingdales\.com)\/is\/image\/([^?#]+)$/i);
+  if (m) return `https://${m[1]}/is/image/${m[2]}?wid=${big ? 640 : 120}&hei=${big ? 640 : 120}&fit=fit`;
+  m = image.match(/^(?:https?:\/\/([^/]+))?\/static\/(.+\.(?:jpe?g|png|webp))$/i);
+  if (m && (!m[1] || m[1] === location.host)) return `/static-thumb/${m[2]}?w=${px}`;
+  return image;
+}
+// A resized copy that will not load retries the full photo once, then shows the placeholder.
+function itemsThumbFailed(img, fallback){
+  const full = img.dataset.fullSrc || '';
+  if (full && !img.dataset.triedFull && img.getAttribute('src') !== full) {
+    img.dataset.triedFull = '1';
+    img.src = full;
+    return;
+  }
+  img.onerror = null;
+  if (fallback) img.src = fallback; else img.style.visibility = 'hidden';
+}
 function resolveStaticAssetUrl(rawPath){
   const raw = String(rawPath || '').trim();
   if(!raw) return '';
@@ -2129,7 +2159,10 @@ function render(results){
   for (const r of viewResults) {
     const title = esc(r.title||'');
     const img = esc(r.image||'');
-    const thumb = img ? img.replace('s-l1600.jpg', 's-l140.jpg') : '';
+    const imageRaw = String(r.image || '').trim();
+    const thumbAttrs = imageRaw && !/^(?:nan|none|null|undefined|no\s*image)$/i.test(imageRaw)
+      ? `src="${esc(itemsThumbUrl(imageRaw, 120))}" data-full-src="${img}" loading="lazy"`
+      : `src="${missingThumb(48,48,'No Img')}"`;
     const upcRaw = String(r.upc||'');
     const upcSuffixMatch = upcRaw.match(/^(\d+)(-\d+)$/);
     const upcBaseRaw = upcSuffixMatch ? upcSuffixMatch[1] : upcRaw;
@@ -2346,7 +2379,7 @@ function render(results){
             `<td>${esc(defectDisplay)}</td>`+
              qtyCell+
              whCell+
-             `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
+             `<td><div class="title-cell"><img class="thumb" ${thumbAttrs} onerror="itemsThumbFailed(this, '${missingThumb(48,48,'No Img')}')"><a href="#" class="img-link" data-img="${img}" data-title="${title}">${title}</a></div></td>`+
              `<td><div class="upc-wrap"><span class="upc-text">${upcDisplayHtml}</span><button type=\"button\" class=\"btn btn-sm btn-copy\" data-upc=\"${baseUpc}\" title=\"Copy UPC\">Copy</button></div></td>`+
              `<td>${actionBtn}</td>`+
              `<td class="last-edited-cell" data-raw="${last_edited}">${formatLastEdited(last_edited)}</td>`+
@@ -2816,7 +2849,7 @@ async function openNotesMediaModal({ upc, lot = '', rowStatus = '', focus = 'not
         if(item.media_type === 'video'){
           wrap.innerHTML = `<video src="${esc(item.src)}" muted playsinline preload="metadata"></video><div class="mixed-media-badge">VIDEO</div>`;
         } else {
-          wrap.innerHTML = `<img src="${esc(item.src)}" alt="Photo"><div class="mixed-media-badge">PHOTO</div>`;
+          wrap.innerHTML = `<img src="${esc(itemsThumbUrl(item.src, 480))}" data-full-src="${esc(item.src)}" alt="Photo" loading="lazy" onerror="itemsThumbFailed(this)"><div class="mixed-media-badge">PHOTO</div>`;
         }
         wrap.addEventListener('click', ()=> setActiveMedia(item, wrap));
         grid.appendChild(wrap);
