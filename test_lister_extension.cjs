@@ -62,6 +62,15 @@ assert.equal(amazon.quantity.index, 3);
 assert.equal(amazon.conditionDescription.index, 5);
 assert.equal(amazon.title, undefined, 'the product search box must not receive the title');
 
+// With no "Match lowest price" link to press, the lowest offer is read off the page text.
+assert.equal(M.lowestPrice('Competing Marketplace Offers: 2 New from $29.40 + $0.00 shipping').price, 29.4, 'the item panel beside the Add offer form');
+assert.equal(M.lowestPrice('Competing Marketplace Offers: 2 New from $29.40 + $0.00 shipping').label, 'competing offers');
+assert.equal(M.lowestPrice('Match lowest price: USD$29.40').price, 29.4, 'the link text itself, when the link will not click');
+assert.equal(M.lowestPrice('Lowest price + shipping $8.99').price, 8.99);
+assert.equal(M.lowestPrice('Lowest landed price $1,234.50').price, 1234.5);
+assert.equal(M.lowestPrice('Your Price USD$ Example: 9.00 Minimum price $5.00'), null, 'our own boxes are never the lowest offer');
+assert.equal(M.lowestPrice(''), null);
+
 // A field the user taught takes priority over the heuristics.
 const taught = M.signature(field({ name: 'weird-field-name', labelText: 'Enter the product name here' }));
 assert.ok(M.matchesSignature(field({ name: 'weird-field-name', labelText: 'Enter the product name here' }), taught));
