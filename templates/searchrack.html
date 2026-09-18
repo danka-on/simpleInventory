@@ -1366,6 +1366,36 @@ function goUnifiedFromWarehouse(encodedBarcode){
 
 function missingThumb(width=48,height=48,text='No Img'){ return 'data:image/svg+xml;utf8,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="'+width+'" height="'+height+'"><rect width="100%" height="100%" fill="#f8f8f8"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#b0b0b0" font-size="10">'+text+'</text></svg>'); }
 
+// Resized copies instead of full photos: phone photos in static/custom_items and
+// static/items_prep are 3000-4000px and up to 8 MB. px is the longest side wanted.
+function warehouseThumbUrl(url, px){
+    const image = String(url || '').trim();
+    if (!image || image.startsWith('data:')) return image;
+    const big = px > 240;
+    let m = image.match(/^https?:\/\/m\.media-amazon\.com\/images\/I\/([^/.]+)(?:\.[^/]*)?\.(jpe?g|png|gif|webp)$/i);
+    if (m) return `https://m.media-amazon.com/images/I/${m[1]}._SL${big ? 640 : 120}_.${m[2]}`;
+    m = image.match(/^https?:\/\/i\.ebayimg\.com\/images\/g\/([^/]+)\/s-l\d+\.(jpe?g|png|webp)$/i);
+    if (m) return `https://i.ebayimg.com/images/g/${m[1]}/s-l${big ? 640 : 140}.${m[2]}`;
+    m = image.match(/^https?:\/\/i\.ebayimg\.com\/\d+\/s\/[^/]+\/z\/([^/]+)\/\$_\d+\.(jpe?g|png)(?:\?.*)?$/i);
+    if (m) return `https://i.ebayimg.com/images/g/${m[1]}/s-l${big ? 640 : 140}.${m[2].toLowerCase()}`;
+    m = image.match(/^https?:\/\/(slimages\.macys\.com|images\.bloomingdales\.com)\/is\/image\/([^?#]+)$/i);
+    if (m) return `https://${m[1]}/is/image/${m[2]}?wid=${big ? 640 : 120}&hei=${big ? 640 : 120}&fit=fit`;
+    m = image.match(/^(?:https?:\/\/([^/]+))?\/static\/(.+\.(?:jpe?g|png|webp))$/i);
+    if (m && (!m[1] || m[1] === location.host)) return `/static-thumb/${m[2]}?w=${px}`;
+    return image;
+}
+// A resized copy that will not load retries the full photo once, then shows the placeholder.
+function warehouseThumbFailed(img, fallback){
+    const full = img.dataset.fullSrc || '';
+    if (full && !img.dataset.triedFull && img.getAttribute('src') !== full) {
+        img.dataset.triedFull = '1';
+        img.src = full;
+        return;
+    }
+    img.onerror = null;
+    if (fallback) img.src = fallback; else img.style.display = 'none';
+}
+
 function inventoryAgeParts(timestamp){
     const parsed = new Date(timestamp || '');
     if (Number.isNaN(parsed.getTime())) return null;
@@ -1606,13 +1636,15 @@ function renderResults(results){
         }catch(e){ /* ignore parse errors */ }
     }
     // Sanitize imgUrl - reject 'nan', 'undefined', 'null' strings
-    if (imgUrl === 'nan' || imgUrl === 'undefined' || imgUrl === 'null') {
+    if (imgUrl === 'nan' || imgUrl === 'undefined' || imgUrl === 'null' || /^no\s*image$/i.test(String(imgUrl || '').trim())) {
         imgUrl = '';
     }
-    const img = esc(imgUrl || '');
     // Only use pictureposition if there is no actual item image at all AND pictureposition is valid
     const hasPicturePosition = !isArchived && r.pictureposition && String(r.pictureposition).trim() !== '' && String(r.pictureposition) !== 'undefined' && String(r.pictureposition) !== 'null' && String(r.pictureposition) !== 'nan';
-    const thumb = (imgUrl && imgUrl.trim() && imgUrl.trim() !== '') ? img : (hasPicturePosition ? ('/static/pictureposition/'+r.pictureposition) : missingThumb());
+    const thumbFull = (imgUrl && imgUrl.trim()) ? imgUrl.trim() : (hasPicturePosition ? ('/static/pictureposition/'+r.pictureposition) : '');
+    const thumbAttrs = thumbFull
+        ? `src="${esc(warehouseThumbUrl(thumbFull, 120))}" data-full-src="${esc(thumbFull)}" loading="lazy"`
+        : `src="${missingThumb()}"`;
     
     const barcode = esc(formatUpcDisplay(barcodeRaw));
     const barcodeRawEsc = esc(barcodeRaw);
@@ -1856,7 +1888,7 @@ function renderResults(results){
         ).toFixed(2)}</td>` : '<td></td>') : '';
     
     html += `<tr data-src="${db}" data-id="${r.id}" data-qty="${qty}"${r.is_duplicate_group ? ' style="background:#fff3cd;"' : ''}>`+
-        `<td><div class="title-cell"><img class="thumb" src="${thumb}" onerror="this.src='${missingThumb(48,48,'No Img')}'"><div>${titleDisplay}${deletedInfo}${createdInfo}${r.is_duplicate_group && r.group_index === 0 ? `<div style="font-size:0.85rem; color:#856404; margin-top:4px;">🔄 <strong>Duplicate Locations</strong> (${r.group_size} locations, ${r.group_total_qty} total qty)</div>` : ''}${r.is_duplicate_group && r.other_locations ? `<div style="font-size:0.8rem; color:#666; margin-top:2px;">Also in: ${esc(r.other_locations)}</div>` : ''}</div></div></td>`+
+        `<td><div class="title-cell"><img class="thumb" ${thumbAttrs} onerror="warehouseThumbFailed(this, '${missingThumb(48,48,'No Img')}')"><div>${titleDisplay}${deletedInfo}${createdInfo}${r.is_duplicate_group && r.group_index === 0 ? `<div style="font-size:0.85rem; color:#856404; margin-top:4px;">🔄 <strong>Duplicate Locations</strong> (${r.group_size} locations, ${r.group_total_qty} total qty)</div>` : ''}${r.is_duplicate_group && r.other_locations ? `<div style="font-size:0.8rem; color:#666; margin-top:2px;">Also in: ${esc(r.other_locations)}</div>` : ''}</div></div></td>`+
                 `<td>${barcodeCell}</td>`+
                 itemIdCell +
                 lotCell +
@@ -2188,7 +2220,7 @@ async function onViewTitle(e){
     let html = `<div><h3>${esc(title)}</h3>`;
     // Only add image if it's a valid URL (not empty, undefined, null, or 'nan')
     if(image && image.trim() !== '' && image !== 'undefined' && image !== 'null' && image !== 'nan') {
-        html += `<img src="${image}" style="max-width:320px;border-radius:8px;display:block;margin:8px 0;" onerror="this.src='${missingThumb(320,180,'Image missing')}'">`;
+        html += `<img src="${esc(warehouseThumbUrl(image, 640))}" data-full-src="${esc(image)}" style="max-width:320px;border-radius:8px;display:block;margin:8px 0;" onerror="warehouseThumbFailed(this, '${missingThumb(320,180,'Image missing')}')">`;
     }
     html += `<div class=\"small-muted\">DB: ${esc(src)}</div></div>`;
     showViewModal(html);
@@ -2353,7 +2385,7 @@ function renderSuffixedItemPrepContext(data){
         const url = String(image.image_url || '').trim();
         const rotation = Number(image.rotation || 0);
         return `<a href="${esc(url)}" target="_blank" rel="noopener" style="display:block;width:132px;height:110px;border:1px solid #cbd5e1;border-radius:9px;overflow:hidden;background:#f8fafc;">
-            <img src="${esc(url)}" alt="Item prep photo" style="width:100%;height:100%;object-fit:cover;transform:rotate(${rotation}deg);" onerror="this.style.display='none'">
+            <img src="${esc(warehouseThumbUrl(url, 480))}" data-full-src="${esc(url)}" alt="Item prep photo" loading="lazy" style="width:100%;height:100%;object-fit:cover;transform:rotate(${rotation}deg);" onerror="warehouseThumbFailed(this)">
         </a>`;
     }).join('');
 
@@ -5191,7 +5223,7 @@ async function showNotRemoved(orderId) {
                 const locLower = String(m.item_position || m.pictureposition || m.location_code || '').toLowerCase();
                 matchesHtml += `
                     <div style="background:#f8f9fa;padding:12px;border-radius:8px;margin-bottom:8px;display:flex;align-items:center;gap:12px;">
-                        <img src="${m.image || ''}" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22><rect fill=%22%23f0f0f0%22 width=%22100%25%22 height=%22100%25%22/></svg>'"
+                        <img src="${esc(warehouseThumbUrl(m.image, 120))}" data-full-src="${esc(m.image || '')}" onerror="warehouseThumbFailed(this, '${missingThumb(50,50,'')}')"
                              style="width:50px;height:50px;object-fit:cover;border-radius:6px;">
                         <div style="flex:1;">
                             <div style="font-weight:600;font-size:0.9rem;">${esc(m.title || 'Unknown')}</div>

@@ -15,7 +15,7 @@ from . import config as ss_config
 
 STATIC_DIR = (ss_config.BASE_DIR / 'static').resolve()
 CACHE_DIR = ss_config.BASE_DIR / 'cache' / 'static_thumbs'
-WIDTHS = (120, 240, 480)
+WIDTHS = (120, 240, 480, 640)
 IMAGE_SUFFIXES = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
 
 
