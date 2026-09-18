@@ -337,15 +337,6 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .autoline .edit { margin-left: auto; background: none; border: 0; padding: 0; color: var(--green); font-size: 11.5px; }
 .autoline .edit:hover { background: none; text-decoration: underline; }
 .autoinline { border-bottom: 1px solid var(--line-2); }
-/* the same Options on the list: defaults set before any item is opened */
-.listgear .gearrow { padding: 0 12px 8px; border-bottom: 0; }
-.listgear .lgearbox { margin: 0 12px 8px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); }
-.listgear textarea { width: 100%; box-sizing: border-box; }
-/* items on the other store's list only */
-.otherlist { opacity: .78; }
-.otherhead { padding: 10px 12px 4px; font-size: 10px; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--faint); }
-.item.other { cursor: default; }
-.item.other .addhere { white-space: nowrap; }
 
 .adv { padding: 10px 12px 14px; }
 .adv > summary { cursor: pointer; color: var(--muted); font-size: 12px; list-style: none; display: flex; align-items: center; gap: 6px; }
@@ -441,6 +432,8 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 .modal[hidden] { display: none; }
 .modal .box { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; max-width: 340px; width: 100%; box-shadow: 0 10px 40px rgba(0, 0, 0, .3); }
 .modal .box p { margin: 6px 0 12px; }
+.modal .box.opts { max-width: 420px; max-height: 88vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.modal .box.opts textarea { width: 100%; box-sizing: border-box; }
 .modal .menu { padding: 8px; display: flex; flex-direction: column; gap: 2px; }
 .modal .menu h2 { padding: 4px 8px 6px; margin: 0; }
 .menu-item { display: block; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 9px 10px; font-size: 13px; }

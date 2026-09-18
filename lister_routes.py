@@ -1457,20 +1457,13 @@ class Lister:
         prep_statuses = self._prep_statuses(upcs)
         note_counts = self._note_counts(upcs)
         defects = self._defects(upcs)
-        active, done, hidden, elsewhere = [], [], 0, []
+        active, done, hidden = [], [], 0
         other = 'amazon' if platform == 'ebay' else 'ebay'
         for row, upc in zip(rows, upcs):
             listed_at = row.get(f'listed_{platform}_at') or ''
             skipped_at = skips.get((upc, platform)) or skips.get((row['upc'], platform)) or ''
             if skipped_at and not listed_at:
                 hidden += 1
-                # Still waiting on the other store's list: this list names it ("on the eBay list") with a
-                # way to add it here too, instead of it just not being there.
-                other_skipped = skips.get((upc, other)) or skips.get((row['upc'], other))
-                if row.get('status') == 'queued' and not row.get(f'listed_{other}_at') and not other_skipped:
-                    elsewhere.append({'id': int(row['id']), 'upc': upc, 'baseUpc': _base_upc(upc), 'suffixed': is_suffixed(upc),
-                                      'title': _text(row.get('title'), 200), 'thumb': _thumb_url(thumbs.get(upc, ''), base_url),
-                                      'addedAt': row.get('added_at') or '', 'onPlatform': other})
                 continue
             stores = self._store_listings(upc)
             existing = stores.get(platform) or []
@@ -1512,7 +1505,7 @@ class Lister:
             }
             (done if listed_at else active).append(item)
         done.sort(key=lambda it: -_order_key(it['listedAt'] if it['listedAt'] != 'store' else ''))
-        return {'items': active + done, 'elsewhere': elsewhere, 'counts': {'queued': len(active), 'listed': len(done), 'hidden': hidden},
+        return {'items': active + done, 'counts': {'queued': len(active), 'listed': len(done), 'hidden': hidden},
                 'stamp': self.queue_stamp()}
 
     def _upc_detail(self, upc, base_url):

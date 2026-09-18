@@ -1263,7 +1263,7 @@ function agentCellInner(upc, titleEnc = '', itemStatus = ''){
     const p = agentPanel.platform, name = AGENT_STORE_NAMES[p];
     const other = p === 'ebay' ? 'amazon' : p === 'amazon' ? 'ebay' : '';
     const otherLine = other && st && st[other] === 'on' && st[p] !== 'on'
-      ? `<div class="agent-other" title="Already queued for ${AGENT_STORE_NAMES[other]} in the Lister">In ${AGENT_STORE_NAMES[other]} queue</div>` : '';
+      ? `<div class="agent-other" title="Already queued for ${AGENT_STORE_NAMES[other]} in the Lister">On ${AGENT_STORE_NAMES[other]} list</div>` : '';
     if(listed.includes(p)) return lines;
     if(otherLine && !lines.includes(otherLine)) return lines + otherLine + agentButton(upc, titleEnc, itemStatus, `+ ${name}`, `Also add it to the ${name} list (it is already queued for ${AGENT_STORE_NAMES[other]})`, false);
     if(st && st[p] === 'on'){ label = `On ${name} list`; title = `On the ${name} list in the Lister (click to take it off ${name})`; active = true; }

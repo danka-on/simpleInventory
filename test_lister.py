@@ -491,10 +491,6 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual(on('ebay', fresh=True), {'queue': 'queued', 'ebay': 'on', 'amazon': 'off'})
         self.assertIn(new, listed_on('ebay'))
         self.assertNotIn(new, listed_on('amazon'))
-        # The Amazon list still names it: "on the eBay list", with a way to add it there too.
-        elsewhere = self.client.get('/api/lister/queue?platform=amazon').get_json()['elsewhere']
-        self.assertEqual([(e['upc'], e['onPlatform']) for e in elsewhere], [(new, 'ebay')])
-        self.assertEqual(self.client.get('/api/lister/queue?platform=ebay').get_json()['elsewhere'], [])
         # The panel moves to Amazon: the same "+" now puts it on the Amazon list as well.
         self.assertEqual(on('amazon'), {'queue': 'queued', 'ebay': 'on', 'amazon': 'on'})
         self.assertIn(new, listed_on('amazon'))

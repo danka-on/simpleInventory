@@ -404,7 +404,6 @@
     try {
       const data = await api('/api/lister/queue?platform=' + state.platform);
       state.items = data.items || [];
-      state.elsewhere = data.elsewhere || [];
       if (data.stamp) reported.stamp = data.stamp;
       for (const it of state.items) if (it.preload?.running) { state.preload.items[it.upc] = it.preload; state.preload.watch.add(it.upc); }
       if (state.preload.watch.size) pollPreload();
@@ -1730,7 +1729,7 @@
         autoSendPhotos: on ? 'Photos will go to the page on every listing (never the too-small ones)' : 'Automatic photo send off',
         autoSendAiOnly: on ? 'Only AI generated photos are sent by default' : 'All of our photos are sent by default (AI version preferred)',
       }[key]);
-      renderAutoMenu(); renderDetail(); renderListGear();
+      renderAutoMenu(); renderDetail(); if ($('optAuto')) openOptions();
       if (!on) return;
       if (key === 'autoAiTitle' || key === 'autoAiDescription') void maybeAutoText();
       else if (key === 'autoAiPhotos') { if (detail()) void maybeAutoPhotos(detail()); }
@@ -1824,6 +1823,7 @@
               { label: '↗ Open the phone page here', run: () => chrome.tabs.create({ url: state.newItem.draft.phoneUrl }) },
               { label: '✕ Throw this new item away', run: () => newCancel(), danger: true }];
     }
+    if (state.view === 'list') list.push({ label: '\u2699 Options: what runs by itself, AI prompts', run: () => openOptions() });
     if (state.view === 'list') list.push({ label: '\u26a1 Preload every queued item', run: () => preloadAll(), off: Boolean(state.preload.all?.running) });
     if (info && state.view === 'item') list.push({ label: '\u2b05 Send photos to the page', run: () => sendPhotos(), off: !page.store || Boolean(state.busy) });
     if (info && state.view === 'item') list.push({ label: '\u2728 AI photoshop the photos', run: () => aiPhotoshop(), off: Boolean(state.aiBusy) || !(info.photos || []).length });
@@ -1896,87 +1896,50 @@
     for (const b of el.querySelectorAll('[data-drop]')) b.onclick = () => { const s = list.find(x => sessionKey(x) === b.dataset.drop); if (s) dropSession(s.upc, s.platform); };
   }
 
-  // The item view's ⚙ Options, on the list too: the automatic switches and the saved AI prompts are
-  // defaults for every item, so they can be set before the first item is opened. The boxes show the
-  // saved prompts only (typing does not re-render), so a list refresh never eats what is being typed.
-  function renderListGear() {
-    const el = $('listGear');
-    if (!el) return;
-    const open = Boolean(state.listGearOpen);
-    const html = `<div class="gearrow"><button id="listGearBtn" class="gear" type="button" aria-expanded="${open}" title="What happens by itself on every item, and the AI prompts">⚙ Options${open ? '' : ' · <span class="gearsum">' + esc(autoSummary()) + '</span>'}</button></div>
-      ${open ? `<div class="lgearbox">
-        <div class="toggles-body autoinline" id="listAuto">${autoRows('l_')}</div>
-        <div class="adv"><div class="inner">
-          <div><h3>AI photoshop prompt <span class="muted">${state.aiPrompt ? 'saved for all items' : 'the default prompt'}</span></h3>
-            <textarea id="listAiPrompt" rows="3" placeholder="Default: keep the product exactly as it is, clean up the background and light">${esc(state.aiPrompt)}</textarea>
-            <div class="row tight"><button id="listAiPromptSave" class="tiny" type="button" title="Keep this prompt for every item and every session">Save for all</button><button id="listAiPromptReset" class="tiny" type="button" title="Back to the default prompt for every item">Reset</button></div></div>
-          <div><h3>AI title prompt <span class="muted">${state.savedTitlePrompt ? 'saved' : 'built-in'}</span></h3>
-            <textarea id="listTitlePrompt" rows="3" placeholder="Extra instructions for the AI title, e.g. always put the size at the end">${esc(state.savedTitlePrompt)}</textarea>
-            <div class="row tight"><button id="listTitlePromptSave" class="tiny" type="button" title="Keep this prompt for every session, on every item">Save for all</button><button id="listTitlePromptReset" class="tiny" type="button" title="Back to the built-in title prompt">Reset</button></div></div>
-        </div></div>
-      </div>` : ''}`;
-    if (!setHtml(el, html)) return;
-    $('listGearBtn').onclick = () => { state.listGearOpen = !state.listGearOpen; renderListGear(); };
-    if (!open) return;
-    wireAutoChecks($('listAuto'));
-    $('listAiPromptSave').onclick = () => {
-      state.aiPrompt = ($('listAiPrompt').value || '').trim();
-      state.promptDraft = null; remember(); renderListGear();
+  // ⋯ -> Options (on the list): the automatic switches, the image model and the AI prompts. They are
+  // defaults for every item, so they can be set before the first item is opened.
+  function openOptions() {
+    const box = $('modal');
+    box.innerHTML = `<div class="box opts"><h2>Options</h2>
+      <div class="toggles-body" id="optAuto">${autoRows('o_')}</div>
+      <div class="adv"><div class="inner">
+        ${imageModelBox('optImageModel')}
+        <div><h3>AI photoshop prompt <span class="muted">${state.aiPrompt ? 'saved for all items' : 'the default prompt'}</span></h3>
+          <textarea id="optAiPrompt" rows="3" placeholder="Default: keep the product exactly as it is, clean up the background and light">${esc(state.aiPrompt)}</textarea>
+          <div class="row tight"><button id="optAiPromptSave" class="tiny" type="button" title="Keep this prompt for every item and every session">Save for all</button><button id="optAiPromptReset" class="tiny" type="button" title="Back to the default prompt for every item">Reset</button></div></div>
+        <div><h3>AI title prompt <span class="muted">${state.savedTitlePrompt ? 'saved' : 'built-in'}</span></h3>
+          <textarea id="optTitlePrompt" rows="3" placeholder="Extra instructions for the AI title, e.g. always put the size at the end">${esc(state.savedTitlePrompt)}</textarea>
+          <div class="row tight"><button id="optTitlePromptSave" class="tiny" type="button" title="Keep this prompt for every session, on every item">Save for all</button><button id="optTitlePromptReset" class="tiny" type="button" title="Back to the built-in title prompt">Reset</button></div></div>
+      </div></div>
+      <button class="menu-close" id="optClose" type="button">Close</button></div>`;
+    box.hidden = false;
+    // Emptied on close, so no switch is left behind outside Settings.
+    const close = () => { box.hidden = true; box.innerHTML = ''; };
+    box.onclick = event => { if (event.target === box) close(); };
+    $('optClose').onclick = close;
+    wireAutoChecks($('optAuto'));
+    wireImageModelBox('optImageModel');
+    $('optAiPromptSave').onclick = () => {
+      state.aiPrompt = ($('optAiPrompt').value || '').trim();
+      state.promptDraft = null; remember(); openOptions();
       toast(state.aiPrompt ? 'Photoshop prompt saved for every item and session' : 'Prompt back to the default for every item');
     };
-    $('listAiPromptReset').onclick = () => { state.aiPrompt = ''; state.promptDraft = null; remember(); renderListGear(); toast('Prompt back to the default for every item'); };
-    $('listTitlePromptSave').onclick = async () => {
-      state.titlePrompt = state.savedTitlePrompt = ($('listTitlePrompt').value || '').trim();
+    $('optAiPromptReset').onclick = () => { state.aiPrompt = ''; state.promptDraft = null; remember(); openOptions(); toast('Prompt back to the default for every item'); };
+    $('optTitlePromptSave').onclick = async () => {
+      state.titlePrompt = state.savedTitlePrompt = ($('optTitlePrompt').value || '').trim();
       await chrome.storage.local.set({ [TITLE_PROMPT_KEY]: state.savedTitlePrompt });
-      renderListGear();
+      openOptions();
       toast(state.savedTitlePrompt ? 'Title prompt saved for every session' : 'Back to the built-in title prompt');
     };
-    $('listTitlePromptReset').onclick = async () => {
+    $('optTitlePromptReset').onclick = async () => {
       state.titlePrompt = ''; state.savedTitlePrompt = '';
       await chrome.storage.local.set({ [TITLE_PROMPT_KEY]: '' });
-      renderListGear();
+      openOptions();
       toast('Back to the built-in title prompt');
     };
   }
 
-  // Items waiting on the OTHER store's list only (Items to List "+" adds to the store the panel
-  // shows): named here - "on the eBay list" - with one button to put them on this list too.
-  function renderElsewhere() {
-    const el = $('otherList');
-    if (!el) return;
-    const filter = state.filter.trim().toLowerCase();
-    const rows = state.statusFilter === 'all' ? (state.elsewhere || []).filter(it => !filter
-      || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter)) : [];
-    el.hidden = !rows.length;
-    if (!rows.length) { setHtml(el, ''); return; }
-    const here = storeName(state.platform);
-    setHtml(el, `<div class="otherhead">Only on the ${esc(storeName(rows[0].onPlatform))} list (${rows.length})</div>`
-      + rows.map(it => `<div class="item other" data-other="${esc(it.upc)}" title="Queued for ${esc(storeName(it.onPlatform))} only">`
-        + `<span class="stripe"></span>${it.thumb ? `<img alt="" loading="lazy" src="${esc(it.thumb)}">` : '<div class="noimg"></div>'}`
-        + `<div class="body"><div class="title">${esc(it.title || '(no title)')}</div><div class="sub"><span class="upc">${esc(it.upc)}</span>`
-        + `<span class="sig quiet">on ${esc(storeName(it.onPlatform))} list</span></div></div>`
-        + `<span class="state"><button class="tiny addhere" type="button" data-addhere="${esc(it.upc)}" title="Put it on the ${esc(here)} list too">+ ${esc(here)}</button></span></div>`).join(''));
-    if (el.dataset.wired) return;
-    el.dataset.wired = '1';
-    el.onclick = async event => {
-      const button = event.target.closest('button[data-addhere]');
-      if (!button) return;
-      const platform = state.platform;
-      button.disabled = true;
-      try {
-        await api('/api/lister/queue/' + encodeURIComponent(button.dataset.addhere) + '/store', { method: 'POST', body: { platform, on: true } });
-        toast(`Added to the ${storeName(platform)} list`);
-        await loadQueue({ keep: true });
-      } catch (error) {
-        button.disabled = false;
-        toast(error.message, true);
-      }
-    };
-  }
-
   function renderItems() {
-    renderListGear();
-    renderElsewhere();
     const filter = state.filter.trim().toLowerCase();
     const isFlagged = it => (it.prepStatus?.status || '') === 'bad' || Boolean(it.defect);
     const isOnStore = it => Boolean(it.alreadyOnStore) || it.otherStatus === 'listed';
