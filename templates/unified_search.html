@@ -184,6 +184,7 @@
     .ev .body { min-width: 0; }
     .ev .title { font-weight: 600; font-size: 13px; line-height: 1.35; }
     .ev .meta { font-size: 12px; color: var(--muted); margin-top: 2px; display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+    .ev .title .loc { font-size: 12px; padding: 1px 7px; vertical-align: 1px; }
     .ev.undone { opacity: .5; } .ev.undone .title { text-decoration: line-through; }
     @media (max-width: 600px) { .ev { grid-template-columns: 76px 12px minmax(0, 1fr); } .identity { flex-direction: column; } .identity img { width: 72px; height: 72px; } }
 
@@ -864,12 +865,42 @@ function renderDashboard() {
     {label: 'Details', cell: e => esc(e.detail), dim: true},
   ], fba) : '<div class="hint">Never sent to FBA.</div>', '/fba-prep'));
 
-  // Recent activity (compact trail)
-  const recent = events.slice(0, 12);
-  const activity = recent.length ? recent.map(e => `<div class="ev ${e.undone ? 'undone' : ''}" style="--k:var(--k-${attrEsc(e.kind)})">
+  // Recent activity (compact trail). The BOL worklist row and the per-LOT prep status repeat what the
+  // Macy shipment card and the prep checks already say, so they stay out of this list.
+  const activityEvents = events.filter(e => e.kind !== 'bol' && e.kind !== 'prep_status');
+  const recent = activityEvents.slice(0, 12);
+  // A listing marked from Item Manager logs no quantity; the LOT it came from knows how many were good.
+  const listedQty = (e) => {
+    const logged = num(pick(e.record || {}, 'quantity'));
+    if (logged) return `quantity ${logged}`;
+    let lot = '';
+    try { lot = text(JSON.parse(pick(e.record || {}, 'meta_json') || '{}').lot_number); } catch (_) {}
+    const lotRows = processed.filter(r => !lot || text(pick(r, 'lot_number')) === lot);
+    const good = lotRows.reduce((s, r) => s + (num(pick(r, 'good_qty')) || 0), 0);
+    const units = good || lotRows.reduce((s, r) => s + (num(pick(r, 'quantity')) || 0), 0);
+    return units ? `quantity ${units}${lot ? ` · LOT ${lot}` : ''}` : '';
+  };
+  // Shelf codes in the title become the same clickable chips as the rest of the page.
+  const eventTitle = (e) => {
+    let html = esc(e.title);
+    const pic = text(pick(e.record || {}, 'pictureposition'));
+    for (const code of [...new Set([e.position, e.from_position, e.to_position].map(text).filter(Boolean))]) {
+      const escaped = esc(code);
+      const safe = escaped.replace(/[.*+?^$()|[\]\\{}]/g, '\\$&');
+      const match = new RegExp('(^|[^A-Za-z0-9-])' + safe + '(?![A-Za-z0-9-])').exec(html);
+      if (!match) continue;
+      const start = match.index + match[1].length;
+      html = html.slice(0, start) + locationChip(code, code === e.position ? pic : '') + html.slice(start + escaped.length);
+    }
+    return html;
+  };
+  const activity = recent.length ? recent.map(e => {
+    const detail = e.kind === 'listed' && !/quantity \d/.test(e.detail || '') ? [e.detail, listedQty(e)].filter(Boolean).join(' · ') : e.detail;
+    return `<div class="ev ${e.undone ? 'undone' : ''}" style="--k:var(--k-${attrEsc(e.kind)})">
       <div class="t">${esc(fmtDate(e.ts))}</div><div class="dot" title="${attrEsc(e.kind)}"></div>
-      <div class="body"><div class="title">${esc(e.title)}</div>${e.detail || e.undone || e.pending ? `<div class="meta">${e.undone ? '<span class="pill">undone</span>' : ''}${e.pending ? '<span class="pill bad">not applied</span>' : ''}${e.detail ? `<span>${esc(e.detail)}</span>` : ''}</div>` : ''}</div>
-    </div>`).join('') : `<div class="hint">${dash.trailError ? 'History could not be loaded.' : 'No history recorded for this item.'}</div>`;
+      <div class="body"><div class="title">${eventTitle(e)}</div>${detail || e.undone || e.pending ? `<div class="meta">${e.undone ? '<span class="pill">undone</span>' : ''}${e.pending ? '<span class="pill bad">not applied</span>' : ''}${detail ? `<span>${esc(detail)}</span>` : ''}</div>` : ''}</div>
+    </div>`;
+  }).join('') : `<div class="hint">${dash.trailError ? 'History could not be loaded.' : 'No history recorded for this item.'}</div>`;
   const finderHref = '/finder?' + new URLSearchParams({q: upc});
 
   const missing = SOURCE_ORDER.filter(key => !rowsFor(key).length).map(key => `<span class="chip">${esc(SOURCES[key].short)}</span>`);
@@ -900,9 +931,9 @@ function renderDashboard() {
     ${(clues || notes.length) ? `<section class="section"><div class="section-title">Clues</div>${clues}${notes.length ? `<div class="hint">${esc(notes.join(' · '))}</div>` : ''}</section>` : ''}
     <section class="section" id="sec-tiles"><div class="tiles">${tiles}</div>${sections.join('')}</section>
     <section class="section source-section" id="sec-activity" style="--s:var(--s-activity)">
-      <div class="section-title"><span>Recent activity</span><span class="count">${esc(String(events.length))}</span><a class="open" href="${attrEsc(finderHref)}" target="_blank" rel="noopener">Full trail ↗</a></div>
+      <div class="section-title"><span>Recent activity</span><span class="count">${esc(String(activityEvents.length))}</span><a class="open" href="${attrEsc(finderHref)}" target="_blank" rel="noopener">Full trail ↗</a></div>
       ${activity}
-      ${events.length > recent.length ? `<div class="more">${events.length - recent.length} older event${events.length - recent.length === 1 ? '' : 's'} in the full trail.</div>` : ''}
+      ${activityEvents.length > recent.length ? `<div class="more">${activityEvents.length - recent.length} older event${activityEvents.length - recent.length === 1 ? '' : 's'} in the full trail.</div>` : ''}
     </section>
     ${missing.length ? `<div class="missing">Not found in:${missing.join('')}</div>` : ''}`;
   syncStickyOffsets();
