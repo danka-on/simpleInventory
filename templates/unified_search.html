@@ -764,9 +764,9 @@ function renderDashboard() {
     prepTile,
     tile('bol', receivedQty, 'Macy shipment', lots.length ? `LOT ${lots.slice(0, 2).join(', ')}` : ''),
     tile('sold', soldUnits, 'Sold', soldOrders ? `${soldOrders} order${soldOrders === 1 ? '' : 's'}` : ''),
-    tile('returns', ledger.returned || returns.length, 'Returned', ledger.restocked ? `${ledger.restocked} restocked` : ''),
     tile('amazon', amazon.length, 'On Amazon', listingDetail(amazon, amazonQty)),
     tile('ebay', ebay.length, 'On eBay', listingDetail(ebay, ebayQty)),
+    tile('returns', ledger.returned || returns.length, 'Returned', ledger.restocked ? `${ledger.restocked} restocked` : ''),
     tile('fba', ledger.fba_units || 0, 'Sent to FBA', (ledger.fba_sessions || []).slice(0, 1).join('')),
   ].join('');
 
