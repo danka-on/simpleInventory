@@ -796,6 +796,30 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const dots = document.querySelectorAll('#ss-lister-guide [data-ss-cp] span');
       return dots[1] && dots[1].style.background.includes('22, 163, 74');
     }, null, { timeout: 15000 });
+
+    // Above the list: a way to Items to List to queue more, and Clear all for this store's list
+    // (asks first, skips every queued row for this store only, and one Undo brings them all back).
+    await toQueue();
+    // A tab the extension opens is not routed: it reaches the real server, whose sign-in page still
+    // names /items-to-list as where it goes next.
+    await panel.bringToFront();
+    const [itemsTab] = await Promise.all([context.waitForEvent('page'), panel.click('#addItems')]);
+    await itemsTab.waitForURL(u => decodeURIComponent(u.href).includes('/items-to-list'), { timeout: 20000 });
+    await itemsTab.close();
+    await panel.bringToFront();
+    const queuedHere = await panel.$$eval('#itemList .item', els => els.map(e => e.dataset.upc));
+    const skipsBefore = calls.skip.length;
+    await panel.click('#clearAll');
+    await panel.waitForSelector('#modal:not([hidden]) #modalOk');
+    assert.ok((await panel.textContent('#modal')).includes('Amazon list'), 'the question names the store');
+    await panel.click('#modalOk');
+    await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('Cleared'), null, { timeout: 15000 });
+    const cleared = calls.skip.slice(skipsBefore);
+    assert.equal(cleared.length, queuedHere.length, 'every queued row is taken off');
+    assert.ok(cleared.every(s => s.platform === 'amazon' && !s.undo), 'only from the Amazon list: ' + JSON.stringify(cleared));
+    await panel.click('#toastAction');
+    for (let i = 0; i < 50 && calls.skip.length < skipsBefore + 2 * queuedHere.length; i += 1) await panel.waitForTimeout(100);
+    assert.ok(calls.skip.slice(skipsBefore + queuedHere.length).every(s => s.undo && s.platform === 'amazon'), 'Undo puts them all back');
     console.log('lister browser test passed');
   } finally {
     await context.close();

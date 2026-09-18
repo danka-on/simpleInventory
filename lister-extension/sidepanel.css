@@ -491,6 +491,15 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
   background: var(--green-soft); color: var(--green); border: 1.5px solid var(--green); }
 .printbtn:hover { background: var(--green); color: var(--green-ink); filter: none; }
 .printbtn svg { flex: 0 0 auto; }
+/* After the label went out (Generate prints on its own) the button says so; a press prints it again. */
+.printbtn.printed { background: var(--green); color: var(--green-ink); letter-spacing: .04em; }
+.printbtn.printed:hover { filter: brightness(1.08); }
+.printbtn.queued { background: none; color: var(--amber); border-color: var(--amber); letter-spacing: .04em; }
+.listacts { display: flex; align-items: center; gap: 8px; padding: 2px 12px 6px; }
+.lact { background: none; border: 0; padding: 2px 0; font-size: 11.5px; font-weight: 600; color: var(--blue); cursor: pointer; }
+.lact:hover { text-decoration: underline; filter: none; }
+.lact.danger { margin-left: auto; color: var(--red); }
+.lact[disabled] { color: var(--faint); cursor: default; text-decoration: none; }
 .small.bad { color: var(--red); }
 
 /* One tile per photo the phone sent. A tile that carries a circle says so, and the note under it

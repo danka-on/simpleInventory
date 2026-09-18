@@ -160,8 +160,11 @@ const draft = {
     assert.equal(calls.barcode.at(-1).kind, 'generated');
     assert.equal(calls.print.length, 1, 'a generated code prints on its own');
     assert.equal(calls.print.at(-1).upc, '777000000042', 'the label carries the generated code');
-    // The card now has the big printer button for a reprint.
+    // The card now has the big printer button for a reprint, and it says the label already went out.
     await panel.waitForSelector('#newPrint.printbtn svg');
+    await panel.waitForSelector('#newPrint.printed', { timeout: 5000 });
+    assert.ok((await panel.textContent('#newPrint')).includes('PRINTED'), 'the label went out on its own, so the button says PRINTED');
+    assert.ok(!(await panel.$eval('#newPrint', el => el.disabled)), 'and it can still be pressed');
     await panel.click('#newPrint');
     for (let i = 0; i < 50 && calls.print.length < 2; i += 1) await panel.waitForTimeout(100);
     assert.equal(calls.print.length, 2, 'the printer button reprints');

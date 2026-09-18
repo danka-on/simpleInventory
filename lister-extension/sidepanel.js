@@ -53,7 +53,7 @@
     busyTasks: new Map(), busyStarted: new Map(), autoPhotosTold: new Set(), checkingAmazon: new Set(), amazonRunning: false, tabItems: {}, sessions: [], lastForm: null, autoSent: new Set(), photoSizes: {}, statusFilter: 'all', aiGenerated: {},
     preload: { items: {}, all: null, watch: new Set(), asked: new Set(), timer: null, startedHere: false },
     // "+ NEW": the draft the phone is filling from the other end.
-    newItem: { id: null, draft: null, barcodeDraft: '', timer: null, opening: false, linking: null, linkBusy: false },
+    newItem: { id: null, draft: null, barcodeDraft: '', timer: null, opening: false, linking: null, linkBusy: false, printed: {} },
   };
 
   const $ = id => document.getElementById(id);
@@ -1188,6 +1188,35 @@
     }
   }
 
+  // Clear all: every item still waiting on this store comes off its list, the same as pressing each
+  // row's X. One Undo puts them all back.
+  async function clearAll() {
+    const platform = state.platform;
+    const items = state.items.filter(it => it.status === 'queued');
+    if (!items.length) return;
+    const n = items.length;
+    const ok = await confirmModal({ title: `Clear all ${n} item${n === 1 ? '' : 's'} from the ${storeName(platform)} list?`,
+      text: `They stay on the ${storeName(platform === 'ebay' ? 'amazon' : 'ebay')} list. Items already done there leave the Listing Agent queue on Items to List.`, okLabel: 'Clear all' });
+    if (!ok) return;
+    const skip = (upc, undo) => api('/api/lister/queue/' + encodeURIComponent(upc) + '/skip', { method: 'POST', body: undo ? { platform, undo: true } : { platform } });
+    const done = busy(`Clearing ${n} item${n === 1 ? '' : 's'}\u2026`);
+    const cleared = [];
+    try {
+      for (let i = 0; i < items.length; i += 6) {
+        const batch = items.slice(i, i + 6);
+        const results = await Promise.allSettled(batch.map(it => skip(it.upc)));
+        results.forEach((r, j) => { if (r.status === 'fulfilled') cleared.push(batch[j].upc); });
+      }
+    } finally {
+      done();
+    }
+    for (const upc of cleared) { delete state.details[upc]; dropSession(upc, platform); }
+    const missed = n - cleared.length;
+    toast(`Cleared ${cleared.length} from ${storeName(platform)}` + (missed ? ` \u2014 ${missed} could not be removed` : ''), Boolean(missed),
+      cleared.length ? { label: 'Undo', run: async () => { await Promise.allSettled(cleared.map(upc => skip(upc, true))); await loadQueue(); } } : null);
+    await loadQueue({ keep: false });
+  }
+
   // -- start listing on a store --------------------------------------------------------------------
 
   async function startOn(platform) {
@@ -1766,6 +1795,7 @@
     const tests = { all: () => true, flagged: isFlagged, listed: isOnStore, blocked: isBlocked };
     rememberThumbs(state.items);
     const queued = state.items.filter(it => it.status === 'queued');
+    $('clearAll').disabled = !queued.length;
     // The filters carry their own counts: the numbers are why you would press one.
     for (const [id, value, n] of [['statusAll', 'all', queued.length], ['statusFlagged', 'flagged', queued.filter(isFlagged).length],
       ['statusListed', 'listed', queued.filter(isOnStore).length], ['statusBlocked', 'blocked', queued.filter(isBlocked).length]]) {
@@ -2417,12 +2447,16 @@
     const done = busy('Sending the label…');
     try {
       await api('/api/printer/print-barcode', { method: 'POST', body: { upc: code, item_description: description || '', quantity: 1 } });
+      state.newItem.printed[code] = 'printed';
+      renderNew();
       toast('Label sent to the printer');
       return true;
     } catch (error) {
       // A queued label still prints later from the print queue page, the way Prep + does it.
       try {
         await api('/api/print-queue', { method: 'POST', body: { title: description || 'New item', barcode: code } });
+        if (state.newItem.printed[code] !== 'printed') state.newItem.printed[code] = 'queued';
+        renderNew();
         toast((error.message || 'The printer did not answer.') + ' Added to the print queue instead.', true);
       } catch {
         toast(error.message, true);
@@ -2671,6 +2705,15 @@
     renderActionBar();
   }
 
+  // The big label button, in the state its label is in: sent to the printer, parked in the print
+  // queue, or not printed yet. It always prints again when pressed.
+  function printButton(printed) {
+    const look = printed === 'printed' ? { cls: ' printed', text: 'PRINTED \u2713', tip: 'The label went to the printer. Press to print it again.' }
+      : printed === 'queued' ? { cls: ' queued', text: 'IN PRINT QUEUE', tip: 'The printer did not answer, so the label waits on the print queue page. Press to try the printer again.' }
+      : { cls: '', text: 'Print label', tip: 'Print this barcode on the Item Prep printer' };
+    return '<button id="newPrint" class="printbtn' + look.cls + '" type="button" title="' + look.tip + '">' + PRINTER_SVG + '<span>' + look.text + '</span></button>';
+  }
+
   // Step 1, the only one done at the bench: scan the code, or Generate one of ours (it prints on its
   // own), or type one and press Print. No popup: everything sits on the card.
   function renderNewCode(draft) {
@@ -2678,7 +2721,7 @@
     const body = !editing
       ? '<div class="row tight"><b class="mono grow">' + esc(draft.upc) + '</b>' +
         '<button id="newRecode" class="tiny" type="button" title="Put a different code on it">Change</button></div>' +
-        '<button id="newPrint" class="printbtn" type="button" title="Print this barcode on the Item Prep printer">' + PRINTER_SVG + '<span>Print label</span></button>'
+        printButton(state.newItem.printed[draft.upc])
       : '<div class="row tight"><div class="search grow"><span aria-hidden="true">\u2337</span>' +
         '<input id="newBarcode" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Scan or type the barcode"></div>' +
         '<button id="newGen" type="button" title="Take the next code of ours; its label prints on its own">Generate</button></div>' +
@@ -2825,6 +2868,8 @@
     $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
     for (const [id, value] of [['statusAll', 'all'], ['statusFlagged', 'flagged'], ['statusListed', 'listed'], ['statusBlocked', 'blocked']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
     $('preloadAll').onclick = () => void preloadAll();
+    $('clearAll').onclick = () => void clearAll();
+    $('addItems').onclick = () => chrome.tabs.create({ url: serverBase() + '/items-to-list' });
     chrome.tabs.onActivated.addListener(scheduleRefresh);
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
       if (info.status === 'loading' && !info.url) {
