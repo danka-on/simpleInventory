@@ -242,6 +242,28 @@ class ListerToReadyToShipTest(unittest.TestCase):
         self.assertEqual(removed_from, [SHELF])
         self.assertEqual(self.rack(), {101: 0, 102: 1, 103: 4}, 'only the listed unit left the shelf')
 
+    def test_selling_more_than_the_shelf_holds_can_still_take_off_what_is_there(self):
+        """Two sold, one on the shelf: the page offers "Remove 1 & Complete" instead of skipping."""
+        self.setUpFixture()
+        order_id = self.sell_raw(sku=DECOY_UNIT, barcode=DECOY_UNIT, quantity=2)
+        options = self.client.get(f'/api/ready-to-ship/location-options/{order_id}').get_json()
+        self.assertEqual((options['quantity'], options['total_available'], options['can_fulfill']), (2, 1, False))
+
+        # Without the short-stock choice the server still refuses a partial removal.
+        res = self.client.post('/mark-order-handled', json={'id': order_id, 'allocations': []})
+        self.assertEqual(res.status_code, 409, res.get_json())
+        self.assertEqual(self.rack(), {101: 1, 102: 1, 103: 4})
+
+        allocations = [{'location_key': l['location_key'], 'location_code': l['location_code'],
+                        'quantity': l['available_qty']} for l in options['locations']]
+        res = self.client.post('/mark-order-handled', json={'id': order_id, 'allocations': allocations,
+                                                            'remove_quantity': 1})
+        data = res.get_json()
+        self.assertEqual((res.status_code, data.get('success'), data.get('removed_units')), (200, True, 1), data)
+        self.assertEqual(self.rack(), {101: 1, 102: 0, 103: 4}, 'the one unit on hand came off, nothing else')
+        row = self.sql('sold.db', 'SELECT isHandled, rackupdated FROM orders WHERE id = ?', (order_id,))[0]
+        self.assertEqual((str(row['isHandled']), row['rackupdated']), ('1', 1))
+
     def test_a_row_that_missed_the_ingest_shows_the_shelf_but_cannot_be_confirmed_from_it(self):
         """The one thin spot: a sold row with no barcode of its own, written around the ingest.
 

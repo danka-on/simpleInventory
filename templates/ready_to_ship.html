@@ -3975,6 +3975,73 @@ function promptNoLocation(order) {
     });
 }
 
+function promptShortStock(order, options) {
+    return new Promise((resolve) => {
+        const existing = document.getElementById('short-stock-popup');
+        if (existing) existing.remove();
+
+        const soldQty = Math.max(1, parsePosInt(options.quantity ?? order.quantity, 1));
+        const haveQty = parsePosInt(options.total_available, 0);
+        const where = (options.locations || [])
+            .filter(loc => parsePosInt(loc.available_qty, 0) > 0)
+            .map(loc => `${loc.location_code} (${parsePosInt(loc.available_qty, 0)})`)
+            .join(', ');
+
+        const overlay = document.createElement('div');
+        overlay.id = 'short-stock-popup';
+        overlay.className = 'loc-alloc-overlay';
+
+        const card = document.createElement('div');
+        card.className = 'loc-alloc-card';
+        card.style.maxWidth = '400px';
+        card.onclick = (e) => e.stopPropagation();
+
+        const title = document.createElement('h3');
+        title.className = 'loc-alloc-title';
+        title.style.color = '#fbbf24';
+        title.textContent = 'Not Enough in Warehouse';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'loc-alloc-subtitle';
+        subtitle.innerHTML = `Sold <strong>${soldQty}</strong>, warehouse has <strong>${haveQty}</strong>` +
+            (where ? ` at <strong>${esc(where)}</strong>` : '') + '.';
+
+        const actions = document.createElement('div');
+        actions.className = 'loc-alloc-actions';
+        actions.style.cssText = 'flex-direction:column;gap:8px;';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'loc-alloc-confirm';
+        removeBtn.textContent = `Remove ${haveQty} & Complete`;
+
+        const skipBtn = document.createElement('button');
+        skipBtn.type = 'button';
+        skipBtn.className = 'loc-alloc-confirm';
+        skipBtn.style.background = 'linear-gradient(135deg,#64748b,#475569)';
+        skipBtn.textContent = 'Skip & Complete (remove nothing)';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'loc-alloc-cancel';
+        cancelBtn.textContent = 'Cancel';
+
+        actions.appendChild(removeBtn);
+        actions.appendChild(skipBtn);
+        actions.appendChild(cancelBtn);
+        card.appendChild(title);
+        card.appendChild(subtitle);
+        card.appendChild(actions);
+        overlay.appendChild(card);
+        document.body.appendChild(overlay);
+
+        removeBtn.onclick = () => { overlay.remove(); resolve('remove'); };
+        skipBtn.onclick = () => { overlay.remove(); resolve('skip'); };
+        cancelBtn.onclick = () => { overlay.remove(); resolve(null); };
+        overlay.onclick = () => { overlay.remove(); resolve(null); };
+    });
+}
+
 function promptLocationAllocation(order, options) {
     return new Promise((resolve) => {
         const existing = document.getElementById('location-allocation-popup');
@@ -4240,6 +4307,7 @@ async function handleOrderStatusChange(orderId, isUndo) {
     let optimisticApplied = false;
     let locationAllocations = [];
     let skipInventory = false;
+    let removeQuantity = 0;
 
     try {
         if (!isUndo) {
@@ -4251,6 +4319,25 @@ async function handleOrderStatusChange(orderId, isUndo) {
                     return;
                 }
                 skipInventory = true;
+            } else if (!options.can_fulfill && parsePosInt(options.total_available, 0) > 0) {
+                // Sold more than the warehouse holds: offer to take off what is there.
+                const choice = await promptShortStock(order, options);
+                if (!choice) {
+                    restoreBtn();
+                    return;
+                }
+                if (choice === 'skip') {
+                    skipInventory = true;
+                } else {
+                    removeQuantity = parsePosInt(options.total_available, 0);
+                    locationAllocations = (options.locations || [])
+                        .filter(loc => parsePosInt(loc.available_qty, 0) > 0)
+                        .map(loc => ({
+                            location_key: loc.location_key,
+                            location_code: loc.location_code,
+                            quantity: parsePosInt(loc.available_qty, 0)
+                        }));
+                }
             } else if (!options.can_fulfill) {
                 const skip = await promptNoLocation(order);
                 if (!skip) {
@@ -4285,6 +4372,7 @@ async function handleOrderStatusChange(orderId, isUndo) {
                 id: orderId,
                 allocations: locationAllocations,
                 skip_inventory: skipInventory,
+                remove_quantity: removeQuantity,
                 matched_barcode: order.location_match_suggested ? (order.location_match_barcode || '') : ''
             };
         const response = await fetch(endpoint, {

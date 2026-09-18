@@ -93,6 +93,12 @@ def mark_order_handled():
             else ''
         )
         sold_qty = max(1, ss_normalization._coerce_int(order['quantity'], 1))
+        # Short stock: the operator chose to take off what the warehouse has
+        # (e.g. 1 of 2 sold) instead of skipping inventory altogether.
+        remove_qty = sold_qty
+        requested_remove = ss_normalization._coerce_int(data.get('remove_quantity'), 0)
+        if 0 < requested_remove < sold_qty:
+            remove_qty = requested_remove
         order_ref = (order['order_id'] or '').strip()
         title = (order['title'] or '').strip()
 
@@ -146,7 +152,7 @@ def mark_order_handled():
         if valid_fallback_barcode:
             plan = ss_marketplace_removal._build_marketplace_removal_plan(
                 valid_fallback_barcode,
-                sold_qty,
+                remove_qty,
                 allocations=normalized_allocations if incoming_allocations is not None else None,
                 preferred_location=str(order['location'] or '').strip()
             )
@@ -157,7 +163,7 @@ def mark_order_handled():
         if plan is None:
             plan = ss_marketplace_removal._build_marketplace_removal_plan(
                 barcode,
-                sold_qty,
+                remove_qty,
                 allocations=normalized_allocations if incoming_allocations is not None else None,
                 fallback_barcodes=fallback_barcodes,
                 preferred_location=str(order['location'] or '').strip()
@@ -174,21 +180,21 @@ def mark_order_handled():
                     'error': 'Location selection required for this order',
                     'location_selection_required': True,
                     'order_id': order_id,
-                    'quantity': sold_qty,
+                    'quantity': remove_qty,
                     'locations': list(plan.get('locations') or [])
                 }, 400)
 
         if not plan.get('can_fulfill'):
             return _release_claim({
                 'success': False,
-                'error': f"Not enough inventory available to remove {sold_qty} unit(s)."
+                'error': f"Not enough inventory available to remove {remove_qty} unit(s)."
             }, 409)
 
         planned_total = sum(max(0, ss_normalization._coerce_int(step.get('quantity'), 0)) for step in (plan.get('planned_steps') or []))
-        if planned_total != sold_qty:
+        if planned_total != remove_qty:
             return _release_claim({
                 'success': False,
-                'error': f'Inventory plan only covers {planned_total} of {sold_qty} required unit(s).'
+                'error': f'Inventory plan only covers {planned_total} of {remove_qty} required unit(s).'
             }, 409)
 
         removal_result = ss_marketplace_removal._apply_marketplace_removal_plan(
@@ -200,10 +206,10 @@ def mark_order_handled():
         )
         if removal_result.get('error'):
             return _release_claim({'success': False, 'error': removal_result['error']}, 409)
-        if removal_result.get('removed_units', 0) != sold_qty:
+        if removal_result.get('removed_units', 0) != remove_qty:
             return _release_claim({
                 'success': False,
-                'error': f"Removed {removal_result.get('removed_units', 0)} of {sold_qty} unit(s); order was not finalized."
+                'error': f"Removed {removal_result.get('removed_units', 0)} of {remove_qty} unit(s); order was not finalized."
             }, 409)
 
         location_summary = ', '.join([str(loc).strip() for loc in (removal_result.get('locations') or []) if str(loc).strip()])
