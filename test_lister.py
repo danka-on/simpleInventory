@@ -80,6 +80,8 @@ class ListerTestCase(unittest.TestCase):
         self.telegram_sent = []
         self.telegram_result = (True, {'message_id': 7})
         self.telegram_deleted = []
+        # Logins that linked their own Telegram on the Telegram page.
+        self.paired = {}
 
         def fake_telegram_send(chat_id, text, disable_notification=True):
             self.telegram_sent.append((chat_id, text, disable_notification))
@@ -89,6 +91,7 @@ class ListerTestCase(unittest.TestCase):
             '_telegram_send_message': fake_telegram_send,
             '_telegram_collect_recipient_rows': lambda: self.telegram_rows,
             '_telegram_get_bot_token': lambda: 'test-bot-token',
+            '_telegram_chat_for_email': lambda email: self.paired.get(email),
             'api_listingagent_amazon_catalog_search': fake_amazon_search,
             'api_listingagent_amazon_restriction_check': fake_amazon_restriction,
             'db_connection': database.db_connection,
@@ -1042,6 +1045,30 @@ class ListerTestCase(unittest.TestCase):
                                   base_url='https://pi.example')
         self.assertEqual(res.status_code, 200, res.get_json())
         self.assertEqual(grabbed, ['https://slimages.macys.com/is/image/MCY/1'])
+
+    def test_photo_link_goes_only_to_the_phone_of_whoever_asked_once_they_linked_it(self):
+        self.paired['dan@example.com'] = {'chat_id': '333', 'name': 'Dan'}
+        res = self.client.post('/api/lister/photo-link', json={'upc': UPC + '-1'}, base_url='https://pi.example',
+                               headers={'Cf-Access-Authenticated-User-Email': 'Dan@Example.com'})
+        body = res.get_json()
+        self.assertEqual(res.status_code, 200, body)
+        self.assertEqual([chat for chat, _text, _quiet in self.telegram_sent], ['333'], 'not the shared chats')
+        self.assertEqual((body['sent'], body['routed']), (['Dan'], 'you'))
+
+    def test_photo_link_from_someone_not_linked_still_reaches_every_enabled_chat(self):
+        self.paired['dan@example.com'] = {'chat_id': '333', 'name': 'Dan'}
+        res = self.client.post('/api/lister/photo-link', json={'upc': UPC + '-1'}, base_url='https://pi.example',
+                               headers={'Cf-Access-Authenticated-User-Email': 'someone@else.com'})
+        self.assertEqual(res.get_json()['routed'], 'everyone')
+        self.assertEqual([chat for chat, _text, _quiet in self.telegram_sent], ['111'])
+
+    def test_whose_phone_comes_from_cloudflare_not_from_the_request_body(self):
+        """actor in the body names who listed something; it must not steer a link to someone's phone."""
+        self.paired['dan@example.com'] = {'chat_id': '333', 'name': 'Dan'}
+        res = self.client.post('/api/lister/photo-link', json={'upc': UPC + '-1', 'actor': 'dan@example.com'},
+                               base_url='https://pi.example')
+        self.assertEqual(res.get_json()['routed'], 'everyone')
+        self.assertNotIn('333', [chat for chat, _text, _quiet in self.telegram_sent])
 
     def test_photo_link_says_what_is_missing(self):
         self.assertEqual(self.client.post('/api/lister/photo-link', json={}).status_code, 400)

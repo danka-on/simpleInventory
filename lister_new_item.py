@@ -200,7 +200,7 @@ class NewItems:
 
     # -- drafts ------------------------------------------------------------------------------
 
-    def create(self, *, actor='', base_url='http://localhost/', send=True):
+    def create(self, *, actor='', base_url='http://localhost/', send=True, to_email=''):
         token = secrets.token_urlsafe(9)
         now = _now()
         with self._open() as conn:
@@ -215,7 +215,7 @@ class NewItems:
             # The phone is meant to buzz the moment the draft opens; a chat the server cannot reach
             # is not a reason to throw the draft away, so the failure is reported beside it.
             try:
-                result['link'] = self.send_link(draft['id'], base_url=base_url)
+                result['link'] = self.send_link(draft['id'], base_url=base_url, to_email=to_email)
             except (NewItemError, ListerError) as e:
                 result['linkError'] = str(e)
             except Exception as e:
@@ -263,7 +263,7 @@ class NewItems:
         except Exception:
             return 0
 
-    def send_link(self, draft_id, *, base_url='http://localhost/', replace=True):
+    def send_link(self, draft_id, *, base_url='http://localhost/', replace=True, to_email=''):
         with self._open() as conn:
             cur = conn.cursor()
             self.init_tables(cur)
@@ -283,13 +283,15 @@ class NewItems:
             text = '\U0001F4F7 ' + (_text(draft.get('title'), 120) or 'New item') + '\n' + url
         else:
             text = '\U0001F195 New item — name it, then photos\n' + url
-        result = self.lister.send_link(key='new:' + draft['token'], token=token, url=url, text=text)
+        result = self.lister.send_link(key='new:' + draft['token'], token=token, url=url, text=text,
+                                       to_email=to_email)
 
         with self._open() as conn:
             cur = conn.cursor()
             self._touch(cur, draft['id'], link_token=token, link_kind=kind)
             conn.commit()
-        return {'url': url, 'kind': kind, 'stage': stage, 'sent': result['sent'], 'errors': result['errors']}
+        return {'url': url, 'kind': kind, 'stage': stage, 'sent': result['sent'], 'errors': result['errors'],
+                'routed': result.get('routed', 'everyone')}
 
     def link_opened(self, token):
         """The phone opened the page, so the bot takes its own message back down."""
@@ -320,7 +322,7 @@ class NewItems:
             return {'title': '', 'image_url': ''}
         return {'title': _text(found.get('title'), 200), 'image_url': _text(found.get('image_url'), 500)}
 
-    def set_barcode(self, draft_id, *, barcode, kind='scanned', base_url='http://localhost/'):
+    def set_barcode(self, draft_id, *, barcode, kind='scanned', base_url='http://localhost/', to_email=''):
         upc = self._normalize(barcode)
         if not upc:
             raise NewItemError('A barcode is required.')
@@ -352,7 +354,7 @@ class NewItems:
         # message and send one that opens straight on the camera.
         if took_name and not photos and _text(draft.get('link_token')):
             try:
-                result['link'] = self.send_link(draft['id'], base_url=base_url)
+                result['link'] = self.send_link(draft['id'], base_url=base_url, to_email=to_email)
                 result['draft'] = self.get(draft['id'], base_url=base_url)['draft']
             except (NewItemError, ListerError) as e:
                 result['linkError'] = str(e)
@@ -687,6 +689,9 @@ def register(app, lister, deps):
         value = _text((data or {}).get('actor'), 80)
         return value or _text(request.headers.get('Cf-Access-Authenticated-User-Email'), 120) or 'lister'
 
+    def signed_in_email():
+        return _text(request.headers.get('Cf-Access-Authenticated-User-Email'), 120).lower()
+
     def guard():
         """The panel's calls carry the extension header. The phone's do not, and do not need to:
         they are same-origin and prove which draft they are for by holding its token."""
@@ -708,7 +713,8 @@ def register(app, lister, deps):
         try:
             guard()
             data = request.get_json(silent=True) or {}
-            result = new_items.create(actor=actor(), base_url=base_url(), send=data.get('send', True) is not False)
+            result = new_items.create(actor=actor(), base_url=base_url(), send=data.get('send', True) is not False,
+                                      to_email=signed_in_email())
             return jsonify({'success': True, **result}), 201
         except Exception as e:
             return failure(e, 'lister:new-item-create')
@@ -728,7 +734,7 @@ def register(app, lister, deps):
     def api_new_link(draft_id):
         try:
             guard()
-            return jsonify({'success': True, **new_items.send_link(draft_id, base_url=base_url()),
+            return jsonify({'success': True, **new_items.send_link(draft_id, base_url=base_url(), to_email=signed_in_email()),
                             **new_items.get(draft_id, base_url=base_url())})
         except Exception as e:
             return failure(e, 'lister:new-item-link')
@@ -739,7 +745,7 @@ def register(app, lister, deps):
             data = request.get_json(silent=True) or {}
             return jsonify({'success': True, **new_items.set_barcode(
                 draft_id, barcode=data.get('barcode'), kind=_text(data.get('kind'), 20) or 'scanned',
-                base_url=base_url())})
+                base_url=base_url(), to_email=signed_in_email())})
         except Exception as e:
             return failure(e, 'lister:new-item-barcode')
 

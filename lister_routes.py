@@ -642,6 +642,8 @@ class Lister:
         self.telegram_send = deps.get('_telegram_send_message')
         self.telegram_recipients = deps.get('_telegram_collect_recipient_rows')
         self.telegram_token = deps.get('_telegram_get_bot_token')
+        # Whose phone: the chat a Cloudflare login linked on the Telegram page (self-serve pairing).
+        self.telegram_chat_for = deps.get('_telegram_chat_for_email')
         self.base_dir = deps.get('BASE_DIR')
         self.static_folder = Path(static_folder)
         self.feed_dir = self.static_folder / 'lister'
@@ -1744,15 +1746,33 @@ class Lister:
             'aiPhotoPrompt': DEFAULT_AI_PHOTO_PROMPT,
         }
 
-    def send_link(self, *, key, token, url, text):
-        """Telegram one link to every enabled chat and remember the messages it made, so that opening
-        the link — or replacing it with a different one — can take those messages back down again."""
-        if not callable(self.telegram_send) or not callable(self.telegram_recipients):
-            raise ListerError('Telegram is not wired up on this server.', 501)
+    def own_chat(self, email):
+        """The chat this login linked for itself, or None (not linked, not signed in, no pairing)."""
+        if not email or not callable(self.telegram_chat_for):
+            return None
         try:
-            rows = self.telegram_recipients() or []
-        except Exception as e:
-            raise ListerError('Could not read the Telegram recipients: ' + str(e), 500)
+            found = self.telegram_chat_for(email)
+        except Exception:
+            return None
+        return found if found and _text(found.get('chat_id')) else None
+
+    def send_link(self, *, key, token, url, text, to_email=''):
+        """Telegram one link and remember the messages it made, so that opening the link - or
+        replacing it with a different one - can take those messages back down again. It goes to the
+        phone of whoever asked (to_email, once they linked their Telegram); a person who has not
+        linked one yet still gets it the old way, on every enabled chat."""
+        if not callable(self.telegram_send):
+            raise ListerError('Telegram is not wired up on this server.', 501)
+        own = self.own_chat(to_email)
+        if own:
+            rows = [{'chat_id': own['chat_id'], 'display_name': own.get('name'), 'enabled': 1}]
+        else:
+            if not callable(self.telegram_recipients):
+                raise ListerError('Telegram is not wired up on this server.', 501)
+            try:
+                rows = self.telegram_recipients() or []
+            except Exception as e:
+                raise ListerError('Could not read the Telegram recipients: ' + str(e), 500)
 
         targets, seen = [], set()
         for row in rows:
@@ -1800,9 +1820,9 @@ class Lister:
                 pass
         if not sent:
             raise ListerError('Telegram refused the message: ' + (errors[0]['error'] if errors else 'unknown error'), 502)
-        return {'token': token, 'url': url, 'sent': sent, 'errors': errors}
+        return {'token': token, 'url': url, 'sent': sent, 'errors': errors, 'routed': 'you' if own else 'everyone'}
 
-    def photo_link(self, upc, *, base_url='http://localhost/'):
+    def photo_link(self, upc, *, base_url='http://localhost/', to_email=''):
         """Telegram the phone camera page for this unit — the QR code without the scanning."""
         upc = _text(upc)
         if not upc:
@@ -1812,8 +1832,8 @@ class Lister:
         title = self._photo_link_title(upc)
         # Nothing but the icon, the name and the link: the message is read on a lock screen.
         text = '\U0001F4F7 ' + (title or ('UPC ' + upc)) + '\n' + url
-        result = self.send_link(key=upc, token=token, url=url, text=text)
-        return {'url': url, 'sent': result['sent'], 'errors': result['errors']}
+        result = self.send_link(key=upc, token=token, url=url, text=text, to_email=to_email)
+        return {'url': url, 'sent': result['sent'], 'errors': result['errors'], 'routed': result['routed']}
 
     def _photo_link_title(self, upc):
         """What to call this unit in a chat message: the proposal title, else the BOL line."""
@@ -2647,6 +2667,9 @@ def register(app, deps):
         value = _text((data or {}).get('actor') or (data or {}).get('reviewed_by') or request.args.get('actor'), 80)
         return value or _text(request.headers.get('Cf-Access-Authenticated-User-Email'), 120) or 'lister'
 
+    def signed_in_email():
+        return _text(request.headers.get('Cf-Access-Authenticated-User-Email'), 120).lower()
+
     def guard_mutation():
         if request.headers.get('Sec-Fetch-Site') == 'cross-site' and not request.headers.get(MUTATION_HEADER):
             raise ListerError('Use the Sweet Shelves Lister extension or a Sweet Shelves page for this action.', 403)
@@ -2886,7 +2909,7 @@ def register(app, deps):
         try:
             guard_mutation()
             data = request.get_json(silent=True) or {}
-            result = lister.photo_link(_text(data.get('upc')), base_url=base_url())
+            result = lister.photo_link(_text(data.get('upc')), base_url=base_url(), to_email=signed_in_email())
             return jsonify({'success': True, **result})
         except Exception as e:
             return failure(e, 'lister:photo-link')

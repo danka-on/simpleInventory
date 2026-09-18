@@ -182,6 +182,9 @@ def register_routes():
     ss_runtime.app.route('/api/telegram/send-health', methods=['POST'])(ss_telegram.api_telegram_send_health)
     ss_runtime.app.route('/api/telegram/send-sync-overdue', methods=['POST'])(ss_telegram.api_telegram_send_sync_overdue)
     ss_runtime.app.route('/api/telegram/send-api-issue', methods=['POST'])(ss_telegram.api_telegram_send_api_issue)
+    ss_runtime.app.route('/api/telegram/me', methods=['GET'])(ss_telegram.api_telegram_me)
+    ss_runtime.app.route('/api/telegram/link', methods=['POST'])(ss_telegram.api_telegram_link)
+    ss_runtime.app.route('/api/telegram/unlink', methods=['POST'])(ss_telegram.api_telegram_unlink)
     ss_runtime.app.route('/bol-stats')(ss_pages.bol_stats_page)
     ss_runtime.app.route('/barcode-print-que')(ss_pages.barcode_print_que)
     ss_runtime.app.route('/barcode-print-view')(ss_pages.barcode_print_view)
@@ -659,5 +662,7 @@ def register_routes():
         '_telegram_send_message': ss_telegram._telegram_send_message,
         '_telegram_collect_recipient_rows': ss_telegram._telegram_collect_recipient_rows,
         '_telegram_get_bot_token': ss_telegram._telegram_get_bot_token,
+        # A photo link goes to the phone of whoever asked for it, once they linked their Telegram.
+        '_telegram_chat_for_email': ss_telegram.telegram_chat_for_email,
         'BASE_DIR': BASE_DIR,
     })

@@ -1130,6 +1130,40 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/telegram/me",
+      "endpoint": "api_telegram_me",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/link",
+      "endpoint": "api_telegram_link",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/telegram/unlink",
+      "endpoint": "api_telegram_unlink",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/bol-stats",
       "endpoint": "bol_stats_page",
       "methods": [

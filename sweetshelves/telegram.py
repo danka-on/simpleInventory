@@ -980,6 +980,15 @@ def telegram_command_worker():
                 message = update.get('message') or update.get('edited_message') or {}
                 _telegram_store_recent_chat(update_id, message)
                 chat_id = str((message.get('chat') or {}).get('id') or '').strip()
+                # Pairing comes first: the person is by definition not an authorized chat yet, and
+                # their tap may be the very first message after a restart. A code is single-use and
+                # expires, so seeing it again on the first poll cannot pair anything twice.
+                try:
+                    if _telegram_handle_link(message, quiet=initial_sync):
+                        continue
+                except Exception as exc:
+                    print(f'⚠️ Telegram link error: {exc}')
+                    continue
                 command = _telegram_normalize_command(message.get('text'))
                 # The first poll acknowledges the historical queue without
                 # replaying old commands. New commands work from the next poll.
@@ -1003,6 +1012,199 @@ def _start_telegram_command_thread():
     thread = threading.Thread(target=telegram_command_worker, daemon=True)
     thread.start()
     print('🚀 Telegram command thread started')
+
+
+# -- self-serve pairing -----------------------------------------------------------------------
+# A person signed in through Cloudflare Access links their own Telegram chat: the page hands out a
+# one-time t.me deep link, tapping it sends "/start <code>" to the bot, and the bot files the pair
+# email <-> chat. From then on a photo link that person asks for goes to their phone only.
+# The email only ever comes from Cloudflare's header, never from the request body, so nobody can
+# link a chat to somebody else's login.
+
+TELEGRAM_LINK_CODE_TTL = 600
+_TELEGRAM_BOT_USERNAME = {'value': '', 'checked_at': 0.0}
+
+
+def _telegram_link_tables(conn):
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS telegram_user_links (
+            email TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            telegram_name TEXT,
+            linked_at TEXT
+        )
+    ''')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS telegram_link_codes (
+            code TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            expires_at REAL NOT NULL,
+            used_at REAL,
+            chat_id TEXT
+        )
+    ''')
+
+
+def _telegram_signed_in_email():
+    """Who Cloudflare Access says is signed in; '' on a route it does not guard (tailnet, localhost)."""
+    try:
+        return str(request.headers.get('Cf-Access-Authenticated-User-Email') or '').strip().lower()[:120]
+    except Exception:
+        return ''
+
+
+def telegram_chat_for_email(email):
+    """{'chat_id', 'name'} of the chat this login linked, or None."""
+    email = str(email or '').strip().lower()
+    if not email:
+        return None
+    conn = sqlite3.connect('searchRack.db')
+    try:
+        _telegram_link_tables(conn)
+        row = conn.execute('SELECT chat_id, telegram_name, linked_at FROM telegram_user_links WHERE email = ?',
+                           (email,)).fetchone()
+    finally:
+        conn.close()
+    if not row or not str(row[0] or '').strip():
+        return None
+    return {'chat_id': str(row[0]).strip(), 'name': str(row[1] or '').strip() or email, 'linked_at': str(row[2] or '')}
+
+
+def _telegram_bot_username():
+    """The bot's @username, for the t.me link. Asked of Telegram once an hour at most."""
+    cached = _TELEGRAM_BOT_USERNAME
+    if cached['value'] and time.time() - cached['checked_at'] < 3600:
+        return cached['value']
+    base = _telegram_api_base()
+    if not base:
+        return ''
+    try:
+        data = requests.get(f'{base}/getMe', timeout=10).json()
+        name = str(((data or {}).get('result') or {}).get('username') or '').strip()
+    except Exception:
+        name = ''
+    if name:
+        cached.update(value=name, checked_at=time.time())
+    return name or cached['value']
+
+
+def _telegram_link_start(email):
+    """A fresh one-time code for this login; any older unused code for it stops working."""
+    import secrets
+    code = secrets.token_urlsafe(16)
+    now = time.time()
+    conn = sqlite3.connect('searchRack.db')
+    try:
+        _telegram_link_tables(conn)
+        conn.execute('DELETE FROM telegram_link_codes WHERE email = ? AND used_at IS NULL', (email,))
+        conn.execute('DELETE FROM telegram_link_codes WHERE expires_at < ?', (now - 86400,))
+        conn.execute('INSERT INTO telegram_link_codes (code, email, created_at, expires_at) VALUES (?, ?, ?, ?)',
+                     (code, email, now, now + TELEGRAM_LINK_CODE_TTL))
+        conn.commit()
+    finally:
+        conn.close()
+    return code
+
+
+def _telegram_link_code(text):
+    """The code in "/start <code>" (what a t.me/<bot>?start=<code> link sends), else ''."""
+    parts = str(text or '').strip().split()
+    if len(parts) != 2:
+        return ''
+    head = parts[0].casefold()
+    if head.startswith('/start@'):
+        head = '/start'
+    return parts[1] if head == '/start' else ''
+
+
+def _telegram_chat_name(message):
+    frm = (message or {}).get('from') or (message or {}).get('chat') or {}
+    username = str(frm.get('username') or '').strip()
+    full = ' '.join(p for p in (str(frm.get('first_name') or '').strip(), str(frm.get('last_name') or '').strip()) if p)
+    return full or (('@' + username) if username else '')
+
+
+def _telegram_handle_link(message, *, quiet=False):
+    """Pair the chat a "/start <code>" came from. True when the message was a link attempt (so it
+    is not also treated as a command). quiet: the first poll after a restart sees old messages;
+    a stale code there is not worth a reply."""
+    code = _telegram_link_code((message or {}).get('text'))
+    chat = (message or {}).get('chat') or {}
+    chat_id = str(chat.get('id') or '').strip()
+    if not code or not chat_id:
+        return False
+    if str(chat.get('type') or 'private') != 'private':
+        if not quiet:
+            _telegram_send_message(chat_id, 'Link Telegram from a private chat with the bot, not a group.')
+        return True
+    now = time.time()
+    name = _telegram_chat_name(message)
+    conn = sqlite3.connect('searchRack.db')
+    try:
+        _telegram_link_tables(conn)
+        row = conn.execute('SELECT email, expires_at, used_at FROM telegram_link_codes WHERE code = ?', (code,)).fetchone()
+        if not row or row[2] is not None or float(row[1]) < now:
+            if not quiet:
+                _telegram_send_message(chat_id, 'That link has expired or was already used. '
+                                                'Open the Telegram page in Sweet Shelves and press "Link my Telegram" again.')
+            return True
+        email = row[0]
+        conn.execute('UPDATE telegram_link_codes SET used_at = ?, chat_id = ? WHERE code = ?', (now, chat_id, code))
+        conn.execute('''
+            INSERT INTO telegram_user_links (email, chat_id, telegram_name, linked_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET chat_id = excluded.chat_id, telegram_name = excluded.telegram_name,
+                                             linked_at = excluded.linked_at
+        ''', (email, chat_id, name, datetime.datetime.now(datetime.timezone.utc).isoformat()))
+        conn.commit()
+    finally:
+        conn.close()
+    _telegram_send_message(chat_id, f'✅ Linked to {email}.\nPhoto links you ask for in Sweet Shelves will come here.',
+                           disable_notification=False)
+    return True
+
+
+def _telegram_cross_site():
+    """Link and unlink ride on the Cloudflare cookie, so another site must not be able to press them."""
+    return request.headers.get('Sec-Fetch-Site') == 'cross-site'
+
+
+def api_telegram_me():
+    email = _telegram_signed_in_email()
+    linked = telegram_chat_for_email(email) if email else None
+    return jsonify({'success': True, 'email': email, 'bot': _telegram_bot_username(),
+                    'linked': {'name': linked['name'], 'at': linked['linked_at']} if linked else None})
+
+
+def api_telegram_link():
+    if _telegram_cross_site():
+        return jsonify({'success': False, 'error': 'Use the Sweet Shelves Telegram page for this.'}), 403
+    email = _telegram_signed_in_email()
+    if not email:
+        return jsonify({'success': False, 'error': 'Open Sweet Shelves through pi.nexuscentralhq.org and sign in, '
+                                                   'so it knows whose Telegram this is.'}), 401
+    bot = _telegram_bot_username()
+    if not bot:
+        return jsonify({'success': False, 'error': 'The Telegram bot is not connected yet.'}), 503
+    code = _telegram_link_start(email)
+    return jsonify({'success': True, 'email': email, 'url': f'https://t.me/{bot}?start={code}',
+                    'expiresIn': TELEGRAM_LINK_CODE_TTL})
+
+
+def api_telegram_unlink():
+    if _telegram_cross_site():
+        return jsonify({'success': False, 'error': 'Use the Sweet Shelves Telegram page for this.'}), 403
+    email = _telegram_signed_in_email()
+    if not email:
+        return jsonify({'success': False, 'error': 'Not signed in.'}), 401
+    conn = sqlite3.connect('searchRack.db')
+    try:
+        _telegram_link_tables(conn)
+        removed = conn.execute('DELETE FROM telegram_user_links WHERE email = ?', (email,)).rowcount
+        conn.commit()
+    finally:
+        conn.close()
+    return jsonify({'success': True, 'removed': removed})
 
 
 def telegram_page():

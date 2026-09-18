@@ -518,6 +518,17 @@
       .save-bar { align-items: flex-start; }
       .save-message { max-width: 160px; }
     }
+    /* Your Telegram: each signed-in person links their own chat. */
+    .me-card { margin-bottom: 18px; }
+    .me-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .me-who { flex: 1 1 220px; min-width: 0; }
+    .me-who strong { overflow-wrap: anywhere; }
+    .me-pair { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-top: 16px;
+      padding-top: 16px; border-top: 1px solid var(--line); }
+    .me-pair[hidden], .me-card .btn[hidden] { display: none; }
+    .me-pair img { width: 168px; height: 168px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 6px; }
+    .me-steps { flex: 1 1 220px; min-width: 0; }
+    .me-steps ol { margin: 0 0 12px; padding-left: 18px; line-height: 1.6; }
   </style>
 </head>
 <body>
@@ -539,6 +550,43 @@
     </header>
 
     <div id="status" class="status-banner" role="status" aria-live="polite"></div>
+
+    <article class="card me-card" id="myTelegramCard">
+      <div class="card-head">
+        <div class="card-title">
+          <div>
+            <h2><i class="fa-brands fa-telegram" style="color:var(--blue);margin-right:8px;"></i>Your Telegram</h2>
+            <p class="card-description">Link your own chat, and the photo links you ask for in the Lister come only to your phone.</p>
+          </div>
+        </div>
+        <span id="myTelegramPill" class="state-pill off"><i class="fa-solid fa-circle"></i> Checking…</span>
+      </div>
+      <div class="card-body">
+        <div class="me-row">
+          <div class="me-who" id="myTelegramWho">Checking who is signed in…</div>
+          <button class="btn btn-primary" id="myTelegramLinkBtn" type="button" onclick="startMyTelegramLink()" disabled>
+            <i class="fa-solid fa-link"></i><span>Link my Telegram</span>
+          </button>
+          <button class="btn btn-secondary" id="myTelegramUnlinkBtn" type="button" onclick="unlinkMyTelegram()" hidden>
+            <i class="fa-solid fa-link-slash"></i><span>Unlink</span>
+          </button>
+        </div>
+        <div class="me-pair" id="myTelegramPair" hidden>
+          <img id="myTelegramQr" alt="QR code that opens the Sweet Shelves bot in Telegram">
+          <div class="me-steps">
+            <ol>
+              <li>On your phone, scan this code, or tap <b>Open Telegram</b> if you are already on the phone.</li>
+              <li>Press <b>Start</b> in the bot chat.</li>
+              <li>This page updates by itself once the bot says it is linked.</li>
+            </ol>
+            <a class="btn btn-primary" id="myTelegramOpen" target="_blank" rel="noopener">
+              <i class="fa-brands fa-telegram"></i><span>Open Telegram</span>
+            </a>
+            <div class="field-help" id="myTelegramExpiry"></div>
+          </div>
+        </div>
+      </div>
+    </article>
 
     <section class="overview" aria-label="Telegram overview">
       <div class="overview-card">
@@ -1232,9 +1280,110 @@
       return escapeHtml(value).replaceAll('`', '&#96;');
     }
 
+    // -- Your Telegram: self-serve pairing -------------------------------------------------------
+    let myTelegramTimer = null;
+
+    function renderMyTelegram(me) {
+      const pill = document.getElementById('myTelegramPill');
+      const who = document.getElementById('myTelegramWho');
+      const linkBtn = document.getElementById('myTelegramLinkBtn');
+      const unlinkBtn = document.getElementById('myTelegramUnlinkBtn');
+      if (!me.email) {
+        pill.className = 'state-pill off';
+        pill.innerHTML = '<i class="fa-solid fa-circle"></i> Not signed in';
+        who.innerHTML = 'Open Sweet Shelves through <b>pi.nexuscentralhq.org</b> and sign in, so it knows whose Telegram to link.';
+        linkBtn.disabled = true;
+        unlinkBtn.hidden = true;
+        return;
+      }
+      linkBtn.disabled = false;
+      if (me.linked) {
+        pill.className = 'state-pill on';
+        pill.innerHTML = '<i class="fa-solid fa-circle"></i> Linked';
+        who.innerHTML = `<strong>${escapeHtml(me.email)}</strong> goes to <b>${escapeHtml(me.linked.name)}</b> on Telegram.`;
+        linkBtn.querySelector('span').textContent = 'Link a different chat';
+        unlinkBtn.hidden = false;
+      } else {
+        pill.className = 'state-pill off';
+        pill.innerHTML = '<i class="fa-solid fa-circle"></i> Not linked';
+        who.innerHTML = `Signed in as <strong>${escapeHtml(me.email)}</strong>. Until you link a chat, photo links go to every chat on this page.`;
+        linkBtn.querySelector('span').textContent = 'Link my Telegram';
+        unlinkBtn.hidden = true;
+      }
+    }
+
+    async function loadMyTelegram() {
+      try {
+        const response = await fetch('/api/telegram/me', {cache: 'no-store'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || `HTTP ${response.status}`);
+        renderMyTelegram(data);
+        return data;
+      } catch (error) {
+        document.getElementById('myTelegramWho').textContent = 'Could not check your Telegram link: ' + (error.message || error);
+        return null;
+      }
+    }
+
+    function stopMyTelegramWait() {
+      if (myTelegramTimer) clearInterval(myTelegramTimer);
+      myTelegramTimer = null;
+    }
+
+    async function startMyTelegramLink() {
+      clearStatus();
+      stopMyTelegramWait();
+      try {
+        const response = await fetch('/api/telegram/link', {method: 'POST'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || `HTTP ${response.status}`);
+        const before = await loadMyTelegram();
+        const linkedBefore = before && before.linked ? before.linked.at : null;
+        document.getElementById('myTelegramQr').src = '/api/lister/qr?text=' + encodeURIComponent(data.url);
+        document.getElementById('myTelegramOpen').href = data.url;
+        document.getElementById('myTelegramPair').hidden = false;
+        const until = Date.now() + (Number(data.expiresIn) || 600) * 1000;
+        const expiry = document.getElementById('myTelegramExpiry');
+        const tick = async () => {
+          const left = Math.max(0, Math.round((until - Date.now()) / 1000));
+          expiry.textContent = left ? `This link works once and expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}.`
+            : 'This link expired. Press the button again for a new one.';
+          if (!left) { stopMyTelegramWait(); return; }
+          // Every third second, ask whether the bot has filed the pair yet.
+          if (left % 3) return;
+          const me = await loadMyTelegram();
+          if (me && me.linked && me.linked.at !== linkedBefore) {
+            stopMyTelegramWait();
+            document.getElementById('myTelegramPair').hidden = true;
+            showStatus(`Telegram linked: photo links now go to ${me.linked.name}.`);
+          }
+        };
+        tick();
+        myTelegramTimer = setInterval(tick, 1000);
+      } catch (error) {
+        showStatus(error.message || 'Could not start linking.', 'err');
+      }
+    }
+
+    async function unlinkMyTelegram() {
+      if (!confirm('Unlink your Telegram? Photo links will go to every chat on this page again.')) return;
+      stopMyTelegramWait();
+      try {
+        const response = await fetch('/api/telegram/unlink', {method: 'POST'});
+        const data = await response.json();
+        if (!response.ok || !data.success) throw new Error(data.error || `HTTP ${response.status}`);
+        document.getElementById('myTelegramPair').hidden = true;
+        await loadMyTelegram();
+        showStatus('Telegram unlinked.');
+      } catch (error) {
+        showStatus(error.message || 'Could not unlink.', 'err');
+      }
+    }
+
     document.getElementById('botToken').addEventListener('input', updateDirtyState);
     updateTypeExplainer();
     loadSettings();
+    loadMyTelegram();
   </script>
 </body>
 </html>
