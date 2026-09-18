@@ -87,6 +87,11 @@ class ReleaseListerTests(unittest.TestCase):
         self.assertIn('"version": "0.2.58"', run(self.work, 'git', 'show', ':lister-extension/manifest.json'), 'their staged copy is left alone')
         self.assertIn('"version": "0.2.61"', on_disk)
 
+    def test_an_unstaged_edit_is_named_in_full_in_the_warning(self):
+        # " M path": the status column starts with a space, which once cost the path its first letter.
+        (self.work / 'lister-extension' / 'sidepanel.js').write_text('// half done', encoding='utf-8')
+        self.assertEqual(self.release('check', '--feed', self.feed(version='0.2.58'))['uncommitted'], ['lister-extension/sidepanel.js'])
+
     def test_the_manifest_wins_when_it_is_ahead_of_the_feed(self):
         self.assertEqual(self.release('check', '--feed', self.feed(version='0.2.50'))['version'], '0.2.59')
         self.assertEqual(self.release('check', '--feed', self.feed())['version'], '0.2.59', 'no feed yet')

@@ -97,7 +97,9 @@ def check(feed_path):
         if git('cat-file', '-e', feed_commit + '^{commit}', check=False).returncode != 0 or not is_ancestor(feed_commit, head):
             raise ReleaseError(f"The live feed ({feed.get('version')}) was built from {feed_commit[:9]}, which HEAD does not contain. "
                                'Publishing now would take changes back out of the extension; nothing published.')
-    dirty = [line[3:] for line in out('status', '--porcelain', '--', 'lister-extension').splitlines() if line.strip()]
+    # Not out(): its strip() would eat the status column's leading space and the path's first letter.
+    porcelain = git('status', '--porcelain', '--', 'lister-extension').stdout.decode('utf-8', 'replace')
+    dirty = [line[3:] for line in porcelain.splitlines() if line.strip()]
     return {'head': head, 'feedVersion': feed.get('version') or '', 'feedCommit': feed_commit,
             'manifestVersion': manifest_version('HEAD'),
             'version': next_version(feed.get('version'), manifest_version('HEAD')), 'uncommitted': dirty}
