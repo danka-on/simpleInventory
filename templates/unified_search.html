@@ -71,6 +71,9 @@
     /* Workspace */
     .workspace { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 14px; align-items: start; }
     @media (max-width: 1000px) { .workspace { grid-template-columns: minmax(0, 1fr); } }
+    /* A barcode opens one item, so the matches list would only repeat it. */
+    .workspace.solo { grid-template-columns: minmax(0, 1fr); }
+    .workspace.solo #matchesPanel { display: none; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
     .panel-toggle { display: none; }
     .panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); font-weight: 700; font-size: 13px; }
@@ -140,7 +143,11 @@
     .tile .d { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tile.zero { border-top-color: var(--line); }
     .tile.zero .n { color: var(--muted); opacity: .5; }
-    a.tile { display: block; text-decoration: none; color: inherit; }
+    .tile[aria-expanded="true"] { border-color: var(--s, var(--line-2)); background: var(--panel); box-shadow: 0 0 0 1px var(--s, var(--line-2)) inset; }
+    .tile .l .caret { display: inline-block; margin-left: 3px; transition: transform .15s; }
+    .tile[aria-expanded="true"] .l .caret { transform: rotate(180deg); }
+    .tile-panel { margin-top: 10px; padding: 10px 12px 12px; border: 1px solid var(--line); border-top: 3px solid var(--s, var(--line)); border-radius: 10px; background: var(--panel); }
+    .tile-panel .section-title .open { font-size: 13px; font-weight: 700; }
     .tile:hover { border-color: var(--line-2); border-top-color: var(--s, var(--line-2)); }
     .clue { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; margin-bottom: 6px; font-size: 13px; border: 1px solid transparent; }
     .clue .dot { width: 9px; height: 9px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
@@ -288,7 +295,7 @@
     </div>
   </section>
 
-  <div class="workspace">
+  <div class="workspace solo" id="workspace">
     <aside class="panel" id="matchesPanel" aria-label="Matches">
       <div class="panel-head"><span>Matches</span><span class="sub" id="matchesSub">across every database</span><span class="count" id="matchesCount">0</span><button type="button" class="panel-toggle" id="matchesToggle" aria-controls="matchesList" aria-expanded="true">Hide</button></div>
       <div class="result-list" id="matchesList"><div class="empty">Search to find items</div></div>
@@ -360,6 +367,8 @@ function syncStickyOffsets() {
 function syncPlaceholder() {
   searchInput.placeholder = isPhone() ? 'Scan or type a name, SKU or order' : 'Scan a barcode, or type part of a name, SKU, ASIN or order number';
 }
+// The matches list only shows when a word search leaves more than one item to choose from.
+function setMatchesShown(shown) { document.getElementById('workspace').classList.toggle('solo', !shown); }
 function setMatchesCollapsed(collapsed) {
   matchesPanel.classList.toggle('collapsed', collapsed);
   matchesToggle.textContent = collapsed ? 'Show' : 'Hide';
@@ -499,6 +508,8 @@ async function doSearch(overrideQuery) {
     renderMatches(candidates, q, data);
     const exact = candidates.find(c => c.upc && sameUpc(c.upc, q));
     const withUpc = candidates.filter(c => c.upc);
+    const direct = exact || isBarcodeQuery(q) || withUpc.length === 1;
+    setMatchesShown(!direct);
     if (exact) openItem(exact.upc, {search: data});
     else if (isBarcodeQuery(q)) openItem(q, {search: data});
     else if (withUpc.length === 1) openItem(withUpc[0].upc);
@@ -507,6 +518,7 @@ async function doSearch(overrideQuery) {
     if (e.name === 'AbortError' || sequence !== searchSequence) return;
     matchesList.innerHTML = '<div class="empty">' + esc(e.message || 'Search failed') + '</div>';
     matchesCount.textContent = '0';
+    setMatchesShown(true);
   } finally {
     if (sequence === searchSequence) {
       searchBtn.disabled = false;
@@ -593,7 +605,7 @@ function highlightSelected() {
 }
 
 // ===== Item dashboard =====
-const dash = {upc: '', family: false, search: null, trail: null, trailError: '', sequence: 0, controller: null};
+const dash = {upc: '', openTile: '', family: false, search: null, trail: null, trailError: '', sequence: 0, controller: null};
 
 function closeItem() {
   dash.upc = ''; dash.search = null; dash.trail = null;
@@ -609,6 +621,7 @@ async function openItem(upc, options = {}) {
   if (dash.controller) dash.controller.abort();
   dash.controller = new AbortController();
   const changed = !sameUpc(dash.upc, upc);
+  if (changed) dash.openTile = '';
   dash.upc = upc;
   dash.family = familyToggle.checked;
   dash.trailError = '';
@@ -680,12 +693,18 @@ function table(columns, rows, footer) {
   }).join('') + '</tr>').join('');
   return `<div class="tbl-wrap"><table class="tbl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${footer || ''}`;
 }
+// Where each tile's "open" link goes, in words.
+const PANEL_LINK_LABELS = {
+  shelves: 'Open in Warehouse', processed: 'Open in Items to List', bol: 'Open Macy BOL', sold: 'Open sold orders',
+  returns: 'Open returns', amazon: 'Open Amazon store', ebay: 'Open eBay store', fba: 'Open FBA prep',
+};
+// A tile's expanded view: everything that source knows about the item, plus a link to the source page.
 function sectionHtml(key, title, count, body, openHref, total) {
   const color = SOURCES[key] ? SOURCES[key].color : `var(--s-${key})`;
-  return `<section class="section source-section" id="sec-${key}" style="--s:${color}">
-    <div class="section-title"><span>${esc(title)}</span><span class="count">${esc(String(count))}</span>${total ? `<span class="tot">${total}</span>` : ''}${openHref ? `<a class="open" href="${attrEsc(openHref)}" data-source-link="${attrEsc(key)}" target="_blank" rel="noopener">Open ↗</a>` : ''}</div>
+  return `<div class="tile-panel source-section" id="panel-${key}" data-panel="${attrEsc(key)}" style="--s:${color}" ${dash.openTile === key ? '' : 'hidden'}>
+    <div class="section-title"><span>${esc(title)}</span><span class="count">${esc(String(count))}</span>${total ? `<span class="tot">${total}</span>` : ''}${openHref ? `<a class="open" href="${attrEsc(openHref)}" data-source-link="${attrEsc(key)}" target="_blank" rel="noopener">${esc(PANEL_LINK_LABELS[key] || 'Open')} ↗</a>` : ''}</div>
     ${body}
-  </section>`;
+  </div>`;
 }
 function moreNote(key, shown) {
   const db = dash.search?.databases?.[key];
@@ -730,11 +749,10 @@ function renderDashboard() {
   const receivedQty = Math.max(ledger.received || 0, bol.reduce((s, r) => s + (num(pick(r, 'quantity')) || 0), 0));
   const soldUnits = ledger.sold_units ?? sold.reduce((s, r) => s + (num(pick(r, 'quantity')) || 1), 0);
   const soldOrders = ledger.sold_orders ?? sold.length;
-  const tile = (key, n, label, detail) => `<button type="button" class="tile ${n ? '' : 'zero'}" data-scroll="sec-${key}" style="--s:var(--s-${key})"><span class="n">${esc(String(n))}</span><span class="l">${esc(label)}</span>${detail ? `<span class="d">${esc(detail)}</span>` : ''}</button>`;
-  // Prep opens Items to List instead of scrolling, since that is where prepped items get worked.
+  const tile = (key, n, label, detail) => `<button type="button" class="tile ${n ? '' : 'zero'}" data-expand="${key}" aria-controls="panel-${key}" aria-expanded="${dash.openTile === key ? 'true' : 'false'}" style="--s:var(--s-${key})"><span class="n">${esc(String(n))}</span><span class="l">${esc(label)}<span class="caret">▾</span></span>${detail ? `<span class="d">${esc(detail)}</span>` : ''}</button>`;
   const prepQty = processed.reduce((s, r) => s + (num(pick(r, 'quantity')) || 0), 0);
   const prepGood = processed.reduce((s, r) => s + (num(pick(r, 'good_qty')) || 0), 0);
-  const prepTile = `<a class="tile ${prepQty ? '' : 'zero'}" href="${attrEsc(openSourceUrl('processed', upc))}" target="_blank" rel="noopener" data-source-link="processed" style="--s:var(--s-processed)" title="Open in Items to List"><span class="n">${esc(String(prepQty))}</span><span class="l">Prep ↗</span>${processed.length ? `<span class="d">${esc(`${prepGood} good`)}</span>` : ''}</a>`;
+  const prepTile = tile('processed', prepQty, 'Prep', processed.length ? `${prepGood} good` : '');
   const listingDetail = (rows, qty) => {
     if (!rows.length) return '';
     const price = rows.map(r => money(pick(r, 'price'))).find(Boolean);
@@ -813,7 +831,7 @@ function renderDashboard() {
     {label: 'Restocked', cell: e => statusPill(e.status), nw: true},
     {label: 'Reason', cell: e => esc(text(pick(e.record, 'return_reason', 'condition_received')))},
     {label: 'Notes', cell: e => e.note ? `<span class="note">${esc(e.note)}</span>` : ''},
-  ], returns) : '<div class="hint">No returns.</div>', returns.length ? '/searchrack?' + new URLSearchParams({db: 'returns', q: upc}) : ''));
+  ], returns) : '<div class="hint">No returns.</div>', '/searchrack?' + new URLSearchParams({db: 'returns', q: upc})));
 
   sections.push(sectionHtml('amazon', 'Amazon listing', sourceCount('amazon'), amazon.length ? table([
     {label: 'ASIN', cell: r => { const asin = text(pick(r, 'asin')); return asin ? `<a href="https://www.amazon.com/dp/${encodeURIComponent(asin)}" target="_blank" rel="noopener noreferrer">${esc(asin)} ↗</a>` : ''; }, nw: true},
@@ -839,12 +857,12 @@ function renderDashboard() {
     {label: 'Title', cell: r => esc(rowTitle('ebay', r)), wide: true},
   ], ebay, moreNote('ebay', ebay.length)) : '<div class="hint">Not listed on eBay.</div>', openSourceUrl('ebay', upc)));
 
-  if (fba.length) sections.push(sectionHtml('fba', 'Amazon FBA', fba.length, table([
+  sections.push(sectionHtml('fba', 'Amazon FBA', fba.length, fba.length ? table([
     {label: 'Date', cell: e => esc(fmtDate(e.ts)), nw: true},
     {label: 'Units', cell: e => esc(String(e.qty ?? '')), num: true},
     {label: 'Session', cell: e => esc(e.title.replace(/^Sent .*? to FBA · /, ''))},
     {label: 'Details', cell: e => esc(e.detail), dim: true},
-  ], fba), '/fba-prep'));
+  ], fba) : '<div class="hint">Never sent to FBA.</div>', '/fba-prep'));
 
   // Recent activity (compact trail)
   const recent = events.slice(0, 12);
@@ -879,9 +897,8 @@ function renderDashboard() {
       </div>
     </div>
     <section class="section"><div class="section-title">Right now</div>${stockHtml}</section>
-    <section class="section"><div class="tiles">${tiles}</div></section>
     ${(clues || notes.length) ? `<section class="section"><div class="section-title">Clues</div>${clues}${notes.length ? `<div class="hint">${esc(notes.join(' · '))}</div>` : ''}</section>` : ''}
-    ${sections.join('')}
+    <section class="section" id="sec-tiles"><div class="tiles">${tiles}</div>${sections.join('')}</section>
     <section class="section source-section" id="sec-activity" style="--s:var(--s-activity)">
       <div class="section-title"><span>Recent activity</span><span class="count">${esc(String(events.length))}</span><a class="open" href="${attrEsc(finderHref)}" target="_blank" rel="noopener">Full trail ↗</a></div>
       ${activity}
@@ -898,8 +915,16 @@ document.addEventListener('click', (e) => {
   if (loc) { e.preventDefault(); e.stopPropagation(); showLocPopup(loc.dataset.loc, loc.dataset.pic); return; }
   const thumb = e.target.closest('.clickable-thumb');
   if (thumb) { e.stopPropagation(); showImgPopup(thumb.src, thumb.dataset.title || ''); return; }
-  const scroll = e.target.closest('[data-scroll]');
-  if (scroll) { const el = document.getElementById(scroll.dataset.scroll); if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'}); return; }
+  const expand = e.target.closest('[data-expand]');
+  if (expand) {
+    const key = expand.dataset.expand;
+    dash.openTile = dash.openTile === key ? '' : key;
+    document.querySelectorAll('[data-expand]').forEach(t => t.setAttribute('aria-expanded', t.dataset.expand === dash.openTile ? 'true' : 'false'));
+    document.querySelectorAll('[data-panel]').forEach(p => { p.hidden = p.dataset.panel !== dash.openTile; });
+    const panel = dash.openTile && document.getElementById('panel-' + dash.openTile);
+    if (panel && panel.getBoundingClientRect().bottom > window.innerHeight) panel.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    return;
+  }
   const copy = e.target.closest('[data-copy]');
   if (copy) { navigator.clipboard?.writeText(copy.dataset.copy).then(() => { copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy UPC'; }, 1500); }).catch(() => {}); return; }
   if (e.target.closest('[data-family-toggle]')) { familyToggle.checked = !dash.family; openItem(dash.upc, {forced: true}); return; }
