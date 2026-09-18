@@ -241,7 +241,7 @@ def sold_orders():
                     SET image = ?
                     WHERE id = ?
                       AND LOWER(TRIM(COALESCE(image, ''))) IN (
-                          '', 'nan', 'none', 'null', 'undefined', 'n/a', 'na'
+                          '', 'nan', 'none', 'null', 'undefined', 'n/a', 'na', 'no image'
                       )
                 ''', (repaired_image, order_dict.get('id')))
                 image_backfills += sold_cur.rowcount

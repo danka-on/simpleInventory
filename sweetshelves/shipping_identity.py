@@ -893,7 +893,7 @@ def _load_order_finder_match_lookup(cur, order_row_ids):
 def _ready_to_ship_image_value(value):
     """Return a usable image reference, or an empty string for missing values."""
     image = str(value or '').strip()
-    if not image or image.lower() in {'nan', 'none', 'null', 'undefined', 'n/a', 'na'}:
+    if not image or image.lower() in {'nan', 'none', 'null', 'undefined', 'n/a', 'na', 'no image'}:
         return ''
     return image
 

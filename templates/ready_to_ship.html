@@ -2110,7 +2110,7 @@ const READY_TO_SHIP_MISSING_THUMB = 'data:image/svg+xml;utf8,' + encodeURICompon
 
 function readyToShipUsableImage(value) {
     const image = String(value || '').trim();
-    return image && !/^(?:nan|none|null|undefined|n\/?a)$/i.test(image);
+    return image && !/^(?:nan|none|null|undefined|n\/?a|no\s*image)$/i.test(image);
 }
 
 function handleReadyToShipImageError(img) {
