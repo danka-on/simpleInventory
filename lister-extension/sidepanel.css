@@ -454,6 +454,14 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
   letter-spacing: .05em; text-transform: uppercase; }
 .newitem .card > .fieldlabel:first-child { margin-top: 0; }
 .newitem input.wide, .newitem textarea { width: 100%; }
+.newitem .newtop { align-items: center; margin-bottom: 3px; }
+.newitem .newtop .fieldlabel { margin: 0; }
+/* The label printer is the one thing you reach for at the bench, so it is a real button. */
+.printbtn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 8px;
+  padding: 10px 12px; border-radius: 9px; font-size: 14px; font-weight: 700;
+  background: var(--green-soft); color: var(--green); border: 1.5px solid var(--green); }
+.printbtn:hover { background: var(--green); color: var(--green-ink); filter: none; }
+.printbtn svg { flex: 0 0 auto; }
 .small.bad { color: var(--red); }
 
 /* One tile per photo the phone sent. A tile that carries a circle says so, and the note under it

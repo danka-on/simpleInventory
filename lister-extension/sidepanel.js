@@ -2356,19 +2356,44 @@
     setView('list');
   }
 
-  // The same three choices the "No barcode" modal on /barcode gives you: type the code that is on
-  // the item, take the next one of ours, print either.
+  // Start over: the old draft (last item's barcode, name, photos) is thrown away and a blank one
+  // opens, with a fresh link to the phone.
+  async function newRestart() {
+    const draft = newDraft();
+    const hasInfo = draft && (draft.upc || draft.title || draft.description || (draft.photos || []).length);
+    if (hasInfo) {
+      const ok = await confirmModal({ title: 'Start over with a blank item?', text: 'What is on this card now, and the photos the phone sent, is thrown away. A used barcode stays reserved.', okLabel: 'Start over' });
+      if (!ok) return;
+    }
+    if (draft) await newPost('/cancel', {}, 'Clearing the old item…');
+    clearTimeout(state.newItem.timer);
+    state.newItem.draft = null;
+    state.newItem.id = null;
+    state.newItem.barcodeDraft = '';
+    remember();
+    await newStart();
+  }
+
+  // The same choices the "No barcode" modal on /barcode gives you: type the code that is on the
+  // item or take the next one of ours. Either way the code goes on the item and its label prints
+  // straight away on the Item Prep printer - a code given here always needs a sticker.
   function newNoBarcodeModal() {
     const box = $('modal');
     box.hidden = false;
     box.innerHTML = '<div class="box" role="dialog" aria-modal="true"><strong>No barcode</strong>' +
-      '<p class="muted small">Type the code that is on the item, or take the next one of ours.</p>' +
+      '<p class="muted small">Type the code that is on the item, or take the next one of ours. The label prints on its own.</p>' +
       '<input id="nbCode" class="wide" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Barcode">' +
-      '<div class="row"><button id="nbGen" type="button">Generate one</button><button id="nbPrint" type="button">Print</button>' +
+      '<div class="row"><button id="nbGen" type="button">Generate one</button>' +
       '<button id="nbUse" class="primary" type="button">Use it</button><button id="nbCancel" type="button">Cancel</button></div>' +
       '<p class="small muted" id="nbStatus"></p></div>';
     const close = () => { box.hidden = true; box.innerHTML = ''; box.onclick = null; };
     const say = (message, bad) => { $('nbStatus').textContent = message; $('nbStatus').className = 'small ' + (bad ? 'bad' : 'muted'); };
+    const useAndPrint = async (code, kind) => {
+      if (!(await newSetBarcode(code, kind))) return false;
+      close();
+      await newPrintLabel(code, (newDraft() || {}).title);
+      return true;
+    };
     $('nbCode').focus();
     $('nbGen').onclick = async () => {
       $('nbGen').disabled = true;
@@ -2376,20 +2401,15 @@
       try {
         const data = await api('/api/items-prep/generate-barcode', { method: 'POST', body: {} });
         $('nbCode').value = data.barcode || '';
-        say('Reserved ' + data.barcode + '. Print it, then use it.');
+        if (await useAndPrint(data.barcode, 'generated')) return;
       } catch (error) { say(error.message, true); }
       $('nbGen').disabled = false;
-    };
-    $('nbPrint').onclick = async () => {
-      const code = $('nbCode').value.trim();
-      if (!code) { say('Type or generate a code first.', true); return; }
-      if (await newPrintLabel(code, (newDraft() || {}).title)) say('Label sent to the printer.');
     };
     $('nbUse').onclick = async () => {
       const code = $('nbCode').value.trim();
       if (!code) { say('Type or generate a code first.', true); return; }
       // Typed by hand it is still the item's own code; a 777 one is ours.
-      if (await newSetBarcode(code, /^777\d{9}$/.test(code) ? 'generated' : 'scanned')) close();
+      await useAndPrint(code, /^777\d{9}$/.test(code) ? 'generated' : 'scanned');
     };
     $('nbCancel').onclick = close;
     box.onclick = event => { if (event.target === box) close(); };
@@ -2521,6 +2541,8 @@
 
   const STAGE_WORDS = { title: 'naming it', details: 'saying what it is like', photos: 'taking photos', done: 'finished' };
   const TITLE_SOURCE = { system: 'from our own records', voice: 'dictated on the phone', typed: 'typed here' };
+  const PRINTER_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><rect x="7" y="14" width="10" height="7"/><circle cx="17.5" cy="12" r=".6" fill="currentColor"/></svg>';
 
   function renderNew() {
     $('newCard').hidden = state.view !== 'new';
@@ -2543,14 +2565,15 @@
     const code = draft.upc
       ? '<div class="row tight"><b class="mono grow">' + esc(draft.upc) + '</b>' +
         '<span class="muted small">' + (draft.upcKind === 'generated' ? 'ours' : 'the item’s own') + '</span>' +
-        '<button id="newPrint" class="tiny" type="button">Print label</button>' +
-        '<button id="newRecode" class="tiny" type="button">Change</button></div>'
+        '<button id="newRecode" class="tiny" type="button">Change</button></div>' +
+        '<button id="newPrint" class="printbtn" type="button" title="Print this barcode on the Item Prep printer">' + PRINTER_SVG + '<span>Print label</span></button>'
       : '<div class="row tight"><div class="search grow"><span aria-hidden="true">⌷</span>' +
         '<input id="newBarcode" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Scan the barcode"></div>' +
         '<button id="newNoCode" type="button">No barcode</button></div>';
     const source = TITLE_SOURCE[draft.titleSource];
     const html = '<div class="card">' +
-      '<label class="fieldlabel">Barcode</label>' + code +
+      '<div class="row tight newtop"><label class="fieldlabel grow">Barcode</label>' +
+      '<button id="newRestart" class="tiny" type="button" title="Throw this item away and start a blank one">↻ Start over</button></div>' + code +
       '<label class="fieldlabel" for="newTitle">Name' + (source ? ' <span class="muted small">· ' + esc(source) + '</span>' : '') + '</label>' +
       '<input id="newTitle" class="wide" type="text" placeholder="The phone fills this in" value="' + esc(draft.title) + '">' +
       '<label class="fieldlabel" for="newDesc">Details</label>' +
@@ -2573,6 +2596,7 @@
     if ($('newNoCode')) $('newNoCode').onclick = () => newNoBarcodeModal();
     if ($('newPrint')) $('newPrint').onclick = () => void newPrintLabel(draft.upc, draft.title);
     if ($('newRecode')) $('newRecode').onclick = () => newNoBarcodeModal();
+    $('newRestart').onclick = () => void newRestart();
     for (const [id, key, label] of [['newTitle', 'title', 'Saving the name…'], ['newDesc', 'description', 'Saving the details…']]) {
       const box = $(id);
       box.onchange = () => { void newPost('/fields', { [key]: box.value, source: 'typed' }, label); };

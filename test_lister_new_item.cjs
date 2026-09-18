@@ -31,7 +31,7 @@ const draft = {
     channel: 'msedge', headless: false,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { create: 0, barcode: [], fields: [], mark: [], submit: [], link: 0, generate: 0, print: [] };
+  const calls = { create: 0, barcode: [], fields: [], mark: [], submit: [], link: 0, generate: 0, print: [], cancel: 0 };
   let current = { ...draft };
   try {
     await context.route('https://pi.nexuscentralhq.org/**', async route => {
@@ -80,6 +80,7 @@ const draft = {
         return json({ success: true, upc: current.upc, title: current.title, draft: current,
                       queued: { id: 88, status: 'queued' }, photos: 2, notes: 1 }, 201);
       }
+      if (url.pathname === `/api/lister/new/${draft.id}/cancel`) { calls.cancel += 1; current = { ...current, status: 'cancelled' }; return state(); }
       if (url.pathname === '/api/items-prep/generate-barcode') { calls.generate += 1; return json({ success: true, barcode: '777000000042' }); }
       if (url.pathname === '/api/printer/print-barcode') { calls.print.push(request.postDataJSON()); return json({ success: true }); }
       // The editor reads the bytes through the API, never off the image URL, so the canvas is not tainted.
@@ -108,15 +109,40 @@ const draft = {
     assert.equal(await panel.textContent('#goBtn'), 'Needs a barcode and a name');
     assert.ok(await panel.$eval('#goBtn', el => el.disabled), 'nothing to submit yet');
 
-    // 2. The "No barcode" modal takes the next code of ours and can print it.
+    // 2. The "No barcode" modal takes the next code of ours, puts it on the item and prints it
+    //    without being asked.
     await panel.click('#newNoCode');
     await panel.waitForSelector('#nbCode');
     await panel.click('#nbGen');
-    await panel.waitForFunction(() => document.getElementById('nbCode').value === '777000000042');
-    await panel.click('#nbPrint');
-    await panel.waitForFunction(() => document.getElementById('nbStatus').textContent.includes('printer'));
+    await panel.waitForFunction(() => document.getElementById('modal').hidden, null, { timeout: 10000 });
+    for (let i = 0; i < 50 && !calls.print.length; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.barcode.at(-1).barcode, '777000000042');
+    assert.equal(calls.barcode.at(-1).kind, 'generated');
+    assert.equal(calls.print.length, 1, 'a generated code prints on its own');
     assert.equal(calls.print.at(-1).upc, '777000000042', 'the label carries the generated code');
-    await panel.click('#nbCancel');
+    // The card now has the big printer button for a reprint.
+    await panel.waitForSelector('#newPrint.printbtn svg');
+    await panel.click('#newPrint');
+    for (let i = 0; i < 50 && calls.print.length < 2; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.print.length, 2, 'the printer button reprints');
+
+    // 2b. A code typed by hand in the same modal prints on its own too.
+    await panel.click('#newRecode');
+    await panel.waitForSelector('#nbCode');
+    await panel.fill('#nbCode', '4006381333931');
+    await panel.click('#nbUse');
+    for (let i = 0; i < 50 && calls.print.length < 3; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.barcode.at(-1).kind, 'scanned', 'a typed code is the item’s own');
+    assert.equal(calls.print.at(-1).upc, '4006381333931', 'a typed code prints on its own');
+
+    // 2c. Start over: the old item goes, a blank one opens with a fresh phone link.
+    await panel.click('#newRestart');
+    await panel.waitForSelector('#modalOk');
+    await panel.click('#modalOk');
+    await panel.waitForSelector('#newBarcode', { timeout: 10000 });
+    assert.equal(calls.cancel, 1, 'the old draft is thrown away');
+    assert.equal(calls.create, 2, 'and a fresh one opens');
+    assert.equal(await panel.$eval('#newTitle', el => el.value), '', 'nothing of the old item is left');
 
     // 3. A scanner types the code and presses Enter. The server already knows the name, so the
     //    title arrives filled in and the phone gets a photos-only link.
