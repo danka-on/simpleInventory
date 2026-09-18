@@ -491,6 +491,8 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
   background: var(--green-soft); color: var(--green); border: 1.5px solid var(--green); }
 .printbtn:hover { background: var(--green); color: var(--green-ink); filter: none; }
 .printbtn svg { flex: 0 0 auto; }
+.printbtn.mini { width: auto; margin-top: 0; padding: 4px 8px; gap: 4px; font-size: 12px; }
+.printbtn.mini svg { width: 14px; height: 14px; }
 /* After the label went out (Generate prints on its own) the button says so; a press prints it again. */
 .printbtn.printed { background: var(--green); color: var(--green-ink); letter-spacing: .04em; }
 .printbtn.printed:hover { filter: brightness(1.08); }

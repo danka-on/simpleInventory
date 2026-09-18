@@ -2724,9 +2724,9 @@
         printButton(state.newItem.printed[draft.upc])
       : '<div class="row tight"><div class="search grow"><span aria-hidden="true">\u2337</span>' +
         '<input id="newBarcode" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Scan or type the barcode"></div>' +
-        '<button id="newGen" type="button" title="Take the next code of ours; its label prints on its own">Generate</button></div>' +
-        '<button id="newPrintTyped" class="printbtn" type="button" title="Put the code typed above on the item and print its label" disabled>' +
-        PRINTER_SVG + '<span>Print label</span></button>' +
+        '<button id="newGen" type="button" title="Take the next code of ours; its label prints on its own">Generate</button>' +
+        '<button id="newPrintTyped" class="printbtn mini" type="button" title="Put the code typed above on the item and print its label" disabled>' +
+        PRINTER_SVG + '<span>Print</span></button></div>' +
         (draft.upc ? '<button id="newRecodeCancel" class="tiny" type="button">Keep ' + esc(draft.upc) + '</button>' : '');
     const html = stepHtml({
       n: 1, tone: draft.upc ? 'done' : 'need', label: 'Barcode',
