@@ -364,6 +364,17 @@ class NameDictationTests(unittest.TestCase):
             self.post.return_value = VoiceNoteTests.response({'text': heard})
             self.assertEqual(self.dictate().status_code, 422, heard)
 
+    def test_our_own_spelling_hint_read_back_is_not_a_name(self):
+        for heard in ('Calphalon nonstick 12-inch frying pan, black.', 'Calphalon nonstick 12-inch frying pan',
+                      'Brand, item type, material, size, count and color.',
+                      'A warehouse worker reads a retail product label aloud.'):
+            self.post.return_value = VoiceNoteTests.response({'text': heard})
+            self.assertEqual(self.dictate().status_code, 422, heard)
+        # A real product that shares a word or two with the example still comes through.
+        for heard in ('Calphalon nonstick 10-inch frying pan, red', 'Black frying pan', 'Frying pan, black'):
+            self.post.return_value = VoiceNoteTests.response({'text': heard})
+            self.assertEqual(self.dictate().status_code, 200, heard)
+
     def test_bad_requests_fail_before_network(self):
         self.assertEqual(self.dictate(filename='name.txt').status_code, 415)
         self.assertEqual(self.dictate(audio=b'').status_code, 413)

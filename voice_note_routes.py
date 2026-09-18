@@ -3,6 +3,7 @@ plus item-name dictation for the receiving screens."""
 from contextlib import contextmanager
 import hashlib
 import os
+import re
 from pathlib import Path
 import sqlite3
 import time
@@ -58,6 +59,20 @@ NAME_AUDIO_HINT = (
 # What transcription models return for silence or background noise instead of speech.
 NOT_SPEECH = {'you', 'thank you', 'thanks', 'thank you for watching', 'thanks for watching', 'bye', 'ok', 'okay',
               'ačiū', 'aciu'}
+
+
+def _words(text):
+    return ' '.join(re.findall(r'[a-z0-9]+', str(text or '').lower()))
+
+
+# With nothing spoken, the model tends to read our own spelling hint back (a 2026-09-18 phone
+# draft was titled with the example pan). Four or more of its words in a row are not a name.
+HINT_WORDS = _words(NAME_AUDIO_HINT)
+
+
+def _echoes_hint(text):
+    heard = _words(text)
+    return len(heard.split()) >= 4 and f' {heard} ' in f' {HINT_WORDS} '
 
 
 class VoiceError(Exception):
@@ -328,7 +343,7 @@ def transcribe_dictation(filename, audio, kind='name'):
     if kind == 'name':
         text = text.strip(' "\'“”').rstrip('.!?,;:…').strip()
     bare = text.lower().strip(' "\'.!?,')
-    if not bare or bare in NOT_SPEECH or 'warehouse worker reads' in bare:
+    if not bare or bare in NOT_SPEECH or (kind == 'name' and _echoes_hint(text)):
         raise VoiceError(f"Didn't catch {'a name' if kind == 'name' else 'the note'}. "
                          'Hold the device closer and say it again.', 422)
     return text[:200 if kind == 'name' else 2000].rstrip()

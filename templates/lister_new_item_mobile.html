@@ -298,7 +298,10 @@
       analyser.getByteTimeDomainData(data);
       let peak = 0;
       for (const value of data) peak = Math.max(peak, Math.abs(value - 128));
-      if (peak > 6) { spoke = true; quietSince = 0; }
+      // A live mic always hisses a little; a meter stuck flat means it is not measuring (iOS can
+      // leave the context suspended), and then silence cannot be told apart from speech.
+      if (peak > 0) session.metered = true;
+      if (peak > 6) { spoke = true; session.spoke = true; quietSince = 0; }
       else if (spoke) {
         quietSince = quietSince || Date.now();
         if (Date.now() - quietSince > config.quietMs) { stopMic(); return; }
@@ -324,6 +327,12 @@
     releaseAudio(session.audio);
     const config = DICTATION[which];
     if (!chunks.length) { micState(which, 'idle'); setStatus(config.status, 'Nothing was recorded. Try again.', 'bad'); return; }
+    // Sent silence comes back as made-up words (often the spelling hint's example), so keep it here.
+    if (session.metered && !session.spoke) {
+      micState(which, 'idle');
+      setStatus(config.status, "Didn't hear anything. Hold the phone closer and say it again.", 'bad');
+      return;
+    }
     const blob = new Blob(chunks, { type: type || 'audio/webm' });
     const form = new FormData();
     form.append('audio', blob, 'dictation.' + ((type || 'audio/webm').includes('mp4') ? 'm4a' : 'webm'));
