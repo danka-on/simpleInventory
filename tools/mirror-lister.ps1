@@ -1,8 +1,10 @@
 #requires -Version 5.1
 # Mirror the Sweet Shelves Lister extension folder to Dropbox and verify every file hash.
-param([string]$Destination = 'C:\Users\boxatron\Dropbox\Dakartee\lister-dist')
+param([string]$Destination = 'C:\Users\boxatron\Dropbox\Dakartee\lister-dist', [string]$Source = '')
 $ErrorActionPreference = 'Stop'
-$source = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\lister-extension'))
+# Publish passes the clean release export; the working folder may hold other sessions' unfinished edits.
+if (-not $Source) { $Source = Join-Path $PSScriptRoot '..\lister-extension' }
+$source = [IO.Path]::GetFullPath($Source).TrimEnd('\')
 $target = [IO.Path]::GetFullPath($Destination).TrimEnd('\')
 if ((Split-Path -Leaf $target) -ne 'lister-dist' -or $target -eq $source -or
     $source.StartsWith($target + '\', [StringComparison]::OrdinalIgnoreCase) -or

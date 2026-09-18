@@ -37,6 +37,15 @@ scp -i C:/Users/boxatron/.ssh/sweet_shelves_pi .\static\i18n.js dk@10.0.0.151:/o
 
 After deploying, restart the service on the Pi: `sudo systemctl restart sweetshelves.service`
 
+## Lister extension (several agent sessions work on it at once)
+
+Several Claude sessions share this worktree and edit `lister-extension/` at the same time. Rules:
+
+- **Never change `"version"` in `lister-extension/manifest.json` by hand.** Publishing sets it: the live feed's version + 1.
+- **Commit only your own files and hunks.** Never `git add -A` or commit a whole shared file that holds someone else's uncommitted edits. Use `git commit -o <your files>`, or build HEAD + your hunk.
+- **Publish only with `tools/publish-lister.ps1`.** It takes a lock on the Pi, refuses if HEAD is behind GitHub or lacks the commit the live feed was built from, and runs the tests on a clean export of HEAD, so uncommitted work never ships. It pushes a one-line release commit before uploading, and the Pi refuses a version that isn't newer. Commit and push your change first; anything uncommitted is left out and listed as a warning.
+- If publish says "Pull or rebase first" or "publish again", do that. Never bypass it by copying files to the Pi's `static/lister/` yourself.
+
 ## Architecture
 
 - **`app.py`** (~14k lines) — monolithic Flask app with 227+ routes. All routing, API endpoints, and view logic lives here.
