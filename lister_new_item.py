@@ -67,12 +67,15 @@ def _row(row):
         return dict(row)
 
 
-def intake_url(token, base_url, *, stage=''):
+def intake_url(token, base_url, *, stage='', start=False):
     """The phone page for one draft. The stage it opens on is a hint, not a gate: the page asks the
-    server what is still missing, so a link opened late does not send anyone back to step one."""
+    server what is still missing, so a link opened late does not send anyone back to step one.
+    start=True is the panel's "from the beginning" link: the name step even if a name is known."""
     url = (base_url or '').rstrip('/') + '/items-to-list/new-item/' + quote(_text(token), safe='')
     if stage:
         url += '?step=' + quote(stage, safe='')
+        if start:
+            url += '&start=1'
     return url
 
 
@@ -170,6 +173,7 @@ class NewItems:
             'prepStatus': self._verdict(draft)[0],
             'prepStatusChosen': _text(draft.get('prep_status')),
             'defects': self._verdict(draft)[1],
+            'defectChoices': list(PREP_DEFECTS),
             'stage': _text(draft.get('stage')) or 'title',
             'status': _text(draft.get('status')) or 'draft',
             'actor': _text(draft.get('actor')),
@@ -309,7 +313,12 @@ class NewItems:
                 self._drop_link(draft)
         threading.Thread(target=run, daemon=True, name='lister-new-drop-link').start()
 
-    def send_link(self, draft_id, *, base_url='http://localhost/', replace=True, to_email=''):
+    def send_link(self, draft_id, *, base_url='http://localhost/', replace=True, to_email='', stage=None):
+        """stage None: wherever the draft needs the phone next. 'title': start from the beginning
+        (the Phone pill beside Name & details). 'photos': straight to the camera (the one by Photos)."""
+        stage = _text(stage) or None
+        if stage is not None and stage not in ('title', 'photos'):
+            raise NewItemError('stage must be title or photos')
         with self._open() as conn:
             cur = conn.cursor()
             self.init_tables(cur)
@@ -320,10 +329,11 @@ class NewItems:
         if replace:
             self._drop_link(draft)
 
-        stage = self._next_stage(draft, photos)
+        start = stage == 'title'
+        stage = stage or self._next_stage(draft, photos)
         kind = 'photos' if stage == 'photos' else 'intake'
         token = secrets.token_urlsafe(9)
-        url = intake_url(draft['token'], base_url, stage=stage)
+        url = intake_url(draft['token'], base_url, stage=stage, start=start)
         # Icon, name, link, nothing else: this is read off a lock screen.
         if kind == 'photos':
             text = '\U0001F4F7 ' + (_text(draft.get('title'), 120) or 'New item') + '\n' + url
@@ -860,7 +870,9 @@ def register(app, lister, deps):
     def api_new_link(draft_id):
         try:
             guard()
-            return jsonify({'success': True, **new_items.send_link(draft_id, base_url=base_url(), to_email=signed_in_email()),
+            data = request.get_json(silent=True) or {}
+            return jsonify({'success': True, **new_items.send_link(draft_id, base_url=base_url(), to_email=signed_in_email(),
+                                                                   stage=data.get('stage') if isinstance(data, dict) else None),
                             **new_items.get(draft_id, base_url=base_url())})
         except Exception as e:
             return failure(e, 'lister:new-item-link')

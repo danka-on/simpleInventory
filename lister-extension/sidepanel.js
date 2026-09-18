@@ -2302,9 +2302,11 @@
     newPoll();
   }
 
-  async function newSendLink(id) {
+  // stage: undefined = wherever the draft needs the phone next; 'title' = from the beginning;
+  // 'photos' = straight to the camera.
+  async function newSendLink(id, stage) {
     try {
-      const data = await api('/api/lister/new/' + id + '/link', { method: 'POST', body: {} });
+      const data = await api('/api/lister/new/' + id + '/link', { method: 'POST', body: stage ? { stage } : {} });
       if (newDraft() && newDraft().id === id && data.draft) { state.newItem.draft = data.draft; renderNew(); }
       toast('\uD83D\uDCF2 Link sent' + ((data.sent || []).length ? ' to ' + data.sent.join(', ') : '') + ' on Telegram' + everyoneHint(data));
     } catch (error) {
@@ -2352,15 +2354,61 @@
     return true;
   }
 
-  // The blue Phone pill: the same link the draft sends itself when it opens, sent again on
-  // one press, with the pill spinning while Telegram answers.
-  async function newPhoneLink() {
+  // The blue Phone pills. The one by Name & details sends a link that starts the phone from the
+  // beginning (name, details, photos); the one by Photos sends it straight to the camera. The pill
+  // pressed spins while Telegram answers.
+  async function newPhoneLink(stage) {
     const draft = newDraft();
     if (!draft || state.newItem.linkBusy) return;
-    state.newItem.linkBusy = true;
+    state.newItem.linkBusy = stage;
     renderNew();
-    const done = busy('Sending the phone its link\u2026');
-    try { await newSendLink(draft.id); } finally { done(); state.newItem.linkBusy = false; renderNew(); }
+    const done = busy(stage === 'photos' ? 'Sending the phone the camera link\u2026' : 'Sending the phone its link\u2026');
+    try { await newSendLink(draft.id, stage); } finally { done(); state.newItem.linkBusy = false; renderNew(); }
+  }
+
+  function newPhonePill(id, stage, title) {
+    const spinning = state.newItem.linkBusy === stage;
+    return '<button id="' + id + '" class="tiny phone-btn" type="button" title="' + esc(title) + '"' +
+      (state.newItem.linkBusy ? ' disabled' : '') + '>' +
+      (spinning ? '<span class="spin"></span>' : '<span class="phone-ico" aria-hidden="true">\ud83d\udcf1</span>Phone') + '</button>';
+  }
+
+  // Item Prep's status and defect bubbles. The phone fills them from what was said; a tap here
+  // decides. Good clears the defects, a defect on a Good item makes it Bad.
+  const NEW_STATUSES = [['good', 'Good'], ['bad', 'Bad'], ['return', 'Return']];
+  const NEW_DEFECTS = ['Missing pieces', 'Broken', 'Box damage', 'Replacement', 'Other'];
+
+  function newVerdictHtml(draft) {
+    const status = draft.prepStatus || 'good';
+    const chosen = new Set(draft.defects || []);
+    const choices = (draft.defectChoices && draft.defectChoices.length) ? draft.defectChoices : NEW_DEFECTS;
+    return '<span class="lbl">Status</span><div class="vbubbles" id="newStatus">' +
+      NEW_STATUSES.map(([value, label]) => '<button type="button" class="vb st-' + value + (value === status ? ' on' : '') +
+        '" data-status="' + value + '" aria-pressed="' + (value === status) + '">' + label + '</button>').join('') + '</div>' +
+      '<span class="lbl">Defects</span><div class="vbubbles" id="newDefects">' +
+      choices.map(name => '<button type="button" class="vb df' + (chosen.has(name) ? ' on' : '') +
+        '" data-defect="' + esc(name) + '" aria-pressed="' + chosen.has(name) + '">' + esc(name) + '</button>').join('') + '</div>';
+  }
+
+  function newWireVerdict() {
+    const save = (prepStatus, defects) => void newPost('/fields', { prepStatus, defects }, 'Saving the status\u2026');
+    $('newStatus').onclick = event => {
+      const button = event.target.closest('[data-status]');
+      const draft = newDraft();
+      if (!button || !draft) return;
+      const status = button.dataset.status;
+      save(status, status === 'good' ? [] : (draft.defects || []));
+    };
+    $('newDefects').onclick = event => {
+      const button = event.target.closest('[data-defect]');
+      const draft = newDraft();
+      if (!button || !draft) return;
+      const picked = new Set(draft.defects || []);
+      const name = button.dataset.defect;
+      if (picked.has(name)) picked.delete(name); else picked.add(name);
+      const status = draft.prepStatus || 'good';
+      save(picked.size && status === 'good' ? 'bad' : status, [...picked]);
+    };
   }
 
   async function newPrintLabel(code, description) {
@@ -2671,17 +2719,17 @@
     const doing = onPhone && !draft.title && STAGE_WORDS[draft.stage] ? 'the phone is ' + STAGE_WORDS[draft.stage] + '\u2026' : '';
     const sub = draft.title ? (source || '') : (doing || (onPhone ? 'waiting for the phone' : 'press Phone to send the link'));
     const tone = draft.title ? 'done' : (onPhone ? 'wait' : 'need');
-    const pill = '<button id="newPhoneBtn" class="tiny phone-btn" type="button" title="' +
-      (draft.linkSent ? 'Send the phone its link again on Telegram' : 'Telegram the phone the link: it names the item and takes the photos') + '"' +
-      (state.newItem.linkBusy ? ' disabled' : '') + '>' +
-      (state.newItem.linkBusy ? '<span class="spin"></span>' : '<span class="phone-ico" aria-hidden="true">\ud83d\udcf1</span>Phone') + '</button>';
+    const pill = newPhonePill('newPhoneBtn', 'title',
+      'Telegram the phone a link that starts from the beginning: name, details, then photos');
     const body = '<label class="lbl" for="newTitle">Name</label>' +
       '<input id="newTitle" class="wide" type="text" placeholder="Dictated on the phone" value="' + esc(draft.title) + '">' +
       '<label class="lbl" for="newDesc">Details</label>' +
-      '<textarea id="newDesc" rows="3" placeholder="Dictated on the phone: what it is, what is in the box">' + esc(draft.description) + '</textarea>';
+      '<textarea id="newDesc" rows="3" placeholder="Dictated on the phone: what it is, what is in the box">' + esc(draft.description) + '</textarea>' +
+      newVerdictHtml(draft);
     const html = stepHtml({ n: 2, tone, label: 'Name & details', sub, right: pill, body });
     if (!setHtml($('newFields'), html)) return;
-    $('newPhoneBtn').onclick = () => void newPhoneLink();
+    $('newPhoneBtn').onclick = () => void newPhoneLink('title');
+    newWireVerdict();
     for (const [id, key, label] of [['newTitle', 'title', 'Saving the name\u2026'], ['newDesc', 'description', 'Saving the details\u2026']]) {
       const box = $(id);
       box.onchange = () => { void newPost('/fields', { [key]: box.value, source: 'typed' }, label); };
@@ -2703,8 +2751,10 @@
     const html = stepHtml({
       n: 3, tone: photos.length ? 'done' : (waiting ? 'wait' : 'todo'), label: 'Photos',
       sub: photos.length ? String(photos.length) + (marked ? ' \u00b7 ' + marked + ' marked' : '') : (waiting ? 'the phone is taking photos\u2026' : 'not yet'),
+      right: newPhonePill('newPhotoPhoneBtn', 'photos', 'Telegram the phone a link straight to the camera'),
       body });
     if (!setHtml($('newPhotos'), html)) return;
+    $('newPhotoPhoneBtn').onclick = event => { event.stopPropagation(); void newPhoneLink('photos'); };
     $('newPhotos').onclick = event => {
       const tile = event.target.closest('[data-photo]');
       if (!tile) return;

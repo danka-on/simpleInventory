@@ -152,6 +152,18 @@ function page(step) {
     assert.ok(await second.$eval('#stepTitle', el => el.hidden), 'the name is settled: do not ask for it again');
     assert.equal(await second.textContent('#photosSub'), 'Ninja blender 1000 watt black');
 
+    // The first link (sent before anything was known) opened after the name is settled skips it;
+    // the "from the beginning" pill's link (start=1) asks for the name again.
+    const late = await context.newPage();
+    await late.goto(`${ORIGIN}/items-to-list/new-item/${TOKEN}?step=title`);
+    await late.waitForFunction(() => !document.getElementById('stepPhotos').hidden, null, { timeout: 20000 });
+    await late.close();
+    const again = await context.newPage();
+    await again.goto(`${ORIGIN}/items-to-list/new-item/${TOKEN}?step=title&start=1`);
+    await again.waitForFunction(() => !document.getElementById('stepTitle').hidden, null, { timeout: 20000 });
+    assert.equal(await again.$eval('#titleInput', el => el.value), 'Ninja blender 1000 watt black', 'the name is there to redo');
+    await again.close();
+
     assert.deepEqual(broken, [], 'the page threw nothing');
     console.log('lister new-item phone page test passed');
   } finally {

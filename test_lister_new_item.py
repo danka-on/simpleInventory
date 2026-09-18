@@ -366,6 +366,25 @@ class NewItemTestCase(unittest.TestCase):
             self.assertEqual(created[0]['category'], 'prep')
         self.assertNotEqual(collect_trail(self.root, connect, '777000000099')['identity']['origin'], 'lister-new')
 
+    def test_each_phone_pill_sends_its_own_link(self):
+        draft = self.create()['draft']
+        self.panel(f"/api/lister/new/{draft['id']}/fields", {'title': 'Ninja blender', 'source': 'typed'})
+        # By Name & details: from the beginning, even though a name is already typed.
+        start = self.panel(f"/api/lister/new/{draft['id']}/link", {'stage': 'title'})
+        self.assertEqual((start['kind'], start['stage']), ('intake', 'title'))
+        self.assertTrue(start['url'].endswith('?step=title&start=1'), start['url'])
+        # By Photos: straight to the camera.
+        photos = self.panel(f"/api/lister/new/{draft['id']}/link", {'stage': 'photos'})
+        self.assertEqual((photos['kind'], photos['stage']), ('photos', 'photos'))
+        self.assertTrue(photos['url'].endswith('?step=photos'), photos['url'])
+        # No stage: wherever the draft needs the phone, and a typed name means the photos.
+        auto = self.panel(f"/api/lister/new/{draft['id']}/link", {})
+        self.assertEqual(auto['stage'], 'photos')
+        self.assertEqual(self.panel(f"/api/lister/new/{draft['id']}/link", {'stage': 'shiny'}, expect=400)['error'],
+                         'stage must be title or photos')
+        self.assertEqual(self.panel(f"/api/lister/new/{draft['id']}", method='GET')['draft']['defectChoices'],
+                         ['Missing pieces', 'Broken', 'Box damage', 'Replacement', 'Other'])
+
     def test_an_unknown_status_is_refused(self):
         draft = self.create()['draft']
         res = self.client.post(f"/api/lister/new/t/{draft['token']}/step", json={'prepStatus': 'shiny'},

@@ -593,6 +593,22 @@
     }
   }
 
+  // Where a freshly opened link lands. "From the beginning" (start=1, the Phone pill by Name &
+  // details) always asks for the name. Otherwise a name that is already known - typed on the panel,
+  // or found from the barcode - is not asked for again: straight to the photos.
+  function firstStep(draft) {
+    if (draft.status !== 'draft') return 'done';
+    const wanted = ['title', 'details', 'photos'].includes(START_STEP) ? START_STEP : '';
+    let fromStart = false;
+    try { fromStart = new URLSearchParams(location.search).get('start') === '1'; } catch (error) {}
+    if (fromStart) return 'title';
+    if (wanted === 'photos') return 'photos';
+    if (!draft.title) return 'title';
+    // Mid-way through dictating: the details are still to say, unless the panel wrote them.
+    if (wanted === 'details' && !draft.description && draft.titleSource === 'voice') return 'details';
+    return 'photos';
+  }
+
   // ---- Wiring ----------------------------------------------------------
 
   $('titleMic').onclick = () => toggleMic('title');
@@ -652,10 +668,7 @@
     $('liveWho').textContent = draft.title || 'New item';
     if (draft.title) $('photosSub').textContent = draft.title;
     renderGrid();
-    // The message said which step to open on; the draft's own state overrules it, so a link opened
-    // late lands where the work actually is.
-    const wanted = ['title', 'details', 'photos'].includes(START_STEP) ? START_STEP : '';
-    show(draft.status !== 'draft' ? 'done' : (wanted || draft.stage || 'title'));
+    show(firstStep(draft));
 
     // Best effort and deliberately unawaited: a bot message left in the chat is a nuisance, not a
     // reason to hold up the camera.

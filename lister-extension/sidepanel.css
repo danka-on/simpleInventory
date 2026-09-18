@@ -520,6 +520,14 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 button.tiny.phone-btn { display: inline-flex; align-items: center; gap: 4px; background: #2563eb; border-color: #2563eb; color: #fff; font-weight: 700; padding: 4px 10px; box-shadow: 0 2px 6px rgba(37, 99, 235, .35); }
 button.tiny.phone-btn:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
 button.tiny.phone-btn .phone-ico { font-size: 13px; line-height: 1; }
+/* + NEW: Item Prep's status and defect bubbles, same colours. */
+.vbubbles { display: flex; flex-wrap: wrap; gap: 5px; }
+.vbubbles .vb { border-radius: 999px; padding: 5px 11px; font-size: 12px; font-weight: 600; background: var(--chip); border: 1.5px solid var(--line); color: var(--ink); }
+#newStatus .vb { flex: 1; }
+.vbubbles .vb.st-good.on { background: #2ecc71; border-color: #2ecc71; color: #fff; }
+.vbubbles .vb.st-bad.on { background: #e74c3c; border-color: #e74c3c; color: #fff; }
+.vbubbles .vb.st-return.on { background: #8b4513; border-color: #8b4513; color: #fff; }
+.vbubbles .vb.df.on { background: #00b894; border-color: #00b894; color: #fff; }
 /* The first signal is the one that matters: it keeps its words, a second one gives way. */
 .item .sub .upc + .sig { flex: none; }
 .item .sub .sig + .sig { flex: 0 1 auto; min-width: 0; }

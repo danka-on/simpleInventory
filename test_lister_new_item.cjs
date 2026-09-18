@@ -31,7 +31,7 @@ const draft = {
     channel: 'msedge', headless: false,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { create: 0, barcode: [], fields: [], mark: [], submit: [], link: 0, generate: 0, print: [], cancel: 0, createBodies: [] };
+  const calls = { create: 0, barcode: [], fields: [], mark: [], submit: [], link: 0, linkBodies: [], generate: 0, print: [], cancel: 0, createBodies: [] };
   let current = { ...draft };
   try {
     await context.route('https://pi.nexuscentralhq.org/**', async route => {
@@ -51,7 +51,11 @@ const draft = {
         return json({ success: true, draft: current, link: { kind: 'intake', stage: 'title', sent: ['Danka'], errors: [] } }, 201);
       }
       if (url.pathname === `/api/lister/new/${draft.id}` && request.method() === 'GET') return state();
-      if (url.pathname === `/api/lister/new/${draft.id}/link`) { calls.link += 1; return state({ kind: 'intake', sent: ['Danka'] }); }
+      if (url.pathname === `/api/lister/new/${draft.id}/link`) {
+        calls.link += 1;
+        calls.linkBodies.push(request.postDataJSON() || {});
+        return state({ kind: 'intake', sent: ['Danka'] });
+      }
       if (url.pathname === `/api/lister/new/${draft.id}/barcode`) {
         const body = request.postDataJSON();
         calls.barcode.push(body);
@@ -65,7 +69,9 @@ const draft = {
         const body = request.postDataJSON();
         calls.fields.push(body);
         current = { ...current, ...(body.title !== undefined ? { title: body.title, titleSource: 'typed' } : {}),
-                    ...(body.description !== undefined ? { description: body.description } : {}) };
+                    ...(body.description !== undefined ? { description: body.description } : {}),
+                    ...(body.prepStatus !== undefined ? { prepStatus: body.prepStatus, prepStatusChosen: body.prepStatus } : {}),
+                    ...(body.defects !== undefined ? { defects: body.prepStatus === 'good' ? [] : body.defects } : {}) };
         return state();
       }
       if (url.pathname === `/api/lister/new/${draft.id}/photos/9`) {
@@ -118,7 +124,29 @@ const draft = {
     await panel.click('#newPhoneBtn');
     for (let i = 0; i < 50 && calls.link < 2; i += 1) await panel.waitForTimeout(100);
     assert.equal(calls.link, 2, 'the Phone pill re-sends the link');
+    assert.deepEqual(calls.linkBodies[0], {}, 'the first link goes wherever the draft needs the phone');
+    assert.deepEqual(calls.linkBodies[1], { stage: 'title' }, 'the pill by Name & details starts from the beginning');
     await panel.waitForFunction(() => !document.getElementById('newPhoneBtn').disabled, null, { timeout: 5000 });
+    // 1c. The pill by Photos sends a camera-only link.
+    await panel.click('#newPhotoPhoneBtn');
+    for (let i = 0; i < 50 && calls.link < 3; i += 1) await panel.waitForTimeout(100);
+    assert.deepEqual(calls.linkBodies[2], { stage: 'photos' }, 'the pill by Photos goes straight to the camera');
+    await panel.waitForFunction(() => !document.getElementById('newPhotoPhoneBtn').disabled, null, { timeout: 5000 });
+    // 1d. Item Prep's status and defect bubbles: Good until told otherwise; a defect makes it Bad,
+    // Good clears the defects again.
+    assert.deepEqual(await panel.$$eval('#newStatus .vb.on', els => els.map(el => el.dataset.status)), ['good']);
+    assert.deepEqual(await panel.$$eval('#newDefects .vb', els => els.map(el => el.dataset.defect)),
+                     ['Missing pieces', 'Broken', 'Box damage', 'Replacement', 'Other']);
+    await panel.click('#newDefects [data-defect="Broken"]');
+    await panel.waitForFunction(() => document.querySelector('#newStatus [data-status="bad"]').classList.contains('on'), null, { timeout: 5000 });
+    assert.deepEqual(calls.fields.at(-1), { prepStatus: 'bad', defects: ['Broken'] });
+    assert.ok(await panel.$eval('#newDefects [data-defect="Broken"]', el => el.classList.contains('on')));
+    await panel.click('#newStatus [data-status="return"]');
+    await panel.waitForFunction(() => document.querySelector('#newStatus [data-status="return"]').classList.contains('on'), null, { timeout: 5000 });
+    assert.deepEqual(calls.fields.at(-1), { prepStatus: 'return', defects: ['Broken'] }, 'Return keeps the defect');
+    await panel.click('#newStatus [data-status="good"]');
+    await panel.waitForFunction(() => !document.querySelector('#newDefects .vb.on'), null, { timeout: 5000 });
+    assert.deepEqual(calls.fields.at(-1), { prepStatus: 'good', defects: [] }, 'Good clears the defects');
     assert.equal(await panel.textContent('#goBtn'), 'Needs a barcode and a name');
     assert.ok(await panel.$eval('#goBtn', el => el.disabled), 'nothing to submit yet');
 
@@ -155,8 +183,8 @@ const draft = {
     await panel.waitForSelector('#newBarcode', { timeout: 10000 });
     assert.equal(calls.cancel, 1, 'the old draft is thrown away');
     assert.equal(calls.create, 2, 'and a fresh one opens');
-    for (let i = 0; i < 50 && calls.link < 3; i += 1) await panel.waitForTimeout(100);
-    assert.equal(calls.link, 3, 'with a fresh phone link');
+    for (let i = 0; i < 50 && calls.link < 4; i += 1) await panel.waitForTimeout(100);
+    assert.equal(calls.link, 4, 'with a fresh phone link');
     assert.equal(await panel.$eval('#newTitle', el => el.value), '', 'nothing of the old item is left');
 
     // 2d. Start over from a blank item: the new card is the same markup as the old one, and the
@@ -166,7 +194,7 @@ const draft = {
     for (let i = 0; i < 50 && calls.create < 3; i += 1) await panel.waitForTimeout(100);
     assert.equal(calls.create, 3, 'a blank item starts over without asking');
     await panel.waitForFunction(() => document.querySelector('#newBarcode')?.value === '', null, { timeout: 5000 });
-    for (let i = 0; i < 50 && calls.link < 4; i += 1) await panel.waitForTimeout(100);
+    for (let i = 0; i < 50 && calls.link < 5; i += 1) await panel.waitForTimeout(100);
 
     // 3. A scanner types the code and presses Enter. The server already knows the name, so the
     //    title arrives filled in and the phone gets a photos-only link.
