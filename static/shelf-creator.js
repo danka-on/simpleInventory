@@ -534,11 +534,14 @@ function renderGroups() {
     container.className = 'shelf-grid group-grid';
     setShelfSearchSummary('');
 
-    // Sort groups: non-default first, then default (id=1) last
+    // Most items first; Unsorted (id=1) always last.
+    const groupItems = id => state.shelves
+        .filter(s => s.group_id === id)
+        .reduce((sum, s) => sum + (parseInt(s.count, 10) || 0), 0);
     const sortedGroups = state.groups.slice().sort((a, b) => {
         if (a.id === 1) return 1;  // Default group goes last
         if (b.id === 1) return -1; // Default group goes last
-        return compareLocationCodes(a.name, b.name);
+        return groupItems(b.id) - groupItems(a.id) || compareLocationCodes(a.name, b.name);
     });
 
     if (!sortedGroups.some(g => g.id !== 1 || state.shelves.some(s => s.group_id === g.id))) {
