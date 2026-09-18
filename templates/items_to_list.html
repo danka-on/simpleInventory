@@ -680,7 +680,6 @@
     <a href="/store-manager" class="btn" style="background:rgba(0,0,0,0.06);color:#555;text-decoration:none;display:inline-flex;align-items:center;gap:4px;font-size:0.9rem;justify-self:start">&#8592; Back</a>
     <h2 style="margin:0; justify-self:center; text-align:center" data-i18n="list_manager">Prepared Items</h2>
     <div style="justify-self:end; display:flex; gap:8px; flex-wrap:wrap;">
-      <button id="scan-stores-btn" type="button" class="btn" title="Refresh list + scan stores" aria-label="Refresh list and scan stores" style="background:#f59e0b; color:#fff; border:none; display:flex; align-items:center; justify-content:center; padding:6px 10px; font-size:1rem; cursor:pointer">↺</button>
       <a href="/fb-listings" class="btn" style="background:#1877f2; color:#fff; text-decoration:none; display:flex; align-items:center; gap:6px">
         <span style="font-size:1rem">📘</span> <span data-i18n="fb_listings">FB Listings</span>
       </a>
@@ -2478,7 +2477,7 @@ let storeScanRunning = false;
 async function refreshWithStoreScan(e){
   if(storeScanRunning) return;
   storeScanRunning = true;
-  const buttons = ['scan-stores-btn', 'refresh-btn'].map(id => document.getElementById(id)).filter(Boolean);
+  const buttons = ['refresh-btn'].map(id => document.getElementById(id)).filter(Boolean);
   buttons.forEach(b => { b.disabled = true; });
   const statusEl = document.getElementById('store-scan-status');
   const showStatus = (text, isError) => {
@@ -2511,7 +2510,6 @@ async function refreshWithStoreScan(e){
   }
 }
 document.getElementById('refresh-btn').addEventListener('click', refreshWithStoreScan);
-document.getElementById('scan-stores-btn').addEventListener('click', refreshWithStoreScan);
 
 function updateStatusFilterHighlight(){
   const map = {
