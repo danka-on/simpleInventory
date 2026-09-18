@@ -18,6 +18,7 @@
     <button id="storeNew" class="store new" type="button" role="tab" aria-selected="false" title="Describe an item that is on no BOL yet">+ NEW</button>
   </div>
   <div class="sys">
+    <button id="listedBtn" class="listedpill" type="button" title="Listed today through the Lister: open the record">&#x2713; <span id="countListedToday">0</span> today</button>
     <button id="connStatus" class="conn" type="button" title="Connection" aria-label="Connection"></button>
     <button id="themeBtn" class="icon" type="button" title="Day / night theme" aria-label="Toggle theme">🌙</button>
     <button id="settingsBtn" class="icon" type="button" title="Settings" aria-label="Settings">⚙</button>
@@ -91,24 +92,16 @@
 <section id="listCard" class="queue">
   <!-- Listings left half done: one click back onto the form they were left on. -->
   <div id="sessionCard" class="resume" hidden></div>
-  <div class="tools">
-    <div class="search"><span aria-hidden="true">⌕</span><input id="filter" type="search" placeholder="Title, UPC or bin"></div>
-    <div class="filters">
-      <button id="statusAll" class="fchip" type="button" aria-pressed="true">All <span class="n"></span></button>
-      <button id="statusFlagged" class="fchip flag" type="button" aria-pressed="false">Flagged <span class="n"></span></button>
-      <button id="statusListed" class="fchip" type="button" aria-pressed="false" title="Already on a store, or listed on the other one">On a store <span class="n"></span></button>
-      <button id="statusBlocked" class="fchip block" type="button" aria-pressed="false" title="Amazon will not take this one from us">Blocked <span class="n"></span></button>
-      <button id="statusDone" class="fchip done" type="button" aria-pressed="false" title="Listed on this store: they leave the list and wait here to be looked at">Listed &#x2713; <span class="n"></span></button>
-      <button id="preloadAll" class="fchip preload" type="button" title="Prepare every queued item in the background: listing values plus the AI title, description and photos that are switched on">⚡ Preload all</button>
-    </div>
-  </div>
   <div id="preloadBar" class="preloadbar" hidden></div>
   <div class="listacts">
     <button id="addItems" class="addbtn" type="button" title="Opens Items to List in a new tab. Press + there and the item shows up here right away."><span class="addplus" aria-hidden="true">+</span><span class="addtxt"><b>Add items</b><small>from Items to List &#x2197;</small></span></button>
-    <button id="clearAll" class="lact danger" type="button" title="Take every queued item off this store's list">Clear all</button>
+    <div class="lstack">
+      <button id="preloadAll" class="lact go" type="button" title="Prepare every queued item in the background: listing values plus the AI title, description and photos that are switched on">&#x26a1; Preload all</button>
+      <button id="statusBlocked" class="lact danger" type="button" aria-pressed="false" hidden title="Amazon will not take these from us: show only them">Blocked <span class="n"></span></button>
+      <button id="clearAll" class="lact danger" type="button" title="Take every queued item off this store's list">Clear all</button>
+    </div>
   </div>
   <div id="itemList" class="list"></div>
-  <button id="listedBtn" class="listedlink" type="button" title="What the Lister has recorded">✓ <b><span id="countListedToday">0</span> listed today</b> through the Lister<span class="chev">›</span></button>
 </section>
 
 <!-- "+ NEW": three numbered steps in one card. The barcode is done here; the name, the details

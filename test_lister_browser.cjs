@@ -298,15 +298,12 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.click('#storeEbay');
     await panel.waitForFunction(() => document.getElementById('countEbay').textContent.includes('2') && document.querySelector('.item.current')?.dataset.upc === '883049370897-1', null, { timeout: 15000 });
     await panel.waitForFunction(() => !document.getElementById('busy').classList.contains('on'), null, { timeout: 15000 });
-    // Note marker, store-coloured badge, and the status / listed filters.
+    // Note marker and store-coloured badge; no search box or filter bubbles, only the header's "listed today" pill.
     assert.ok(firstRow.includes('📝 1') && firstRow.includes('🎤 1'), 'the row shows its note counts: ' + firstRow);
     assert.ok((await panel.textContent('.item[data-upc="012345678905"] .sig.quiet')).includes('on eBay'), 'a UPC the store already carries says so, quietly');
-    await panel.click('#statusFlagged');
-    assert.deepEqual(await panel.$$eval('.item', els => els.map(e => e.dataset.upc)), ['883049370897-1'], 'Flagged shows only the one with something wrong');
-    assert.equal(await panel.$eval('#statusFlagged .n', el => el.textContent), '1', 'the filters carry their counts');
-    await panel.click('#statusListed');
-    assert.deepEqual(await panel.$$eval('.item', els => els.map(e => e.dataset.upc)), ['012345678905'], 'Listed shows what a store already carries');
-    await panel.click('#statusAll');
+    assert.ok(!(await panel.$('#filter')) && !(await panel.$('#statusAll')) && !(await panel.$('#statusFlagged')) && !(await panel.$('#statusListed')) && !(await panel.$('#statusDone')), 'the search box and filter bubbles are gone');
+    assert.ok(await panel.$('header.top .sys #listedBtn'), 'listed today sits top right in the header');
+    assert.ok(await panel.$eval('#statusBlocked', el => el.hidden), 'Blocked stays out of sight on eBay');
     assert.equal((await panel.$$('.item')).length, 2);
     assert.ok(!(await panel.$('#autoSendPhotos')), 'the automatic switches are not on the work surface');
     // Preload all: the whole queue is prepared in the background; the bar shows the percentage, the rows their state.
@@ -753,11 +750,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     // Listed on eBay: the item leaves the eBay list, stays on the Amazon list, and shows in the Listed side bar.
     await panel.waitForFunction(() => !document.querySelector('#itemList .item[data-upc="883049370897-1"]'), null, { timeout: 15000 });
     await panel.waitForFunction(() => document.getElementById('countListedToday').textContent === '1', null, { timeout: 15000 });
-    // ...and waits on eBay's "Listed ✓" list, where a click opens it to look at.
-    await panel.click('#statusDone');
-    await panel.waitForSelector('#itemList .item.listed[data-upc="883049370897-1"]', { timeout: 10000 });
-    assert.match(await panel.textContent('#itemList .item.listed[data-upc="883049370897-1"] .sub'), /listed · 335566778899/);
-    await panel.click('#statusAll');
+    assert.match(await panel.textContent('#listedBtn'), /1 today/, 'the header pill counts it');
     await panel.click('#listedBtn');
     await panel.waitForSelector('#listedDrawer:not([hidden]) .litem');
     assert.deepEqual(await panel.$$eval('#listedList .litem', els => els.map(e => e.dataset.link)), ['1'], 'Today shows only today\'s listing');

@@ -108,7 +108,7 @@ const BOTH = '840115641220';
     panel.platform = 'amazon';
     await page.waitForFunction(() => document.getElementById('agentHead').textContent.includes('Amazon'), null, { timeout: 10000 });
     assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+ Amazon', 'reset for Amazon');
-    assert.equal((await cell(NEW).locator('.agent-other').textContent()).trim(), 'On eBay list', 'says it already waits on eBay');
+    assert.equal((await cell(NEW).locator('.agent-onlist.ebay').textContent()).trim(), 'On eBay list', 'says it already waits on eBay');
     await cell(NEW).locator('button').click();
     await page.waitForFunction(upc => document.querySelector(`.agent-cell[data-upc="${upc}"] button`)?.textContent.includes('On Amazon list'), NEW, { timeout: 10000 });
     assert.equal(calls.add.length, 1, 'already in the queue: no second add');

@@ -1940,30 +1940,23 @@
   }
 
   function renderItems() {
-    const filter = state.filter.trim().toLowerCase();
-    const isFlagged = it => (it.prepStatus?.status || '') === 'bad' || Boolean(it.defect);
-    const isOnStore = it => Boolean(it.alreadyOnStore) || it.otherStatus === 'listed';
     const isBlocked = it => state.platform === 'amazon' && ['restricted', 'approval', 'no_asin'].includes(it.amazonCheck?.status || '');
-    const tests = { all: () => true, flagged: isFlagged, listed: isOnStore, blocked: isBlocked };
     rememberThumbs(state.items);
     const queued = state.items.filter(it => it.status === 'queued');
-    const listedHere = state.items.filter(it => it.status === 'listed');
     $('clearAll').disabled = !queued.length;
-    // The filters carry their own counts: the numbers are why you would press one.
-    for (const [id, value, n] of [['statusAll', 'all', queued.length], ['statusFlagged', 'flagged', queued.filter(isFlagged).length],
-      ['statusListed', 'listed', queued.filter(isOnStore).length], ['statusBlocked', 'blocked', queued.filter(isBlocked).length], ['statusDone', 'done', listedHere.length]]) {
-      const button = $(id);
-      button.setAttribute('aria-pressed', String(state.statusFilter === value));
-      button.querySelector('.n').textContent = n;
-      button.hidden = value === 'blocked' && state.platform !== 'amazon';
-    }
-    const match = it => !filter || (it.title || '').toLowerCase().includes(filter) || (it.upc || '').includes(filter);
-    // Listed ones leave the list for their own: "Listed ✓" shows them to inspect.
-    const rows = state.statusFilter === 'done' ? listedHere.filter(match) : queued.filter(it => (tests[state.statusFilter] || tests.all)(it) && match(it));
+    // Filtering is gone apart from Amazon's "Blocked", which shows only while something is blocked.
+    const blocked = queued.filter(isBlocked).length;
+    if (state.statusFilter !== 'blocked' || !blocked) state.statusFilter = 'all';
+    const blockedBtn = $('statusBlocked');
+    blockedBtn.hidden = !blocked;
+    blockedBtn.setAttribute('aria-pressed', String(state.statusFilter === 'blocked'));
+    blockedBtn.querySelector('.n').textContent = blocked;
+    // Listed ones leave the list: the "✓ N today" pill in the header opens what was listed.
+    const rows = state.statusFilter === 'blocked' ? queued.filter(isBlocked) : queued;
     const list = $('itemList');
     if (!rows.length) {
       const listedHere = state.items.filter(it => it.status === 'listed').length;
-      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' || filter ? 'Nothing matches this filter.' : (listedHere ? `Everything queued for ${storeName(state.platform)} is listed.` : `Nothing queued for ${storeName(state.platform)}. Press <b>+ Add items</b> above and queue some on Items to List.`))}</div>`;
+      list.innerHTML = `<div class="empty">${state.connected === false ? 'Not connected.' : (state.statusFilter !== 'all' ? 'Nothing matches this filter.' : (listedHere ? `Everything queued for ${storeName(state.platform)} is listed.` : `Nothing queued for ${storeName(state.platform)}. Press <b>+ Add items</b> above and queue some on Items to List.`))}</div>`;
       return;
     }
     // Only the exceptions earn a word here: a row with nothing on it is the good row. At most two,
@@ -3069,8 +3062,7 @@
       else if (!$('editor').hidden) { $('editor').hidden = true; $('editor').innerHTML = ''; }
       else if (!$('modal').hidden) $('modal').hidden = true;
     });
-    $('filter').oninput = () => { state.filter = $('filter').value; renderItems(); };
-    for (const [id, value] of [['statusAll', 'all'], ['statusFlagged', 'flagged'], ['statusListed', 'listed'], ['statusBlocked', 'blocked'], ['statusDone', 'done']]) $(id).onclick = () => { state.statusFilter = value; renderItems(); };
+    $('statusBlocked').onclick = () => { state.statusFilter = state.statusFilter === 'blocked' ? 'all' : 'blocked'; renderItems(); };
     $('preloadAll').onclick = () => void preloadAll();
     $('clearAll').onclick = () => void clearAll();
     $('addItems').onclick = () => chrome.tabs.create({ url: serverBase() + '/items-to-list' });

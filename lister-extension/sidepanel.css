@@ -151,21 +151,9 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 
 /* -- queue ------------------------------------------------------------------------------------ */
 .queue[hidden] { display: none; }
-.tools { display: flex; flex-direction: column; gap: 7px; padding: 9px 10px; border-bottom: 1px solid var(--line-2); }
 .search { display: flex; align-items: center; gap: 7px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 5px 9px; color: var(--faint); }
 .search input { flex: 1; border: 0; background: none; padding: 0; min-width: 0; }
 .search input:focus { outline: none; }
-.filters { display: flex; gap: 5px; flex-wrap: wrap; }
-.fchip { border: 1px solid var(--line); background: none; border-radius: 999px; padding: 3px 10px; font-size: 11.5px; color: var(--muted); display: inline-flex; gap: 5px; align-items: baseline; }
-.fchip .n { font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
-.fchip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-.fchip[aria-pressed="true"] .n { color: var(--bg); opacity: .7; }
-.fchip.flag[aria-pressed="true"] { background: var(--amber); border-color: var(--amber); color: #fff; }
-.fchip.block[aria-pressed="true"] { background: var(--red); border-color: var(--red); color: #fff; }
-.fchip.done[aria-pressed="true"] { background: var(--green); border-color: var(--green); color: var(--green-ink); }
-/* min-width: "Preload all" and "Preloading…" are different lengths; without it the chip row rewraps. */
-.fchip.preload { margin-left: auto; min-width: 104px; justify-content: center; border-color: var(--green); color: var(--green); white-space: nowrap; }
-.fchip[hidden] { display: none; }
 
 .list { display: flex; flex-direction: column; gap: 1px; padding: 5px 6px; max-height: 58vh; overflow: auto; }
 /* Fixed columns and a fixed height: a signal or the preload bolt arriving after the row is on
@@ -208,10 +196,6 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .item:hover .remove, .item .remove:focus-visible { opacity: 1; }
 .item .remove:hover { background: var(--red-soft); color: var(--red); }
 .empty { color: var(--muted); padding: 16px 10px; text-align: center; }
-.listedlink { display: flex; align-items: center; gap: 6px; width: calc(100% - 20px); margin: 2px 10px 10px; padding: 9px 4px 0; background: none; border: 0; border-top: 1px solid var(--line-2); border-radius: 0; color: var(--muted); font-size: 12px; text-align: left; }
-.listedlink:hover { color: var(--ink); background: none; filter: none; }
-.listedlink b { color: var(--ink); font-weight: 600; }
-.listedlink .chev { margin-left: auto; }
 
 /* preload: the automatic work done ahead in the background */
 .preloadbar { display: flex; align-items: center; gap: 8px; margin: 7px 10px 0; font-size: 12px; color: var(--muted); }
@@ -452,8 +436,6 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 .locpv img { width: 100%; border-radius: 8px; display: block; }
 .locpv figcaption { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
-.listedlink.active { color: var(--ink); }
-.listedlink.active .chev { transform: rotate(90deg); }
 
 /* "+ NEW" ------------------------------------------------------------------------------------
    A third tab beside the two stores, because starting an item is a different job from working
@@ -518,7 +500,17 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 .addtxt small { font-size: 11px; opacity: .85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lact { background: none; border: 0; padding: 2px 0; font-size: 11.5px; font-weight: 600; color: var(--blue); cursor: pointer; }
 .lact:hover { text-decoration: underline; filter: none; }
-.lact.danger { margin-left: auto; color: var(--red); }
+.lact.danger { color: var(--red); }
+/* Beside "+ Add items": the small list-wide actions, stacked and right-aligned. */
+.lstack { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex: none; }
+.lact.go { color: var(--green); white-space: nowrap; }
+.lact .n { font-variant-numeric: tabular-nums; }
+.lact[aria-pressed="true"] { background: var(--red); color: #fff; border-radius: 999px; padding: 2px 8px; text-decoration: none; }
+.lact[hidden] { display: none; }
+/* Header, top right: what the Lister listed today; opens the record. */
+.listedpill { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--green); background: none; color: var(--green); font-size: 11.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.listedpill:hover, .listedpill.active { background: var(--green); color: var(--green-ink); filter: none; }
 .lact[disabled] { color: var(--faint); cursor: default; text-decoration: none; }
 .small.bad { color: var(--red); }
 

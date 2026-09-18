@@ -386,6 +386,18 @@
     .agent-store.amazon{background:#d97706}
     .agent-store.fb{background:#1877f2}
     .agent-listed.fb-on{color:#1877f2}
+    /* "On eBay list" / "On Amazon list": a solid pill in the store's own colour, readable from across the room. */
+    .agent-onlist{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;font-size:12.5px;font-weight:800;letter-spacing:.01em;white-space:nowrap;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.22)}
+    .agent-onlist::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.9}
+    .agent-onlist.ebay{background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
+    .agent-onlist.amazon{background:linear-gradient(135deg,#ffb020,#ff9900);color:#131921}
+    .agent-onlist.fb{background:linear-gradient(135deg,#3b8cff,#1877f2)}
+    .btn-listagent-queue.agent-on{font-weight:800 !important;letter-spacing:.01em;border:0 !important;box-shadow:0 1px 4px rgba(0,0,0,.22)}
+    .btn-listagent-queue.agent-on::before{content:'\2713  '}
+    .btn-listagent-queue.agent-on.ebay{background:linear-gradient(135deg,#3b82f6,#1d4ed8) !important;color:#fff !important}
+    .btn-listagent-queue.agent-on.amazon{background:linear-gradient(135deg,#ffb020,#ff9900) !important;color:#131921 !important}
+    .btn-listagent-queue.agent-on.fb{background:linear-gradient(135deg,#3b8cff,#1877f2) !important;color:#fff !important}
+    .btn-listagent-queue.agent-on:hover{filter:brightness(1.08)}
     /* Filter dropdown panel */
     .dropdown-panel{display:none;position:fixed;z-index:10000;min-width:280px;max-width:92vw;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px}
     .dropdown-section{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
@@ -1256,17 +1268,17 @@ function agentCellInner(upc, titleEnc = '', itemStatus = ''){
   const st = agentStoreState[upc] || null;
   // The Facebook list is opt-in (the FB tab of the Lister): say so wherever the button cannot.
   const fbOn = st && st.fb === 'on' && !(agentPanel.active && agentPanel.platform === 'fb')
-    ? '<div class="agent-listed fb-on">On Facebook list</div>' : '';
+    ? '<div class="agent-onlist fb">On Facebook list</div>' : '';
   const lines = listed.map(p => `<div class="agent-listed">Listed on ${AGENT_STORE_NAMES[p]} \u2713</div>`).join('') + fbOn;
-  let label = '', title = '', active = false;
+  let label = '', title = '', active = false, onStore = '';
   if(agentPanel.active){
     const p = agentPanel.platform, name = AGENT_STORE_NAMES[p];
     const other = p === 'ebay' ? 'amazon' : p === 'amazon' ? 'ebay' : '';
     const otherLine = other && st && st[other] === 'on' && st[p] !== 'on'
-      ? `<div class="agent-other" title="Already queued for ${AGENT_STORE_NAMES[other]} in the Lister">On ${AGENT_STORE_NAMES[other]} list</div>` : '';
+      ? `<div class="agent-onlist ${other}" title="Already queued for ${AGENT_STORE_NAMES[other]} in the Lister">On ${AGENT_STORE_NAMES[other]} list</div>` : '';
     if(listed.includes(p)) return lines;
     if(otherLine && !lines.includes(otherLine)) return lines + otherLine + agentButton(upc, titleEnc, itemStatus, `+ ${name}`, `Also add it to the ${name} list (it is already queued for ${AGENT_STORE_NAMES[other]})`, false);
-    if(st && st[p] === 'on'){ label = `On ${name} list`; title = `On the ${name} list in the Lister (click to take it off ${name})`; active = true; }
+    if(st && st[p] === 'on'){ label = `On ${name} list`; title = `On the ${name} list in the Lister (click to take it off ${name})`; active = true; onStore = p; }
     else { label = `+ ${name}`; title = `Add to the ${name} list in the Lister (the side panel is on ${name})`; }
   } else {
     if(listed.filter(p => p !== 'fb').length === 2) return lines;
@@ -1279,7 +1291,7 @@ function agentCellInner(upc, titleEnc = '', itemStatus = ''){
       if(on.length === 1) label += ' \u00b7 ' + AGENT_STORE_NAMES[on[0]];
     }
   }
-  return lines + `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${active ? ' btn-copied' : ''}" data-upc="${esc(upc)}" data-title="${titleEnc}" data-item-status="${esc(itemStatus)}" title="${esc(title)}">${esc(label)}</button>`;
+  return lines + `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${active ? ' btn-copied' : ''}${onStore ? ` agent-on ${onStore}` : ''}" data-upc="${esc(upc)}" data-title="${titleEnc}" data-item-status="${esc(itemStatus)}" title="${esc(title)}">${esc(label)}</button>`;
 }
 
 // A narrow window (the Lister side panel open, a small screen): the least important columns step
