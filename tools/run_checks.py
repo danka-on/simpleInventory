@@ -24,7 +24,7 @@ TESTS = [
     'test_prep_fallback_lookup', 'test_prep_plus', 'test_prep_unmatched',
     'test_pnl_report', 'test_listing_proposals',
     'test_listing_reconciliation', 'test_reconciliation_ai', 'test_voice_notes',
-    'test_lister',
+    'test_lister', 'test_fb_marketplace',
 ]
 
 

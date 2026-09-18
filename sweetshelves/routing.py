@@ -668,3 +668,14 @@ def register_routes():
         '_telegram_chat_for_email': ss_telegram.telegram_chat_for_email,
         'BASE_DIR': BASE_DIR,
     })
+
+    # Facebook Marketplace messages: the Lister extension reads the Marketplace inbox in Chrome
+    # (Meta has no API for it); new buyer messages go to Telegram and /fb-messages.
+    from fb_marketplace import register as register_fb_marketplace
+    register_fb_marketplace(ss_runtime.app, {
+        '_safe_error': ss_errors._safe_error,
+        '_telegram_send_message': ss_telegram._telegram_send_message,
+        '_telegram_collect_recipient_rows': ss_telegram._telegram_collect_recipient_rows,
+        '_telegram_chat_for_email': ss_telegram.telegram_chat_for_email,
+        'BASE_DIR': BASE_DIR,
+    })

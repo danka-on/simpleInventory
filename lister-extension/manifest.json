@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Sweet Shelves Lister",
-  "version": "0.2.58",
-  "description": "List the Sweet Shelves queue on eBay and Amazon: UPC search, auto-fill, guided fields, prep notes and photos, then link the live listing back to the warehouse.",
+  "version": "0.2.59",
+  "description": "List the Sweet Shelves queue on eBay and Amazon: UPC search, auto-fill, guided fields, prep notes and photos, then link the live listing back to the warehouse. Also reads the Facebook Marketplace inbox (never personal chats) for new buyer messages.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -28,13 +28,15 @@
     "scripting",
     "sidePanel",
     "storage",
-    "tabs"
+    "tabs",
+    "alarms"
   ],
   "host_permissions": [
     "https://pi.nexuscentralhq.org/*",
     "https://debby.taila97a84.ts.net/*",
     "https://*.ebay.com/*",
-    "https://sellercentral.amazon.com/*"
+    "https://sellercentral.amazon.com/*",
+    "https://www.facebook.com/*"
   ],
   "content_scripts": [
     {
@@ -42,7 +44,18 @@
         "https://pi.nexuscentralhq.org/lister/*",
         "https://debby.taila97a84.ts.net/lister/*"
       ],
-      "js": ["update-bridge.js"],
+      "js": [
+        "update-bridge.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/marketplace/*"
+      ],
+      "js": [
+        "fb-inbox.js"
+      ],
       "run_at": "document_idle"
     }
   ],

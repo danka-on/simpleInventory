@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Marketplace Messages</title>
+  <style>
+    :root{--fb:#1877f2;--fb-bg:#e7f0fd;--bg:#f7f7f8;--card:#fff;--border:#e0e0e0;--ink:#0f172a;--muted:#64748b;--amber:#b7791f;--amber-bg:#fff6e0;--green:#0a9c6c;--green-bg:#e3f6ee;--radius:10px;}
+    *{box-sizing:border-box;}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);margin:0;padding:16px;color:var(--ink);}
+    .top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;margin-bottom:12px;}
+    .back-btn{display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--muted);font-size:0.9rem;font-weight:600;padding:6px 10px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);justify-self:start;}
+    h1{margin:0;font-size:1.3rem;text-align:center;display:flex;align-items:center;gap:8px;}
+    .fb-mark{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--fb);color:#fff;font-size:15px;}
+    .reader{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 12px;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);margin-bottom:12px;font-size:0.88rem;}
+    .reader.ok{border-color:#b7e4cf;background:var(--green-bg);}
+    .reader.stale{border-color:#f1d08a;background:var(--amber-bg);}
+    .dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:0 0 auto;}
+    .reader.ok .dot{background:var(--green);} .reader.stale .dot{background:var(--amber);}
+    .filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;}
+    .chip-btn{padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--card);font:inherit;font-size:0.85rem;font-weight:600;color:var(--muted);cursor:pointer;}
+    .chip-btn[aria-pressed="true"]{background:var(--fb);border-color:var(--fb);color:#fff;}
+    .card{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--fb);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;display:grid;grid-template-columns:64px 1fr;gap:12px;}
+    .card.handled{border-left-color:var(--border);opacity:0.75;}
+    .thumb{width:64px;height:64px;border-radius:8px;object-fit:cover;background:var(--fb-bg);display:flex;align-items:center;justify-content:center;color:var(--fb);font-size:24px;}
+    .tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px;}
+    .tag{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;}
+    .tag.mp{background:var(--fb);color:#fff;}
+    .tag.selling{background:var(--green-bg);color:var(--green);}
+    .tag.buying{background:#f1f5f9;color:#334155;}
+    .tag.reply{background:var(--amber-bg);color:var(--amber);}
+    .tag.unread{background:#fde8e8;color:#b42318;}
+    .who{font-weight:700;}
+    .item{color:var(--muted);font-size:0.88rem;}
+    .snippet{margin:6px 0 2px;font-size:0.95rem;overflow-wrap:anywhere;}
+    .snippet.me{color:var(--muted);}
+    .meta{color:var(--muted);font-size:0.8rem;}
+    .actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:0.85rem;font-weight:600;font-family:inherit;cursor:pointer;background:var(--card);color:var(--ink);text-decoration:none;}
+    .btn.primary{background:var(--fb);border-color:var(--fb);color:#fff;}
+    details{margin-top:6px;font-size:0.85rem;}
+    details li{margin:2px 0;overflow-wrap:anywhere;}
+    .empty{text-align:center;color:var(--muted);padding:30px;background:var(--card);border:1px dashed var(--border);border-radius:var(--radius);}
+    .muted{color:var(--muted);font-size:0.85rem;}
+    @media (max-width:640px){body{padding:12px;}.top{grid-template-columns:auto 1fr;}.top .spacer{display:none;}h1{justify-content:flex-end;font-size:1.1rem;}.card{grid-template-columns:48px 1fr;}.thumb{width:48px;height:48px;}}
+  </style>
+</head>
+<body>
+  <div class="top">
+    <a class="back-btn" href="/tools">&larr; Tools</a>
+    <h1><span class="fb-mark" aria-hidden="true">f</span>Marketplace Messages</h1>
+    <span class="spacer"></span>
+  </div>
+
+  <div id="reader" class="reader" role="status"><span class="dot"></span><span id="readerText">Checking the reader…</span></div>
+
+  <div class="filters" role="group" aria-label="Show">
+    <button class="chip-btn" data-filter="reply" aria-pressed="true">Needs reply</button>
+    <button class="chip-btn" data-filter="all" aria-pressed="false">All</button>
+    <button class="chip-btn" data-filter="selling" aria-pressed="false">Selling</button>
+    <button class="chip-btn" data-filter="buying" aria-pressed="false">Buying</button>
+  </div>
+
+  <div id="list"><div class="empty">Loading…</div></div>
+
+  <p class="muted">Only Facebook Marketplace chats show up here. The Sweet Shelves Lister extension reads the Marketplace inbox in
+    Chrome (it keeps a pinned tab open); personal Messenger chats are never read. Replies are sent on Facebook.</p>
+
+<script>
+(() => {
+  const state = { filter: 'reply', threads: [], reader: null };
+  try { state.filter = localStorage.getItem('fbMessagesFilter') || 'reply'; } catch (e) { /* storage blocked */ }
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const safeUrl = url => /^https:\/\//.test(String(url || '')) ? url : '';
+
+  function ago(minutes) {
+    if (minutes == null) return 'never';
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return Math.round(minutes) + ' min ago';
+    const hours = minutes / 60;
+    if (hours < 24) return Math.round(hours) + ' h ago';
+    return Math.round(hours / 24) + ' days ago';
+  }
+
+  function renderReader() {
+    const reader = state.reader || {};
+    const box = $('reader');
+    if (!reader.lastCaptureAt) {
+      box.className = 'reader stale';
+      $('readerText').textContent = 'The reader has not checked in yet. Update the Lister extension, approve the Facebook access Chrome asks for, and keep Chrome open.';
+      return;
+    }
+    box.className = 'reader ' + (reader.stale ? 'stale' : 'ok');
+    let text = (reader.stale ? 'Reader is quiet: last checked ' : 'Reader is on: checked ') + ago(reader.minutesAgo) +
+      ' · ' + (reader.rows || 0) + ' chats seen';
+    if (reader.stale) text += '. Is Chrome open on the PC?';
+    else if (reader.noRowsOnPage) text += ' (no chats found on the inbox page — is Facebook signed in in that Chrome?)';
+    else if (Number(reader.rawRows) > 0 && Number(reader.rows) === 0) text += ' (rows found but none could be read — the page layout may have changed)';
+    if (reader.alertError) text += ' · Telegram: ' + reader.alertError;
+    $('readerText').textContent = text;
+  }
+
+  function visible(thread) {
+    if (state.filter === 'reply') return thread.needsReply;
+    if (state.filter === 'selling' || state.filter === 'buying') return thread.role === state.filter;
+    return true;
+  }
+
+  function card(thread) {
+    const thumb = safeUrl(thread.thumb)
+      ? `<img class="thumb" src="${esc(thread.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      : '<div class="thumb" aria-hidden="true">🛒</div>';
+    const tags = ['<span class="tag mp">Marketplace</span>'];
+    if (thread.role) tags.push(`<span class="tag ${esc(thread.role)}">${thread.role === 'selling' ? 'Selling' : 'Buying'}</span>`);
+    if (thread.needsReply) tags.push('<span class="tag reply">Needs reply</span>');
+    if (thread.unread) tags.push('<span class="tag unread">Unread</span>');
+    const history = (thread.history || []).slice(1);
+    const search = thread.item ? '/unified-search?q=' + encodeURIComponent(thread.item) : '';
+    return `<div class="card${thread.needsReply ? '' : ' handled'}" data-thread="${esc(thread.threadId)}">
+      ${thumb}
+      <div>
+        <div class="tags">${tags.join('')}</div>
+        <div><span class="who">${esc(thread.name || 'Unknown')}</span>${thread.item ? ` <span class="item">· ${esc(thread.item)}</span>` : ''}</div>
+        <div class="snippet${thread.fromMe ? ' me' : ''}">${thread.fromMe ? 'You: ' : ''}${esc(thread.snippet || '(photo or attachment)')}</div>
+        <div class="meta">${esc(thread.time ? thread.time + ' on Facebook' : '')}${thread.lastMessageAt ? ' · seen here ' + esc(thread.lastMessageAt.replace('T', ' ').slice(0, 16)) : ''}</div>
+        ${history.length ? `<details><summary>Earlier (${history.length})</summary><ul>${history.map(h => `<li>${h.fromMe ? 'You: ' : ''}${esc(h.snippet)} <span class="meta">${esc((h.seenAt || '').replace('T', ' ').slice(0, 16))}</span></li>`).join('')}</ul></details>` : ''}
+        <div class="actions">
+          ${safeUrl(thread.href) ? `<a class="btn primary" href="${esc(thread.href)}" target="_blank" rel="noopener">Reply on Facebook</a>` : ''}
+          ${search ? `<a class="btn" href="${esc(search)}" target="_blank" rel="noopener">Find in warehouse</a>` : ''}
+          ${thread.fromMe ? '' : `<button class="btn" type="button" data-handled="${thread.needsReply ? '1' : '0'}">${thread.needsReply ? 'Mark handled' : 'Needs reply again'}</button>`}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function render() {
+    renderReader();
+    document.querySelectorAll('[data-filter]').forEach(btn => btn.setAttribute('aria-pressed', String(btn.dataset.filter === state.filter)));
+    const shown = state.threads.filter(visible);
+    if (!shown.length) {
+      const none = state.threads.length
+        ? (state.filter === 'reply' ? 'No buyer is waiting on a reply.' : 'No chats in this view.')
+        : 'No Marketplace chats yet. They appear once the reader has looked at the inbox.';
+      $('list').innerHTML = `<div class="empty">${esc(none)}</div>`;
+      return;
+    }
+    $('list').innerHTML = shown.map(card).join('');
+  }
+
+  async function load() {
+    try {
+      const response = await fetch('/api/fb-marketplace/threads', { cache: 'no-store', credentials: 'same-origin' });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Could not load');
+      state.threads = data.threads || [];
+      state.reader = data.reader || null;
+      render();
+    } catch (error) {
+      $('list').innerHTML = `<div class="empty">Could not load Marketplace chats: ${esc(error.message)}</div>`;
+    }
+  }
+
+  document.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => {
+    state.filter = btn.dataset.filter;
+    try { localStorage.setItem('fbMessagesFilter', state.filter); } catch (e) { /* storage blocked */ }
+    render();
+  }));
+
+  $('list').addEventListener('click', async event => {
+    const btn = event.target.closest('[data-handled]');
+    if (!btn) return;
+    const id = btn.closest('[data-thread]').dataset.thread;
+    btn.disabled = true;
+    try {
+      const response = await fetch('/api/fb-marketplace/threads/' + encodeURIComponent(id) + '/handled', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ handled: btn.dataset.handled === '1' }) });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error || 'Failed');
+      await load();
+    } catch (error) {
+      btn.disabled = false;
+      alert('Could not update: ' + error.message);
+    }
+  });
+
+  load();
+  setInterval(() => { if (!document.hidden) load(); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+})();
+</script>
+</body>
+</html>

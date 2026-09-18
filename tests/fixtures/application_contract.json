@@ -6496,6 +6496,52 @@
       "defaults": null,
       "strict_slashes": true,
       "subdomain": ""
+    },
+    {
+      "rule": "/api/fb-marketplace/capture",
+      "endpoint": "api_fb_marketplace_capture",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb-marketplace/threads",
+      "endpoint": "api_fb_marketplace_threads",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/fb-marketplace/threads/<thread_id>/handled",
+      "endpoint": "api_fb_marketplace_handled",
+      "methods": [
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/fb-messages",
+      "endpoint": "fb_messages_page",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
     }
   ],
   "hooks": {

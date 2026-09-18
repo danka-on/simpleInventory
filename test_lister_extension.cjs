@@ -207,6 +207,12 @@ for (const file of [manifest.background.service_worker, manifest.side_panel.defa
 assert.ok(manifest.host_permissions.includes('https://pi.nexuscentralhq.org/*'));
 assert.ok(manifest.host_permissions.some(p => p.includes('ebay.com')) && manifest.host_permissions.some(p => p.includes('sellercentral.amazon.com')));
 assert.ok(manifest.content_scripts[0].matches.every(m => m.endsWith('/lister/*')), 'the update bridge only runs on the update page');
+// The Marketplace reader only runs on facebook.com/marketplace pages (never personal Messenger).
+const fbReader = manifest.content_scripts.find(entry => entry.js.includes('fb-inbox.js'));
+assert.ok(fbReader && fbReader.matches.every(m => m === 'https://www.facebook.com/marketplace/*'), 'the inbox reader is scoped to Marketplace');
+const fbReaderSource = fs.readFileSync(path.join(root, 'fb-inbox.js'), 'utf8');
+new vm.Script(fbReaderSource);
+assert.ok(!/\.click\(|dispatchEvent|execCommand|\.value\s*=/.test(fbReaderSource), 'the inbox reader never clicks or types');
 const panel = fs.readFileSync(path.join(root, 'sidepanel.html'), 'utf8');
 assert.ok(panel.includes('src="matcher.js"') && panel.includes('src="sidepanel.js"'));
 for (const id of ['connStatus', 'pageCard', 'itemList', 'detail', 'confirm', 'pickCard', 'settings', 'signin', 'toast',
