@@ -666,6 +666,8 @@ def register_routes():
         '_telegram_get_bot_token': ss_telegram._telegram_get_bot_token,
         # A photo link goes to the phone of whoever asked for it, once they linked their Telegram.
         '_telegram_chat_for_email': ss_telegram.telegram_chat_for_email,
+        # FB list: "Mark listed" records the Facebook listing where the rest of the app tracks them.
+        '_track_fb_listing': ss_facebook._track_fb_listing,
         'BASE_DIR': BASE_DIR,
     })
 

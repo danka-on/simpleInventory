@@ -176,8 +176,9 @@
   const reported = { platform: '', at: 0, stamp: '' };
   function reportPanel(open = true) {
     if (state.connected === false || !state.platform) return;
-    reported.platform = state.platform; reported.at = Date.now();
-    const body = JSON.stringify({ platform: state.platform, follow: state.settings.followPlus !== false, open });
+    const platform = state.view === 'fb' ? 'fb' : state.platform;
+    reported.platform = platform; reported.at = Date.now();
+    const body = JSON.stringify({ platform, follow: state.settings.followPlus !== false, open });
     fetch(serverBase() + '/api/lister/panel', { method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'manual', keepalive: true,
       headers: { 'Content-Type': 'application/json', 'X-Sweet-Shelves-Lister': '1' }, body })
       .then(r => r.json()).then(d => { if (open && d?.queueStamp && reported.stamp && d.queueStamp !== reported.stamp) queueChanged(); })
@@ -190,6 +191,7 @@
   function queueChanged() {
     clearTimeout(queueNudge);
     queueNudge = setTimeout(() => { if (state.connected !== false) void loadQueue({ keep: true }); }, 300);
+    globalThis.SSListerFb?.changed();
   }
   setInterval(() => { if (document.visibilityState === 'visible') reportPanel(); }, 15000);
   document.addEventListener('visibilitychange', () => reportPanel(document.visibilityState === 'visible'));
@@ -1574,11 +1576,12 @@
   // The panel is in one place at a time: the queue, or one item. The crumb is the way back.
   function renderStoreBar() {
     for (const p of ['ebay', 'amazon']) {
-      $(p === 'ebay' ? 'storeEbay' : 'storeAmazon').setAttribute('aria-selected', String(state.platform === p));
+      $(p === 'ebay' ? 'storeEbay' : 'storeAmazon').setAttribute('aria-selected', String(state.platform === p && state.view !== 'fb'));
       const c = state.counts[p] || {};
       $(p === 'ebay' ? 'countEbay' : 'countAmazon').textContent = c.queued != null ? c.queued : '';
     }
     $('storeNew').setAttribute('aria-selected', String(state.view === 'new'));
+    $('storeFb').setAttribute('aria-selected', String(state.view === 'fb'));
     const item = current();
     const onItem = state.view === 'item' && Boolean(item);
     const onNew = state.view === 'new';
@@ -1588,7 +1591,7 @@
     if (onNew) $('crumbNow').textContent = 'New item';
     else if (onItem) $('crumbNow').textContent = locked?.title || item.title || item.upc;
     $('crumbLock').hidden = !state.locked || onNew;
-    $('listCard').hidden = onItem || onNew;
+    $('listCard').hidden = onItem || onNew || state.view === 'fb';
     renderActionBar();
   }
 
@@ -1683,6 +1686,7 @@
     const item = current();
     const page = state.page || {};
     const g = state.guide;
+    if (state.view === 'fb') return globalThis.SSListerFb?.action() || { label: 'Facebook', disabled: true };
     if (state.view === 'new') {
       const draft = state.newItem.draft;
       if (!draft) return { label: 'Start a new item', run: () => newStart() };
@@ -1734,6 +1738,7 @@
 
   // Everything else you could do right here, one level down.
   function moreActions() {
+    if (state.view === 'fb') return globalThis.SSListerFb?.more() || [];
     const item = current();
     const info = detail();
     const page = state.page || {};
@@ -2847,7 +2852,10 @@
   }
 
   function setView(view) {
+    const wasFb = state.view === 'fb';
     state.view = view; renderStoreBar(); renderDetail(); renderConfirm(); renderNew();
+    globalThis.SSListerFb?.show(view === 'fb');
+    if (wasFb !== (view === 'fb')) reportPanel();
     if (view !== 'new') clearTimeout(state.newItem.timer);
     if (view === 'item' && state.currentUpc) void loadDetail(state.currentUpc);
   }
@@ -2878,8 +2886,9 @@
     $('openUpdates').onclick = () => chrome.tabs.create({ url: serverBase() + '/lister/' });
     $('signinBtn').onclick = () => chrome.tabs.create({ url: serverBase() + '/lister/' });
     $('connStatus').onclick = () => { state.connected = null; renderHeader(); void connect().then(() => loadQueue()); };
-    $('storeEbay').onclick = () => setPlatform('ebay');
-    $('storeAmazon').onclick = () => setPlatform('amazon');
+    $('storeEbay').onclick = () => { if (state.view === 'fb') setView('list'); setPlatform('ebay'); };
+    $('storeAmazon').onclick = () => { if (state.view === 'fb') setView('list'); setPlatform('amazon'); };
+    $('storeFb').onclick = () => setView('fb');
     $('storeNew').onclick = () => void newStart();
     $('backToQueue').onclick = () => { state.locked = null; setView('list'); };
     $('goBtn').onclick = () => { const action = nextAction(); if (!action.disabled && action.run) void action.run(); };
@@ -2917,6 +2926,10 @@
     chrome.tabs.onUpdated.addListener((tabId, info, tab) => { if (tab?.active && info.status === 'complete') setTimeout(scheduleRefresh, 2500); });
   }
 
+  // sidepanel-fb.js (the FB tab) works through these instead of its own copies.
+  globalThis.SSListerPanel = { api, serverBase, esc, toast, busy, setHtml, renderActionBar, openMenu: () => openMore(),
+                               get connected() { return state.connected; } };
+
   async function main() {
     await loadStorage();
     wireStatic();
@@ -2925,6 +2938,7 @@
     await connect();
     // The queue first, so a panel opened on the store's search page already has an item to search.
     await loadQueue();
+    if (await globalThis.SSListerFb?.wasOpen()) setView('fb');
     await refreshTab();
     watchPhonePhotos();
     // A draft left open in an earlier session is still being filled by somebody's phone.

@@ -377,6 +377,8 @@
     .agent-store{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle}
     .agent-store.ebay{background:#2563eb}
     .agent-store.amazon{background:#d97706}
+    .agent-store.fb{background:#1877f2}
+    .agent-listed.fb-on{color:#1877f2}
     /* Filter dropdown panel */
     .dropdown-panel{display:none;position:fixed;z-index:10000;min-width:280px;max-width:92vw;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px}
     .dropdown-section{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
@@ -1202,7 +1204,7 @@ function _listagentQueueUiState(queueItem){
   };
 }
 
-const AGENT_STORE_NAMES = { ebay: 'eBay', amazon: 'Amazon' };
+const AGENT_STORE_NAMES = { ebay: 'eBay', amazon: 'Amazon', fb: 'Facebook' };
 
 // The Lister side panel (through its queue-bridge.js on this page) reloads its list at once.
 function notifyListerQueue(){
@@ -1219,14 +1221,17 @@ function agentListedStores(upc){
   const st = agentStoreState[upc];
   const q = listingAgentQueueState[upc] || null;
   const fromQueue = p => !!(q && (q[`listed_${p}_at`] || String(q.listed_platform || '').toLowerCase().includes(p)));
-  return ['ebay', 'amazon'].filter(p => (st ? st[p] === 'listed' : false) || fromQueue(p));
+  return ['ebay', 'amazon', 'fb'].filter(p => (st ? st[p] === 'listed' : false) || (p !== 'fb' && fromQueue(p)));
 }
 
 // The Listing Agent cell: "Listed on eBay ✓" / "Listed on Amazon ✓" (both when both), then the button.
 function agentCellInner(upc, titleEnc = '', itemStatus = ''){
   const listed = agentListedStores(upc);
-  const lines = listed.map(p => `<div class="agent-listed">Listed on ${AGENT_STORE_NAMES[p]} \u2713</div>`).join('');
   const st = agentStoreState[upc] || null;
+  // The Facebook list is opt-in (the FB tab of the Lister): say so wherever the button cannot.
+  const fbOn = st && st.fb === 'on' && !(agentPanel.active && agentPanel.platform === 'fb')
+    ? '<div class="agent-listed fb-on">On Facebook list</div>' : '';
+  const lines = listed.map(p => `<div class="agent-listed">Listed on ${AGENT_STORE_NAMES[p]} \u2713</div>`).join('') + fbOn;
   let label = '', title = '', active = false;
   if(agentPanel.active){
     const p = agentPanel.platform, name = AGENT_STORE_NAMES[p];
@@ -1234,7 +1239,7 @@ function agentCellInner(upc, titleEnc = '', itemStatus = ''){
     if(st && st[p] === 'on'){ label = `On ${name} list`; title = `On the ${name} list in the Lister (click to take it off ${name})`; active = true; }
     else { label = `+ ${name}`; title = `Add to the ${name} list in the Lister (the side panel is on ${name})`; }
   } else {
-    if(listed.length === 2) return lines;
+    if(listed.filter(p => p !== 'fb').length === 2) return lines;
     const ui = _listagentQueueUiState(listingAgentQueueState[upc] || null);
     if(ui.disabled && listed.length) return lines;
     label = ui.label; title = ui.title; active = ui.active;

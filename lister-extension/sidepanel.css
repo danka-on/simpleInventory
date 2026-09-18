@@ -26,6 +26,8 @@
   --ebay-soft: #e6eefb;
   --amazon: #c26a00;
   --amazon-soft: #fdefdc;
+  --fb: #1877f2;
+  --fb-soft: #e7f0fd;
   --back: #c0392b;
   --note-bg: #fff8d6;
   --note-edge: #e6c54a;
@@ -59,6 +61,8 @@
   --ebay-soft: #14243f;
   --amazon: #f0a23c;
   --amazon-soft: #3a2a0e;
+  --fb: #6ea8ff;
+  --fb-soft: #14223d;
   --back: #d9544a;
   --note-bg: #3b3110;
   --note-edge: #7d6820;
@@ -112,6 +116,7 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 .store[aria-selected="true"] { color: var(--ink); border-bottom-color: currentColor; }
 .store.ebay[aria-selected="true"] { color: var(--ebay); background: var(--ebay-soft); }
 .store.amazon[aria-selected="true"] { color: var(--amazon); background: var(--amazon-soft); }
+.store.fb[aria-selected="true"] { color: var(--fb); background: var(--fb-soft); }
 .sys { display: flex; align-items: center; gap: 2px; padding: 0 6px 0 8px; border-left: 1px solid var(--line-2); }
 .conn { width: 9px; height: 9px; padding: 0; border-radius: 50%; border: 0; background: var(--faint); flex: none; }
 .conn.ok { background: var(--green); }
@@ -552,3 +557,26 @@ button.tiny.phone-btn .phone-ico { font-size: 13px; line-height: 1; }
 /* The first signal is the one that matters: it keeps its words, a second one gives way. */
 .item .sub .upc + .sig { flex: none; }
 .item .sub .sig + .sig { flex: 0 1 auto; min-width: 0; }
+
+/* FB tab (sidepanel-fb.js): review, then one Facebook workbook. */
+.fbview .fb-title { font-weight: 700; display: flex; align-items: center; gap: 7px; margin-bottom: 2px; }
+.fbview .fb-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--fb); color: #fff; font-size: 12px; font-weight: 800; }
+.fbview .fb-batch + .fb-batch { border-top: 1px solid var(--line-2); margin-top: 8px; padding-top: 8px; }
+.fbview .fb-steps { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
+.fbview .fb-list { max-height: none; }
+.fbview .fb-row.ready .stripe { background: var(--green); }
+.fbview .fb-status { font-weight: 600; color: var(--muted); }
+.fbview .fb-status.ready { color: var(--green); }
+.fbview .fb-status.in_template { color: var(--amber); }
+.fbview .fb-bad { color: var(--red); }
+.fbview .fb-empty { padding: 18px 10px; text-align: center; }
+.fbview .fb-editbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.fbview .fb-lock { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: var(--amber-soft); color: var(--amber); }
+.fbview .fb-note { margin-top: 8px; padding: 6px 8px; border-radius: 6px; background: var(--note-bg); color: var(--note-ink); border: 1px solid var(--note-edge); }
+.fbview .fb-photos { display: flex; gap: 6px; overflow-x: auto; margin-top: 8px; min-height: 20px; }
+.fbview .fb-photos img { width: 64px; height: 64px; object-fit: cover; border-radius: 7px; background: var(--chip); flex: none; }
+.fbview .fb-two { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
+.fbview .fb-n { float: right; font-variant-numeric: tabular-nums; color: var(--faint); }
+.fbview #fbCatSearch { margin-top: 6px; }
+.fbview .fb-results { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; max-height: 180px; overflow: auto; }
+.fbview .fb-cat { text-align: left; font-size: 12px; padding: 4px 8px; background: var(--card-2); }

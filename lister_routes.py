@@ -2021,8 +2021,8 @@ class Lister:
     PANEL_FRESH_SECONDS = 45
 
     def panel_report(self, email, *, platform, follow=True, open_=True):
-        if platform not in PLATFORMS:
-            raise ListerError('platform must be ebay or amazon')
+        if platform not in PLATFORMS + ('fb',):  # fb: the Facebook list (lister_fb.py)
+            raise ListerError('platform must be ebay, amazon or fb')
         with self.db('listagent.db') as conn:
             cur = conn.cursor()
             self.init_tables(cur)
@@ -2093,10 +2093,14 @@ class Lister:
                     else:
                         entry[p] = 'off'
                 out[raw] = entry
+        if getattr(self, 'fb_list', None) is not None:
+            self.fb_list.merge_states(out)  # adds 'fb' only for items on the Facebook list
         return out
 
     def set_store(self, upc, *, platform, on, only=False, fresh=False, actor=''):
         """Put an item on one store's list (and, with only, keep it off the other) or take it off."""
+        if platform == 'fb' and getattr(self, 'fb_list', None) is not None:
+            return self.fb_list.set_store(upc, on=on, only=only, fresh=fresh, actor=actor)
         if platform not in PLATFORMS:
             raise ListerError('platform must be ebay or amazon')
         raw = _text(upc)
@@ -3133,4 +3137,7 @@ def register(app, deps):
     lister_new_item.register(app, lister, deps)
     import lister_stats
     lister_stats.register(app, lister)
+    # FB: the Facebook Marketplace list, reviewed in the panel and uploaded as Facebook's workbook.
+    import lister_fb
+    lister_fb.register(app, lister, deps)
     return lister

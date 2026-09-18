@@ -24,7 +24,7 @@ TESTS = [
     'test_prep_fallback_lookup', 'test_prep_plus', 'test_prep_unmatched',
     'test_pnl_report', 'test_listing_proposals',
     'test_listing_reconciliation', 'test_reconciliation_ai', 'test_voice_notes',
-    'test_lister', 'test_fb_marketplace',
+    'test_lister', 'test_fb_marketplace', 'test_lister_fb',
 ]
 
 
@@ -42,6 +42,8 @@ def main():
         if (ROOT / 'tests' / 'fixtures').is_dir():
             shutil.copytree(ROOT / 'tests' / 'fixtures', destination / 'tests' / 'fixtures')
         shutil.copytree(ROOT / 'templates', destination / 'templates')
+        if (ROOT / 'data').is_dir():  # Facebook's bulk-upload template and categories
+            shutil.copytree(ROOT / 'data', destination / 'data')
         if (ROOT / 'lister-extension').is_dir():
             shutil.copytree(ROOT / 'lister-extension', destination / 'lister-extension',
                             ignore=shutil.ignore_patterns('__pycache__'))

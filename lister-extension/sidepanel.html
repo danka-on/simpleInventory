@@ -14,6 +14,7 @@
   <div class="stores" role="tablist">
     <button id="storeEbay" class="store ebay" type="button" role="tab" aria-selected="true">eBay <span id="countEbay" class="n"></span></button>
     <button id="storeAmazon" class="store amazon" type="button" role="tab" aria-selected="false">Amazon <span id="countAmazon" class="n"></span></button>
+    <button id="storeFb" class="store fb" type="button" role="tab" aria-selected="false" title="Facebook Marketplace: review, then one workbook for Facebook's bulk upload">FB <span id="countFb" class="n"></span></button>
     <button id="storeNew" class="store new" type="button" role="tab" aria-selected="false" title="Describe an item that is on no BOL yet">+ NEW</button>
   </div>
   <div class="sys">
@@ -125,6 +126,10 @@
 
 <section id="detail" class="detail" hidden></section>
 
+<!-- FB: Facebook Marketplace has no listing API. Items are reviewed here and go into Facebook's own
+     bulk-upload workbook, which is uploaded on Facebook (sidepanel-fb.js). -->
+<section id="fbCard" class="fbview" hidden></section>
+
 <section id="confirm" class="confirm" hidden></section>
 
 <div id="modal" class="modal" hidden></div>
@@ -138,6 +143,7 @@
 </footer>
 
 <script src="matcher.js"></script>
+<script src="sidepanel-fb.js"></script>
 <script src="sidepanel.js"></script>
 </body>
 </html>
