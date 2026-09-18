@@ -2348,6 +2348,8 @@
     const data = await newPost('/barcode', { barcode, kind: kind || 'scanned' }, 'Saving the barcode…');
     if (!data) return false;
     state.newItem.barcodeDraft = '';
+    state.newItem.recode = false;
+    renderNew();
     if (data.systemTitle) toast('We already know this code: ' + data.systemTitle);
     if (data.link && data.link.kind === 'photos') toast('Name found — the phone was re-sent a photos-only link');
     if (data.linkError) toast('The new link did not send: ' + data.linkError, true);
@@ -2418,11 +2420,44 @@
       toast('Label sent to the printer');
       return true;
     } catch (error) {
-      toast(error.message, true);
+      // A queued label still prints later from the print queue page, the way Prep + does it.
+      try {
+        await api('/api/print-queue', { method: 'POST', body: { title: description || 'New item', barcode: code } });
+        toast((error.message || 'The printer did not answer.') + ' Added to the print queue instead.', true);
+      } catch {
+        toast(error.message, true);
+      }
       return false;
     } finally {
       done();
     }
+  }
+
+  // Generate: the next code of ours goes on the item and its label prints straight away.
+  async function newGenerateCode() {
+    const done = busy('Taking the next code\u2026');
+    let code = '';
+    try {
+      code = (await api('/api/items-prep/generate-barcode', { method: 'POST', body: {} })).barcode || '';
+    } catch (error) {
+      toast(error.message, true);
+    } finally {
+      done();
+    }
+    if (!code || !(await newSetBarcode(code, 'generated'))) return;
+    await newPrintLabel(code, (newDraft() || {}).title);
+  }
+
+  // Print for a code typed into the box: it becomes the item's code, then its label prints.
+  async function newPrintTyped(code) {
+    code = String(code || '').trim();
+    if (!code) { toast('Type or scan a code first, or press Generate.', true); return; }
+    const draft = newDraft();
+    if (!draft || draft.upc !== code) {
+      // Typed by hand it is still the item's own code; a 777 one is ours.
+      if (!(await newSetBarcode(code, /^777\d{9}$/.test(code) ? 'generated' : 'scanned'))) return;
+    }
+    await newPrintLabel(code, (newDraft() || {}).title);
   }
 
   async function newSubmit() {
@@ -2466,53 +2501,12 @@
     state.newItem.draft = null;
     state.newItem.id = null;
     state.newItem.barcodeDraft = '';
+    state.newItem.recode = false;
     // A blank card after a blank card is the same markup, and setHtml would keep the old boxes -
     // with the half-typed barcode and name still in them. Forget them so it draws afresh.
     for (const id of ['newHead', 'newFields', 'newPhotos']) written.delete($(id));
     remember();
     await newStart();
-  }
-
-  // The same choices the "No barcode" modal on /barcode gives you: type the code that is on the
-  // item or take the next one of ours. Either way the code goes on the item and its label prints
-  // straight away on the Item Prep printer - a code given here always needs a sticker.
-  function newNoBarcodeModal() {
-    const box = $('modal');
-    box.hidden = false;
-    box.innerHTML = '<div class="box" role="dialog" aria-modal="true"><strong>No barcode</strong>' +
-      '<p class="muted small">Type the code that is on the item, or take the next one of ours. The label prints on its own.</p>' +
-      '<input id="nbCode" class="wide" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Barcode">' +
-      '<div class="row"><button id="nbGen" type="button">Generate one</button>' +
-      '<button id="nbUse" class="primary" type="button">Use it</button><button id="nbCancel" type="button">Cancel</button></div>' +
-      '<p class="small muted" id="nbStatus"></p></div>';
-    const close = () => { box.hidden = true; box.innerHTML = ''; box.onclick = null; };
-    const say = (message, bad) => { $('nbStatus').textContent = message; $('nbStatus').className = 'small ' + (bad ? 'bad' : 'muted'); };
-    const useAndPrint = async (code, kind) => {
-      if (!(await newSetBarcode(code, kind))) return false;
-      close();
-      await newPrintLabel(code, (newDraft() || {}).title);
-      return true;
-    };
-    $('nbCode').focus();
-    $('nbGen').onclick = async () => {
-      $('nbGen').disabled = true;
-      say('Taking the next code…');
-      try {
-        const data = await api('/api/items-prep/generate-barcode', { method: 'POST', body: {} });
-        $('nbCode').value = data.barcode || '';
-        if (await useAndPrint(data.barcode, 'generated')) return;
-      } catch (error) { say(error.message, true); }
-      $('nbGen').disabled = false;
-    };
-    $('nbUse').onclick = async () => {
-      const code = $('nbCode').value.trim();
-      if (!code) { say('Type or generate a code first.', true); return; }
-      // Typed by hand it is still the item's own code; a 777 one is ours.
-      await useAndPrint(code, /^777\d{9}$/.test(code) ? 'generated' : 'scanned');
-    };
-    $('nbCancel').onclick = close;
-    box.onclick = event => { if (event.target === box) close(); };
-    $('nbCode').onkeydown = event => { if (event.key === 'Enter') { event.preventDefault(); $('nbUse').click(); } };
   }
 
   // -- marking a photo ------------------------------------------------------------------------
@@ -2677,15 +2671,20 @@
     renderActionBar();
   }
 
-  // Step 1, the only one done at the bench: scan the code, or take one of ours and print it.
+  // Step 1, the only one done at the bench: scan the code, or Generate one of ours (it prints on its
+  // own), or type one and press Print. No popup: everything sits on the card.
   function renderNewCode(draft) {
-    const body = draft.upc
+    const editing = !draft.upc || state.newItem.recode;
+    const body = !editing
       ? '<div class="row tight"><b class="mono grow">' + esc(draft.upc) + '</b>' +
         '<button id="newRecode" class="tiny" type="button" title="Put a different code on it">Change</button></div>' +
         '<button id="newPrint" class="printbtn" type="button" title="Print this barcode on the Item Prep printer">' + PRINTER_SVG + '<span>Print label</span></button>'
       : '<div class="row tight"><div class="search grow"><span aria-hidden="true">\u2337</span>' +
-        '<input id="newBarcode" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Scan the barcode"></div>' +
-        '<button id="newNoCode" type="button" title="Take the next code of ours and print it">No barcode</button></div>';
+        '<input id="newBarcode" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="Scan or type the barcode"></div>' +
+        '<button id="newGen" type="button" title="Take the next code of ours; its label prints on its own">Generate</button></div>' +
+        '<button id="newPrintTyped" class="printbtn" type="button" title="Put the code typed above on the item and print its label" disabled>' +
+        PRINTER_SVG + '<span>Print label</span></button>' +
+        (draft.upc ? '<button id="newRecodeCancel" class="tiny" type="button">Keep ' + esc(draft.upc) + '</button>' : '');
     const html = stepHtml({
       n: 1, tone: draft.upc ? 'done' : 'need', label: 'Barcode',
       sub: draft.upc ? (draft.upcKind === 'generated' ? 'ours, printed' : 'the item\u2019s own') : 'scan it now',
@@ -2695,19 +2694,23 @@
     const field = $('newBarcode');
     if (field) {
       field.value = state.newItem.barcodeDraft || '';
-      field.oninput = () => { state.newItem.barcodeDraft = field.value; };
+      const printTyped = $('newPrintTyped');
+      printTyped.disabled = !field.value.trim();
+      field.oninput = () => { state.newItem.barcodeDraft = field.value; printTyped.disabled = !field.value.trim(); };
+      printTyped.onclick = () => void newPrintTyped(field.value);
       // A scanner types the code and presses Enter for you; a person can too.
       field.onkeydown = event => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
         const code = field.value.trim();
-        if (code) void newSetBarcode(code, 'scanned');
+        if (code) void newSetBarcode(code, /^777\d{9}$/.test(code) ? 'generated' : 'scanned');
       };
       field.focus();
     }
-    if ($('newNoCode')) $('newNoCode').onclick = () => newNoBarcodeModal();
+    if ($('newGen')) $('newGen').onclick = () => void newGenerateCode();
     if ($('newPrint')) $('newPrint').onclick = () => void newPrintLabel(draft.upc, draft.title);
-    if ($('newRecode')) $('newRecode').onclick = () => newNoBarcodeModal();
+    if ($('newRecode')) $('newRecode').onclick = () => { state.newItem.recode = true; state.newItem.barcodeDraft = ''; renderNew(); };
+    if ($('newRecodeCancel')) $('newRecodeCancel').onclick = () => { state.newItem.recode = false; renderNew(); };
     $('newRestart').onclick = () => void newRestart();
   }
 

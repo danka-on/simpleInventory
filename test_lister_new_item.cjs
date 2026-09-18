@@ -150,13 +150,12 @@ const draft = {
     assert.equal(await panel.textContent('#goBtn'), 'Needs a barcode and a name');
     assert.ok(await panel.$eval('#goBtn', el => el.disabled), 'nothing to submit yet');
 
-    // 2. The "No barcode" modal takes the next code of ours, puts it on the item and prints it
-    //    without being asked.
-    await panel.click('#newNoCode');
-    await panel.waitForSelector('#nbCode');
-    await panel.click('#nbGen');
-    await panel.waitForFunction(() => document.getElementById('modal').hidden, null, { timeout: 10000 });
+    // 2. Generate, right beside the box (no popup), takes the next code of ours, puts it on the
+    //    item and prints it without being asked.
+    assert.ok(await panel.$eval('#newPrintTyped', el => el.disabled), 'nothing typed, nothing to print');
+    await panel.click('#newGen');
     for (let i = 0; i < 50 && !calls.print.length; i += 1) await panel.waitForTimeout(100);
+    assert.ok(await panel.$eval('#modal', el => el.hidden), 'no popup');
     assert.equal(calls.barcode.at(-1).barcode, '777000000042');
     assert.equal(calls.barcode.at(-1).kind, 'generated');
     assert.equal(calls.print.length, 1, 'a generated code prints on its own');
@@ -167,14 +166,18 @@ const draft = {
     for (let i = 0; i < 50 && calls.print.length < 2; i += 1) await panel.waitForTimeout(100);
     assert.equal(calls.print.length, 2, 'the printer button reprints');
 
-    // 2b. A code typed by hand in the same modal prints on its own too.
+    // 2b. Change opens the box again in place; a code typed there prints with the Print button.
     await panel.click('#newRecode');
-    await panel.waitForSelector('#nbCode');
-    await panel.fill('#nbCode', '4006381333931');
-    await panel.click('#nbUse');
+    await panel.waitForSelector('#newBarcode');
+    assert.ok(await panel.$eval('#modal', el => el.hidden), 'still no popup');
+    await panel.fill('#newBarcode', '4006381333931');
+    assert.ok(!(await panel.$eval('#newPrintTyped', el => el.disabled)), 'a typed code can be printed');
+    await panel.click('#newPrintTyped');
     for (let i = 0; i < 50 && calls.print.length < 3; i += 1) await panel.waitForTimeout(100);
     assert.equal(calls.barcode.at(-1).kind, 'scanned', 'a typed code is the item’s own');
     assert.equal(calls.print.at(-1).upc, '4006381333931', 'a typed code prints on its own');
+    await panel.waitForFunction(() => !document.getElementById('newBarcode') && document.getElementById('newRecode'), null, { timeout: 5000 });
+    assert.ok((await panel.textContent('#newHead')).includes('4006381333931'), 'and the card shows it as the code again');
 
     // 2c. Start over: the old item goes, a blank one opens with a fresh phone link.
     await panel.click('#newRestart');
