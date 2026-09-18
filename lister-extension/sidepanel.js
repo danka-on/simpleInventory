@@ -1536,24 +1536,31 @@
 
   // The automatic switches. They live in Settings and nowhere else, so nothing on the work surface
   // can be knocked by accident; the item view reports what they are set to in one line.
+  // The switch rows alone. `prefix` keeps the ids unique when the item's Options box shows them too.
+  function autoRows(prefix = '') {
+    const items = AUTO_TOGGLES;
+    const s = state.settings;
+    const groups = [...new Set(items.map(t => t.group))];
+    const row = t => {
+      const dim = t.sub && !s.autoSendPhotos;
+      return `<label class="sw${t.sub ? ' sub' : ''}${dim ? ' dim' : ''}" title="${esc(t.hint)}">
+          <input id="${prefix}${t.key}" data-auto="${t.key}" type="checkbox" role="switch" ${s[t.key] ? 'checked' : ''}><span class="track" aria-hidden="true"></span>
+          <span class="ico" aria-hidden="true">${t.icon}</span><span class="txt"><b>${esc(t.label)}</b><small>${esc(t.hint)}</small></span></label>`;
+    };
+    return groups.map(g => `<div class="tgroup"><div class="tg-title">${esc(g)}</div>${items.filter(t => t.group === g).map(row).join('')}</div>`).join('');
+  }
+
   function autoMenu() {
     const items = AUTO_TOGGLES;
     const open = Boolean(state.settings.togglesOpen);
     const s = state.settings;
     const on = items.filter(t => s[t.key] && !t.sub).map(t => t.short + (t.key === 'autoSendPhotos' && s.autoSendAiOnly ? ' (AI only)' : ''));
-    const groups = [...new Set(items.map(t => t.group))];
-    const row = t => {
-      const dim = t.sub && !s.autoSendPhotos;
-      return `<label class="sw${t.sub ? ' sub' : ''}${dim ? ' dim' : ''}" title="${esc(t.hint)}">
-          <input id="${t.key}" data-auto="${t.key}" type="checkbox" role="switch" ${s[t.key] ? 'checked' : ''}><span class="track" aria-hidden="true"></span>
-          <span class="ico" aria-hidden="true">${t.icon}</span><span class="txt"><b>${esc(t.label)}</b><small>${esc(t.hint)}</small></span></label>`;
-    };
     return `<div class="toggles${open ? ' open' : ''}">
         <button id="togglesBtn" class="toggles-head" type="button" aria-expanded="${open}" title="${open ? 'Hide' : 'Show'} the automatic switches">
           <span class="caret">${open ? '\u25be' : '\u25b8'}</span><span class="lbl">Automatic</span>
           <span class="sum ${on.length ? 'on' : 'muted'}">${on.length ? on.map(x => `<span class="pill">${esc(x)}</span>`).join('') : 'all off'}</span></button>
         <div class="toggles-body"${open ? '' : ' hidden'}>
-          ${groups.map(g => `<div class="tgroup"><div class="tg-title">${esc(g)}</div>${items.filter(t => t.group === g).map(row).join('')}</div>`).join('')}
+          ${autoRows()}
         </div>
       </div>`;
   }
@@ -1572,7 +1579,11 @@
     box.innerHTML = autoMenu();
     const head = $('togglesBtn');
     head.onclick = async () => { await saveSettings({ ...state.settings, togglesOpen: !state.settings.togglesOpen }); renderAutoMenu(); };
-    for (const check of box.querySelectorAll('input[data-auto]')) check.onchange = async () => {
+    wireAutoChecks(box);
+  }
+
+  function wireAutoChecks(scope) {
+    for (const check of scope.querySelectorAll('input[data-auto]')) check.onchange = async () => {
       const key = check.dataset.auto;
       const on = check.checked;
       await saveSettings({ ...state.settings, [key]: on });
@@ -2015,7 +2026,8 @@
       <div class="gearrow"><button id="gearBtn" class="gear" type="button" aria-expanded="${state.gearOpen ? 'true' : 'false'}" title="What happens by itself, prompts and specifics, and the manual Confirm &amp; link">⚙ Options${state.gearOpen ? '' : ' · <span class="gearsum">' + esc(autoSummary()) + '</span>'}</button></div>
 
       <div class="gearbox" ${state.gearOpen ? '' : 'hidden'}>
-      <div class="autoline">By itself: <b>${esc(autoSummary())}</b><button class="edit" id="autoEdit" type="button">Change</button></div>
+      <div class="autoline">By itself: <b>${esc(autoSummary())}</b><button class="edit" id="autoEdit" type="button" aria-expanded="${state.autoEditOpen ? 'true' : 'false'}">${state.autoEditOpen ? 'Done' : 'Change'}</button></div>
+      ${state.autoEditOpen ? `<div class="toggles-body autoinline" id="autoInline">${autoRows('i_')}</div>` : ''}
 
       <details class="adv" id="advBox" ${state.advOpen ? 'open' : ''}><summary>Advanced \u2014 prompts, specifics, manual link</summary>
         <div class="inner">
@@ -2035,7 +2047,8 @@
     if ($('markExisting')) $('markExisting').onclick = () => markExisting(item);
     $('gearBtn').onclick = () => { state.gearOpen = !state.gearOpen; renderDetail(); renderConfirm(); };
     $('advBox').ontoggle = () => { state.advOpen = $('advBox').open; };
-    $('autoEdit').onclick = () => { $('settings').hidden = false; renderAutoMenu(); $('settings').scrollIntoView({ block: 'nearest' }); };
+    $('autoEdit').onclick = () => { state.autoEditOpen = !state.autoEditOpen; renderDetail(); if (state.autoEditOpen) $('autoInline')?.scrollIntoView({ block: 'nearest' }); };
+    if ($('autoInline')) wireAutoChecks($('autoInline'));
     for (const button of el.querySelectorAll('button[data-transcribe]')) button.onclick = () => transcribe(info.upc, Number(button.dataset.transcribe), Boolean(button.dataset.again));
     for (const button of el.querySelectorAll('button[data-locpv]')) button.onclick = () => locPreview.open(button.dataset.locpv);
     for (const button of el.querySelectorAll('button[data-play]')) button.onclick = () => {

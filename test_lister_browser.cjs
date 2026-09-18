@@ -613,6 +613,15 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await panel.waitForFunction(() => document.getElementById('aiPromptWhere').textContent === 'the default prompt', null, { timeout: 10000 });
     assert.equal(await panel.$eval('#aiPrompt', el => el.value), 'Clean up this product photo.', 'reset goes back to the default prompt');
 
+    // "Change" next to "By itself" opens the automatic switches right there - not the Settings card
+    // the header gear opens (server, name, ...).
+    await panel.click('#autoEdit');
+    await panel.waitForSelector('#autoInline input#i_autoAiTitle');
+    assert.equal(await panel.$eval('#settings', el => el.hidden), true, 'Change must not open the server settings');
+    assert.equal(await panel.$eval('#autoEdit', el => el.textContent), 'Done');
+    await panel.click('#autoEdit');
+    await panel.waitForFunction(() => !document.getElementById('autoInline'));
+
     // Nothing ticked: by default only AI generated photos go, and never a too-small one.
     // clear every tick (each photo has its own checkbox)
     for (const box of await panel.$$('.photo.selected input[data-select]')) await box.click();
