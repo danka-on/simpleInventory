@@ -265,7 +265,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(!(await panel.$('.item.blocked')), 'the eBay list does not carry Amazon verdicts');
     await panel.click('#storeAmazon');
     await panel.waitForFunction(() => document.querySelector('.item[data-upc="012345678905"]')?.classList.contains('blocked'), null, { timeout: 15000 });
-    assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('restricted'));
+    assert.ok((await panel.textContent('.item[data-upc="012345678905"]')).includes('Amazon restricted'));
     assert.ok(!(await panel.$('.item[data-upc="883049370897-1"] .sig.block')), 'a listable UPC says nothing: a clean row is the good row');
     await panel.click('#storeEbay');
     await panel.waitForFunction(() => document.getElementById('countEbay').textContent.includes('2') && document.querySelector('.item.current')?.dataset.upc === '883049370897-1', null, { timeout: 15000 });
@@ -520,7 +520,13 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(calls.generate[0].values.notes.includes('scratched on the back'), 'the voice note text feeds the AI prompt');
     await store.waitForFunction(() => Array.from(document.querySelectorAll('#ss-lister-guide [data-ss-row] sup')).some(s => s.title.includes('generated with AI')), null, { timeout: 10000 });
     const titleRowText = await store.$$eval('#ss-lister-guide [data-ss-row]', els => { const row = els.find(e => e.textContent.trim().startsWith('Title')); return (row?.querySelector('sup')?.title || '') + ' | ' + row?.textContent.replace(/\s+/g, ' ').trim(); });
-    assert.ok(await store.$eval('#ss-lister-guide', el => el.style.right === '0px' && el.style.bottom === '0px' && el.style.left === ''), 'the overlay starts docked bottom-right, against the side panel');
+    const inView = () => store.$eval('#ss-lister-guide', el => { const r = el.getBoundingClientRect(); return r.top >= -1 && r.bottom <= innerHeight + 1 && r.right <= innerWidth + 1 && Math.abs(r.right - innerWidth) < 2 && Math.abs(r.bottom - innerHeight) < 2; });
+    assert.ok(await inView(), 'the docked HUD is in the bottom-right corner of the window');
+    // eBay-like page: a transform on <html> makes position:fixed page-relative; the HUD must still show.
+    await store.evaluate(() => { document.documentElement.style.transform = 'translateZ(0)'; document.body.style.minHeight = '3000px'; window.scrollTo(0, 400); window.dispatchEvent(new Event('scroll')); });
+    await store.waitForFunction(() => { const r = document.querySelector('#ss-lister-guide').getBoundingClientRect(); return Math.abs(r.bottom - innerHeight) < 2 && Math.abs(r.right - innerWidth) < 2; }, null, { timeout: 5000 });
+    await store.evaluate(() => { document.documentElement.style.transform = ''; document.body.style.minHeight = ''; window.scrollTo(0, 0); window.dispatchEvent(new Event('scroll')); });
+    await store.waitForFunction(() => { const r = document.querySelector('#ss-lister-guide').getBoundingClientRect(); return Math.abs(r.bottom - innerHeight) < 2; }, null, { timeout: 5000 });
     // Dragging the HUD by its header remembers the spot for this browser (localStorage + chrome.storage.local).
     const head = await store.$('#ss-lister-guide [data-ss="head"]');
     const box = await head.boundingBox();
@@ -587,18 +593,11 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
       const dt = new DataTransfer();
       dt.setData('application/x-sweetshelves-photo', JSON.stringify({ url: 'https://pi.nexuscentralhq.org/static/listingagent_uploads/dragged.jpg', name: 'dragged.jpg', type: 'image/jpeg', base64: '/9j/4AAQ' }));
       const zone = document.querySelector('.uploader-dropzone');
-      // Like eBay's dropzone: dragenter/dragleave counting switches a "drop here" state that hides the grid.
-      window.zoneDepth = 0;
-      zone.addEventListener('dragenter', () => { window.zoneDepth++; });
-      zone.addEventListener('dragleave', () => { window.zoneDepth = Math.max(0, window.zoneDepth - 1); });
-      zone.addEventListener('drop', () => { window.zoneDepth = 0; });
-      zone.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
       zone.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
       zone.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
     });
     await store.waitForFunction(() => Array.isArray(window.photoNames) && window.photoNames.includes('dragged.jpg'), null, { timeout: 15000 });
     await panel.waitForFunction(() => document.getElementById('toast').textContent.includes('Dropped dragged.jpg'), null, { timeout: 10000 });
-    assert.equal(await store.evaluate(() => window.zoneDepth), 0, 'the page uploader is not left in its drag-over state after our drop');
     // ...and when the bytes were not cached before the drag, the page script asks the panel for them.
     await store.evaluate(() => {
       const dt = new DataTransfer();

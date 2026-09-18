@@ -701,33 +701,11 @@
     return true;
   }
 
-  // The page's own uploader must never see our drag. eBay's dropzone counts dragenter/dragleave to
-  // switch into a "drop here" state that hides the photo grid; we swallow the drop, so if it saw the
-  // enter it never saw the end, and the new photo only showed ("1/25") after a page refresh.
-  function releasePageDrag(target) {
-    for (const node of [target, document.body, document.documentElement, document]) {
-      if (!node || !node.dispatchEvent) continue;
-      try {
-        node.dispatchEvent(new DragEvent('dragleave', { bubbles: true, cancelable: true, relatedTarget: null }));
-      } catch { /* ignore */ }
-    }
-    try { document.dispatchEvent(new DragEvent('dragend', { bubbles: true })); } catch { /* ignore */ }
-  }
-
   function installDropBridge() {
     const isOurs = event => Array.from(event.dataTransfer?.types || []).includes(PHOTO_MIME);
-    const hide = event => { event.stopImmediatePropagation(); event.stopPropagation(); };
-    window.addEventListener('dragenter', event => { if (isOurs(event)) { event.preventDefault(); hide(event); } }, true);
-    window.addEventListener('dragover', event => { if (isOurs(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; hide(event); } }, true);
-    window.addEventListener('dragleave', event => { if (isOurs(event)) hide(event); }, true);
-    window.addEventListener('drop', event => {
-      if (!isOurs(event)) return;
-      const target = event.target;
-      void handlePhotoDrop(event);
-      hide(event);
-      // Clear any drag state a listener registered before ours already picked up.
-      setTimeout(() => releasePageDrag(target), 0);
-    }, true);
+    document.addEventListener('dragover', event => { if (isOurs(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; } }, true);
+    document.addEventListener('dragenter', event => { if (isOurs(event)) event.preventDefault(); }, true);
+    document.addEventListener('drop', event => { if (isOurs(event)) void handlePhotoDrop(event); }, true);
   }
   installDropBridge();
 
@@ -1039,6 +1017,26 @@
     if (aiBtn) aiBtn.onclick = event => { event.stopPropagation(); aiBtn.textContent = '\u2026'; panelAction('generate', { kind: aiBtn.dataset.ssAi }); };
   }
 
+  // Some store pages put a transform/filter on <html>, which turns position:fixed into page-relative and
+  // left the docked HUD far below the fold (invisible). Measure where it really sits and move it back:
+  // bottom-right while docked, clamped inside the window once the user has dragged it somewhere.
+  function keepGuideOnScreen() {
+    const panel = guide?.panel;
+    if (!panel || !panel.isConnected) return;
+    const r = panel.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const maxLeft = Math.max(0, window.innerWidth - r.width), maxTop = Math.max(0, window.innerHeight - r.height);
+    const wantLeft = guidePos ? Math.min(Math.max(0, r.left), maxLeft) : maxLeft;
+    const wantTop = guidePos ? Math.min(Math.max(0, r.top), Math.max(0, window.innerHeight - 40)) : maxTop;
+    const dx = wantLeft - r.left, dy = wantTop - r.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+    const cs = getComputedStyle(panel);
+    panel.style.left = (parseFloat(cs.left) + dx) + 'px';
+    panel.style.top = (parseFloat(cs.top) + dy) + 'px';
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+  }
+
   function guidePanel() {
     if (guide.panel) return guide.panel;
     const panel = document.createElement('div');
@@ -1112,6 +1110,9 @@
     document.documentElement.appendChild(panel);
     guide.panel = panel;
     loadGuidePos(panel);
+    requestAnimationFrame(keepGuideOnScreen);
+    window.addEventListener('scroll', keepGuideOnScreen, true);
+    window.addEventListener('resize', keepGuideOnScreen);
     loadGuideTheme();
     return panel;
   }
@@ -1231,6 +1232,7 @@
     const use = panel.querySelector('[data-ss="use"]');
     const next = panel.querySelector('[data-ss="next"]');
     panel.querySelector('[data-ss="ready"]').style.display = allSet ? '' : 'none';
+    requestAnimationFrame(keepGuideOnScreen);
     use.style.display = allSet || guide.steps ? 'none' : '';
     next.style.display = allSet || guide.steps || !open.length ? 'none' : '';
     if (!allSet && !guide.steps) {
@@ -1400,6 +1402,8 @@
     }
     clearInterval(guide.ticker); clearTimeout(guide.timer);
     if (guide.panel) guide.panel.remove();
+    window.removeEventListener('scroll', keepGuideOnScreen, true);
+    window.removeEventListener('resize', keepGuideOnScreen);
     if (guide.pointer) guide.pointer.remove();
     if (guide.qtyTag) guide.qtyTag.remove();
     guide = null;
