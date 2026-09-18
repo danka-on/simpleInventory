@@ -1261,6 +1261,12 @@
     renderDetail();
   }
 
+  // A link that went to every chat because this login has not linked its own Telegram says how to
+  // change that; once linked, the server sends only to that phone (routed: 'you').
+  function everyoneHint(result) {
+    return result?.routed === 'everyone' ? ' · link your own on the Telegram page to get these only on your phone' : '';
+  }
+
   // "+ Photo link": the bot messages the phone the same camera page the QR code points at, so
   // the phone is one notification tap away from shooting instead of pointing a camera at the screen.
   async function sendPhotoLink(info) {
@@ -1270,7 +1276,7 @@
     try {
       const result = await api('/api/lister/photo-link', { method: 'POST', body: { upc: info.upc } });
       const who = (result.sent || []).join(', ');
-      toast('\uD83D\uDCF2 Camera link sent' + (who ? ' to ' + who : '') + ' on Telegram');
+      toast('\uD83D\uDCF2 Camera link sent' + (who ? ' to ' + who : '') + ' on Telegram' + everyoneHint(result));
     } catch (error) {
       toast('Photo link: ' + error.message, true);
     } finally {
@@ -2264,7 +2270,7 @@
       state.newItem.barcodeDraft = '';
       remember();
       if (data.linkError) toast('The phone was not sent a link: ' + data.linkError, true);
-      else if (data.link) toast('Photo link sent to ' + (data.link.sent || []).join(', '));
+      else if (data.link) toast('Photo link sent to ' + (data.link.sent || []).join(', ') + everyoneHint(data.link));
     } catch (error) {
       toast(error.message, true);
     }
