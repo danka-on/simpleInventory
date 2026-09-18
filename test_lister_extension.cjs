@@ -71,6 +71,16 @@ assert.equal(M.lowestPrice('Lowest landed price $1,234.50').price, 1234.5);
 assert.equal(M.lowestPrice('Your Price USD$ Example: 9.00 Minimum price $5.00'), null, 'our own boxes are never the lowest offer');
 assert.equal(M.lowestPrice(''), null);
 
+// eBay's own price advice beside the price box goes in as the suggested price.
+assert.equal(M.suggestedPrice('Price $ Recommended: $24.99 Est. 7-14 days to sell').price, 24.99);
+assert.equal(M.suggestedPrice('eBay recommends $1,024.50 based on recent sales').price, 1024.5);
+assert.equal(M.suggestedPrice('Suggested price $18.00').label, 'suggested');
+assert.equal(M.suggestedPrice('Pricing recommendation Buy It Now $31.00').price, 31);
+assert.equal(M.suggestedPrice('Similar items sold for $20.00 - $35.00'), null, 'a sold range is not advice');
+assert.equal(M.suggestedPrice('Shipping: Recommended: USPS Ground Advantage $5.40'), null, 'a shipping service is not the item price');
+assert.equal(M.suggestedPrice('Shipping: Recommended: USPS Ground Advantage $5.40 ... Price Recommended: $24.99').price, 24.99, 'skips the shipping one, finds the price one');
+assert.equal(M.suggestedPrice(''), null);
+
 // A field the user taught takes priority over the heuristics.
 const taught = M.signature(field({ name: 'weird-field-name', labelText: 'Enter the product name here' }));
 assert.ok(M.matchesSignature(field({ name: 'weird-field-name', labelText: 'Enter the product name here' }), taught));

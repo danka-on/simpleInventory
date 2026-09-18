@@ -839,6 +839,19 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     await itemsTab.waitForURL(u => decodeURIComponent(u.href).includes('/items-to-list'), { timeout: 20000 });
     await itemsTab.close();
     await panel.bringToFront();
+    // The item view's ⚙ Options on the list too: switches and prompts are set before any item opens.
+    await panel.click('#listGearBtn');
+    await panel.waitForSelector('#listAuto input#l_autoAiTitle');
+    assert.ok(await panel.$('#listAiPrompt') && await panel.$('#listTitlePrompt'), 'the AI prompts are there too');
+    const titleWas = await panel.$eval('#l_autoAiTitle', el => el.checked);
+    await panel.click('#listAuto label:has(#l_autoAiTitle)');
+    await panel.waitForFunction(was => document.getElementById('l_autoAiTitle')?.checked === !was, titleWas);
+    const saved = await panel.evaluate(() => chrome.storage.local.get(null));
+    assert.ok(Object.values(saved).some(v => v && typeof v === 'object' && v.autoAiTitle === !titleWas), 'the list switch saves the same setting');
+    await panel.click('#listAuto label:has(#l_autoAiTitle)');
+    await panel.waitForFunction(was => document.getElementById('l_autoAiTitle')?.checked === was, titleWas);
+    await panel.click('#listGearBtn');
+    await panel.waitForFunction(() => !document.getElementById('listAuto'));
     const queuedHere = await panel.$$eval('#itemList .item', els => els.map(e => e.dataset.upc));
     const skipsBefore = calls.skip.length;
     await panel.click('#clearAll');

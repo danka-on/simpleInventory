@@ -301,6 +301,14 @@
     // is filled again when it turns up.
     if (fulfilment && fulfilment.ok) fillWhenShown('quantity', values, store);
     else if (store === 'amazon') keepMerchantFulfilled(values, store);
+    // eBay: its recommended price goes in (tagged "Suggested price"); it can draw late, so it is
+    // looked for a while, and only when none turns up is its "Match lowest price" pressed instead.
+    if (store === 'ebay') {
+      const now = useSuggestedPrice(values.price);
+      if (now) (now.ok ? report.filled : report.skipped).push({ target: 'suggestedPrice', value: now.value, label: 'Suggested price (' + now.label + ')', reason: now.ok ? '' : 'could not type it' });
+      else useSuggestedPriceWhenShown(values.price);
+      return fillAspects(report, descriptors, elements, used, aspects);
+    }
     const lowest = matchLowestPrice(store);
     if (lowest) (lowest.ok ? report.filled : report.skipped).push({ target: 'matchLowest', value: lowest.label, label: 'Match lowest price', reason: lowest.ok ? '' : 'could not click it' });
     // No link to press (Seller Central does not always draw one): the lowest offer is still written
@@ -316,8 +324,11 @@
         (ok ? report.filled : report.skipped).push({ target: 'matchLowest', value, label: 'Lowest price read from the page (' + read.label + ')', reason: ok ? '' : 'could not type it' });
       }
     }
+    return fillAspects(report, descriptors, elements, used, aspects);
+  }
 
-    // Item specifics by exact label (Brand, Color, Material, ...).
+  // Item specifics by exact label (Brand, Color, Material, ...).
+  function fillAspects(report, descriptors, elements, used, aspects) {
     const aspectHits = M.matchAspects(descriptors.map((d, i) => used.has(i) ? { tag: 'input', type: 'hidden' } : d), aspects);
     for (const [aspect, hit] of Object.entries(aspectHits)) {
       const el = elements[hit.index];
@@ -402,6 +413,56 @@
     if (!pick) return null;
     try { pick.el.click(); flash(pick.el); } catch { return { ok: false, label: pick.text }; }
     return { ok: true, label: pick.text };
+  }
+
+  // eBay's recommended price, read from the words around the price box only: the shipping section
+  // further down has its own "Recommended" services with prices. A "Use recommended price" button,
+  // when eBay draws one, is pressed rather than typing our reading of the figure.
+  let suggested = null;  // { price, label } once eBay's advice is in the price box
+  function useSuggestedPrice(expect = null) {
+    const elements = collect();
+    const hit = M.assign(elements.map(describe), ['price']).price;
+    if (!hit) return null;
+    const box = elements[hit.index];
+    let area = null;
+    let read = null;
+    for (let node = box.parentElement, depth = 0; node && depth < 8; node = node.parentElement, depth += 1) {
+      const text = node.innerText || '';
+      if (text.length > 2500) break;
+      read = M.suggestedPrice(text);
+      if (read) { area = node; break; }
+    }
+    if (!read) return null;
+    const value = read.price.toFixed(2);
+    // Typed over only while the box holds nothing or what we put there - never over the user.
+    const current = String(box.value || '').trim().replace(/[$,\s]/g, '');
+    let ok = Boolean(current) && Number(current) === read.price;
+    if (!ok && current && (expect == null || Number(current) !== Number(expect))) return null;
+    const button = Array.from(area.querySelectorAll('button, a, [role=button]'))
+      .find(b => isVisible(b) && !buttonDisabled(b) && /\b(use|apply|accept|match)\b.{0,25}\b(recommend|suggest)/i.test(b.textContent || ''));
+    if (button && !ok) { try { button.click(); ok = Number(box.value) === read.price; } catch { ok = false; } }
+    if (!ok) { try { ok = setField(box, value); } catch { ok = false; } }
+    if (!ok) return { ok: false, value, label: read.label };
+    suggested = { price: read.price, label: read.label };
+    flash(box);
+    markSuggested(box);
+    if (guide) guideRefresh();
+    return { ok: true, value, label: read.label };
+  }
+
+  function markSuggested(box) {
+    if (suggested) markAi(box, 'Suggested price $' + suggested.price.toFixed(2), false, { icon: '💡 ', bg: '#0f766e' });
+  }
+
+  // The pricing card loads after the form: keep looking for ~8 s.
+  function useSuggestedPriceWhenShown(expect, attempts = 16) {
+    setTimeout(() => {
+      if (suggested) return;
+      const done = useSuggestedPrice(expect);
+      if (done && done.ok) return;
+      if (attempts > 0) useSuggestedPriceWhenShown(expect, attempts - 1);
+      else matchLowestPrice();
+    }, 500);
   }
 
   // A box the page adds in reaction to something we clicked (Seller Central's quantity): keep
@@ -586,7 +647,7 @@
   let aiBadgeTimer = 0;
   let aiPhotoTrack = null;     // { before: Set of <img> on the page before our first send, flags: [ai?] per sent file }
 
-  function markAi(el, text, inside = false) {
+  function markAi(el, text, inside = false, look = null) {
     if (!el || !el.isConnected) return;
     let badge = aiBadges.get(el);
     if (!badge) {
@@ -597,7 +658,8 @@
       badge = { tag, inside };
       aiBadges.set(el, badge);
     }
-    badge.tag.textContent = '✨ ' + text;
+    badge.tag.style.background = (look && look.bg) || '#7c3aed';
+    badge.tag.textContent = ((look && look.icon) || '✨ ') + text;
     placeAiBadges();
     startAiBadges();
   }
@@ -1074,10 +1136,12 @@
       return;
     }
     const colour = rowColour(row);
-    const flag = rowCheck(row) ? 'check it' : row.done ? (row.fromNotes ? 'from the notes' : 'filled') : (row.required ? 'required' : 'optional');
+    const tip = row.target === 'price' && row.done && suggested;
+    const flag = tip && rowCheck(row) ? 'suggested price' : rowCheck(row) ? 'check it' : row.done ? (row.fromNotes ? 'from the notes' : 'filled') : (row.required ? 'required' : 'optional');
     const ai = guide.options.aiFields?.[row.target];
     const said = row.done
       ? (row.value ? escapeHtml(row.value) : '<span style="opacity:.75">already on the page</span>') + (ai ? ` <span style="color:${t.good}">\u00b7 written by AI${ai === 'auto' ? ' automatically' : ''}</span>` : '')
+        + (tip ? ` <span style="color:#0f766e">\u00b7 suggested price: eBay recommends $${suggested.price.toFixed(2)}</span>` : '')
       : (row.suggestion ? escapeHtml(row.suggestion) : `<span style="color:${t.muted}">Nothing prepared for this one \u2014 fill it on the page.</span>`);
     const canAi = row.target === 'title' || row.target === 'description';
     body.innerHTML = `<div style="${CARD}">
@@ -1250,6 +1314,7 @@
     const current = guide.rows[guide.index];
     for (const row of guide.rows) {
       if (row.done && row.kind === 'field' && (row.target === 'title' || row.target === 'description') && guide.options.aiFields?.[row.target]) markAi(guide.elements[row.index], 'Added AI generated ' + row.target);
+      if (row.done && row.kind === 'field' && row.target === 'price' && suggested) markSuggested(guide.elements[row.index]);
     }
     const panel = guidePanel();
     const total = guide.rows.length;
@@ -1294,7 +1359,8 @@
         const ai = guide.options.aiFields?.[row.target];
         const mark = row.done && row.fromNotes
           ? ` <sup title="Filled from the warehouse prep notes. Read it once before listing." style="color:#2563eb;font-size:8px;font-weight:700;letter-spacing:.04em">NOTE</sup>`
-          : (row.done && ai ? ` <sup title="generated with AI${ai === 'auto' ? ' (automatically)' : ''}" style="color:${t.good};font-size:8px;font-weight:700;letter-spacing:.04em">AI</sup>` : '');
+          : (row.done && ai ? ` <sup title="generated with AI${ai === 'auto' ? ' (automatically)' : ''}" style="color:${t.good};font-size:8px;font-weight:700;letter-spacing:.04em">AI</sup>` : '')
+          + (row.done && row.target === 'price' && suggested ? ` <sup title="eBay's recommended price" style="color:#0f766e;font-size:8px;font-weight:700;letter-spacing:.04em">SUGGESTED</sup>` : '');
         const state = row.done ? (row.value || '') : (row.required ? 'required' : 'optional');
         return `<div data-ss-row="${i}" style="display:flex;align-items:center;gap:9px;padding:6px 12px;cursor:pointer;${here ? `background:${t.current};` : ''}">
           <span style="width:8px;height:8px;border-radius:50%;background:${colour};flex:none"></span>

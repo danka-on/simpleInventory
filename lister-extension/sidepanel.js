@@ -1708,7 +1708,7 @@
         autoSendPhotos: on ? 'Photos will go to the page on every listing (never the too-small ones)' : 'Automatic photo send off',
         autoSendAiOnly: on ? 'Only AI generated photos are sent by default' : 'All of our photos are sent by default (AI version preferred)',
       }[key]);
-      renderAutoMenu(); renderDetail();
+      renderAutoMenu(); renderDetail(); renderListGear();
       if (!on) return;
       if (key === 'autoAiTitle' || key === 'autoAiDescription') void maybeAutoText();
       else if (key === 'autoAiPhotos') { if (detail()) void maybeAutoPhotos(detail()); }
@@ -1874,7 +1874,51 @@
     for (const b of el.querySelectorAll('[data-drop]')) b.onclick = () => { const s = list.find(x => sessionKey(x) === b.dataset.drop); if (s) dropSession(s.upc, s.platform); };
   }
 
+  // The item view's ⚙ Options, on the list too: the automatic switches and the saved AI prompts are
+  // defaults for every item, so they can be set before the first item is opened. The boxes show the
+  // saved prompts only (typing does not re-render), so a list refresh never eats what is being typed.
+  function renderListGear() {
+    const el = $('listGear');
+    if (!el) return;
+    const open = Boolean(state.listGearOpen);
+    const html = `<div class="gearrow"><button id="listGearBtn" class="gear" type="button" aria-expanded="${open}" title="What happens by itself on every item, and the AI prompts">⚙ Options${open ? '' : ' · <span class="gearsum">' + esc(autoSummary()) + '</span>'}</button></div>
+      ${open ? `<div class="lgearbox">
+        <div class="toggles-body autoinline" id="listAuto">${autoRows('l_')}</div>
+        <div class="adv"><div class="inner">
+          <div><h3>AI photoshop prompt <span class="muted">${state.aiPrompt ? 'saved for all items' : 'the default prompt'}</span></h3>
+            <textarea id="listAiPrompt" rows="3" placeholder="Default: keep the product exactly as it is, clean up the background and light">${esc(state.aiPrompt)}</textarea>
+            <div class="row tight"><button id="listAiPromptSave" class="tiny" type="button" title="Keep this prompt for every item and every session">Save for all</button><button id="listAiPromptReset" class="tiny" type="button" title="Back to the default prompt for every item">Reset</button></div></div>
+          <div><h3>AI title prompt <span class="muted">${state.savedTitlePrompt ? 'saved' : 'built-in'}</span></h3>
+            <textarea id="listTitlePrompt" rows="3" placeholder="Extra instructions for the AI title, e.g. always put the size at the end">${esc(state.savedTitlePrompt)}</textarea>
+            <div class="row tight"><button id="listTitlePromptSave" class="tiny" type="button" title="Keep this prompt for every session, on every item">Save for all</button><button id="listTitlePromptReset" class="tiny" type="button" title="Back to the built-in title prompt">Reset</button></div></div>
+        </div></div>
+      </div>` : ''}`;
+    if (!setHtml(el, html)) return;
+    $('listGearBtn').onclick = () => { state.listGearOpen = !state.listGearOpen; renderListGear(); };
+    if (!open) return;
+    wireAutoChecks($('listAuto'));
+    $('listAiPromptSave').onclick = () => {
+      state.aiPrompt = ($('listAiPrompt').value || '').trim();
+      state.promptDraft = null; remember(); renderListGear();
+      toast(state.aiPrompt ? 'Photoshop prompt saved for every item and session' : 'Prompt back to the default for every item');
+    };
+    $('listAiPromptReset').onclick = () => { state.aiPrompt = ''; state.promptDraft = null; remember(); renderListGear(); toast('Prompt back to the default for every item'); };
+    $('listTitlePromptSave').onclick = async () => {
+      state.titlePrompt = state.savedTitlePrompt = ($('listTitlePrompt').value || '').trim();
+      await chrome.storage.local.set({ [TITLE_PROMPT_KEY]: state.savedTitlePrompt });
+      renderListGear();
+      toast(state.savedTitlePrompt ? 'Title prompt saved for every session' : 'Back to the built-in title prompt');
+    };
+    $('listTitlePromptReset').onclick = async () => {
+      state.titlePrompt = ''; state.savedTitlePrompt = '';
+      await chrome.storage.local.set({ [TITLE_PROMPT_KEY]: '' });
+      renderListGear();
+      toast('Back to the built-in title prompt');
+    };
+  }
+
   function renderItems() {
+    renderListGear();
     const filter = state.filter.trim().toLowerCase();
     const isFlagged = it => (it.prepStatus?.status || '') === 'bad' || Boolean(it.defect);
     const isOnStore = it => Boolean(it.alreadyOnStore) || it.otherStatus === 'listed';

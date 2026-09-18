@@ -94,6 +94,30 @@
     return null;
   }
 
+  // eBay's own price advice beside the price box ("Recommended: $24.99", "eBay recommends $24.99",
+  // "Suggested price $24.99", "Pricing recommendation ... $24.99"). A sold range ("Similar items sold
+  // for $20 - $35") is not advice, so it is never read as one.
+  const SUGGESTED_SHAPES = [
+    { label: 'recommended', re: /(?:ebay\s+)?recommend(?:ed|s)[a-z ]{0,30}?(?:price)?[^$\d]{0,30}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+    { label: 'price recommendation', re: /pric(?:e|ing)\s+recommendation[^$]{0,60}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+    { label: 'suggested', re: /suggested[a-z ]{0,20}price[^$\d]{0,30}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+    { label: 'price guidance', re: /price\s+guidance[^$]{0,60}\$\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)/i },
+  ];
+
+  function suggestedPrice(text) {
+    const sample = String(text || '').replace(/\s+/g, ' ').slice(0, 40000);
+    for (const shape of SUGGESTED_SHAPES) {
+      for (const match of sample.matchAll(new RegExp(shape.re.source, 'gi'))) {
+        // eBay also "recommends" shipping services with a price: those are not the item's price.
+        const around = sample.slice(Math.max(0, match.index - 25), match.index + match[0].length);
+        if (/shipping|postage|delivery|usps|fedex|\bups\b|ground advantage|carrier/i.test(around)) continue;
+        const price = Number(String(match[1]).replace(/,/g, ''));
+        if (Number.isFinite(price) && price > 0) return { price, label: shape.label };
+      }
+    }
+    return null;
+  }
+
   const SKIP_TYPES = new Set(['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'color', 'range', 'date', 'password']);
 
   function normalize(value) {
@@ -416,6 +440,6 @@
   return {
     TARGETS, CONDITION_LABELS, normalize, scoreTarget, assign, suggestTargets, matchAspects,
     signature, matchesSignature, detectPage, successInfo, isRequired, isEmptyValue, searchBoxScore,
-    conditionLabels, prelistCondition, lowestPrice, tokens, candidateScore, rankCandidates, categoryScore, chooseOption,
+    conditionLabels, prelistCondition, lowestPrice, suggestedPrice, tokens, candidateScore, rankCandidates, categoryScore, chooseOption,
   };
 });
