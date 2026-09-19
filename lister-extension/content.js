@@ -304,6 +304,11 @@
     // eBay: its recommended price goes in (tagged "Suggested price"); it can draw late, so it is
     // looked for a while, and only when none turns up is its "Match lowest price" pressed instead.
     if (store === 'ebay') {
+      // The custom label box is hidden until asked for: open it and put our code in as it draws.
+      if (!chosen.sku) {
+        const reveal = revealCustomLabel(values, store);
+        if (reveal) report.filled.push({ target: 'customLabel', value: clip(valueFor('sku', values, store)), label: 'Custom label (SKU)', reason: '', pending: reveal !== 'shown' });
+      }
       const now = useSuggestedPrice(values.price);
       if (now) (now.ok ? report.filled : report.skipped).push({ target: 'suggestedPrice', value: now.value, label: 'Suggested price (' + now.label + ')', reason: now.ok ? '' : 'could not type it' });
       else useSuggestedPriceWhenShown(values.price);
@@ -482,6 +487,75 @@
       }
       if (!done && attempts > 0) fillWhenShown(target, values, store, attempts - 1);
     }, 400);
+  }
+
+  // -- eBay's Custom label (SKU) ------------------------------------------------------------------
+  // eBay keeps the custom label behind "See title options" and then a "Custom label (SKU)" switch.
+  // Our code goes in there - the suffixed unit code or the one we made up - as the fallback that
+  // ties the sale back to the rack, so the fill and the guide both open it up and type it in.
+  function skuFieldShown() {
+    const elements = collect();
+    return Boolean(M.assign(elements.map(describe), ['sku']).sku);
+  }
+
+  function titleOptionsOpener() {
+    return deepQuery('a, button, [role=button], [role=link]')
+      .find(el => isVisible(el) && !buttonDisabled(el) && /^(see|show|view|more)\b.{0,12}\btitle options\b/i.test(clip(el.textContent || el.getAttribute('aria-label') || '').trim()));
+  }
+
+  // The switch beside the words "Custom label (SKU)": an input checkbox, a role=switch or an aria-pressed button.
+  function customLabelSwitch() {
+    const words = deepQuery('label, span, div, p, legend, dt')
+      .filter(el => isVisible(el) && /^custom label(\s*\(sku\))?\s*(\(optional\))?$/i.test(clip(el.textContent || '').trim()));
+    for (const label of words) {
+      let box = label;
+      for (let depth = 0; box && depth < 6; depth++, box = box.parentElement) {
+        const control = Array.from(box.querySelectorAll('input[type=checkbox], [role=switch], button[aria-pressed], [role=checkbox]')).find(isVisible);
+        if (control) return control;
+      }
+    }
+    return null;
+  }
+
+  function switchOn(control) {
+    return Boolean(control.checked === true || control.getAttribute('aria-checked') === 'true' || control.getAttribute('aria-pressed') === 'true');
+  }
+
+  function pressSwitch(control) {
+    let label = null;
+    try { label = control.closest('label') || (control.id && ownDocument(control).querySelector(`label[for="${CSS.escape(control.id)}"]`)); } catch { /* ignore */ }
+    for (const target of [control, label]) {
+      if (!target) continue;
+      try { target.click(); } catch { /* next */ }
+      if (switchOn(control)) break;
+    }
+    if (!switchOn(control) && control.tagName === 'INPUT') {
+      try { control.checked = true; } catch { /* ignore */ }
+      for (const type of ['input', 'change']) control.dispatchEvent(new Event(type, { bubbles: true, composed: true }));
+    }
+    return switchOn(control);
+  }
+
+  // Open the options, turn the switch on, type the code once the box is drawn (only while it is
+  // empty). The opener is pressed once: pressing it again would fold the options away.
+  // Returns what was done right now: 'shown' (box already there), 'switched', 'opened' or ''.
+  function revealCustomLabel(values, store, attempts = 12, opened = false) {
+    if (store !== 'ebay' || !valueFor('sku', values, store)) return '';
+    if (skuFieldShown()) { fillWhenShown('sku', values, store, 2); return 'shown'; }
+    const control = customLabelSwitch();
+    if (control) {
+      if (!switchOn(control)) pressSwitch(control);
+      fillWhenShown('sku', values, store, 12);
+      setTimeout(() => { if (guide) guideRefresh(); }, 900);
+      return 'switched';
+    }
+    let did = '';
+    if (!opened) {
+      const opener = titleOptionsOpener();
+      if (opener) { try { opener.click(); did = 'opened'; opened = true; } catch { /* ignore */ } }
+    }
+    if (attempts > 0) setTimeout(() => revealCustomLabel(values, store, attempts - 1, opened), 400);
+    return did;
   }
 
   function flash(el) {
@@ -893,7 +967,7 @@
     const noteSet = new Set(noteFields || []);
     descriptors.forEach((d, index) => {
       const target = byIndex[index] || '';
-      if (target === 'upc') return;  // filled silently; not part of the checklist
+      if (target === 'upc' && store !== 'ebay') return;  // Seller Central: filled silently; eBay's item specifics want a look
       const conditionSelect = !target && d.tag === 'select' && /condition/.test(M.normalize(d.labelText + ' ' + d.ariaLabel + ' ' + d.name));
       const required = M.isRequired(d) || REQUIRED_TARGETS.has(target) || conditionSelect;
       if (!required && !target) return;
@@ -1441,6 +1515,8 @@
     }
     guideWaitUntil = 0;
     clearTimeout(guideWaitTimer);
+    // eBay: the custom label row can only exist once its switch is on, so it is opened here too.
+    if (options && options.store === 'ebay' && !rows.some(r => r.target === 'sku')) revealCustomLabel(options.values || {}, 'ebay');
     guide = { elements, rows, index: -1, options: options || {}, panel: null, pointer: null, qtyTag: null, collapsed: false, steps: false, preview: null, seen: new Set() };
     const handlers = {
       key(event) {
