@@ -159,8 +159,8 @@ class ListerFbTests(ListerTestCase):
             def __init__(self, **kw):
                 pass
 
-            def get_item_offers(self, asin, ItemCondition='New'):
-                assert asin == 'B0TESTASIN'
+            def get_item_offers(self, asin, item_condition, **kwargs):  # python-amazon-sp-api's real signature
+                assert (asin, item_condition) == ('B0TESTASIN', 'New')
                 return type('R', (), {'payload': {'Summary': {
                     'LowestPrices': [{'condition': 'new', 'LandedPrice': {'Amount': '21.99'}}, {'condition': 'used', 'LandedPrice': {'Amount': '9'}}],
                     'BuyBoxPrices': [{'condition': 'New', 'ListingPrice': {'Amount': '22.49'}}],

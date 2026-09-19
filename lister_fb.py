@@ -365,7 +365,7 @@ class FbList:
         from sp_api.api import Products
 
         credentials, _, marketplace_id, marketplace = self.amazon_context()
-        result = Products(credentials=credentials, marketplace=marketplace).get_item_offers(asin, ItemCondition='New')
+        result = Products(credentials=credentials, marketplace=marketplace).get_item_offers(asin, 'New')
         summary = (result.payload or {}).get('Summary') or {}
         found = {'lowest': None, 'buyBox': None, 'count': 0, 'suggested': None}
 
