@@ -140,9 +140,35 @@ const BOTH = '840115641220';
     await page.setViewportSize({ width: 1500, height: 900 });
     await page.waitForFunction(() => !document.getElementById('fit-note'), null, { timeout: 5000 });
 
-    // The panel closes: the plain queue button again, saying which store it waits on.
+    // The panel closes: the row still shows where it stands (listed on eBay), and, with Amazon still
+    // open to it, the plain "+" that opens the panel.
     panel.active = false; panel.platform = '';
     await page.waitForFunction(() => document.getElementById('agentHead').textContent.trim() === '+ Listing Agent', null, { timeout: 10000 });
+    assert.deepEqual(await cell(NEW).locator('.agent-listed').allTextContents(), ['Listed on eBay ✓']);
+    assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+');
+
+    // Panel closed, queued for Amazon: the Amazon pill shows in its colour and clicking it takes the
+    // item off Amazon, no panel needed (a phone, a PC without the Lister).
+    stores[NEW] = { queue: 'queued', ebay: 'listed', amazon: 'on' };
+    panel.queueStamp = 's3';
+    await page.waitForFunction(upc => document.querySelector(`.agent-cell[data-upc="${upc}"] button.agent-onlist.amazon`), NEW, { timeout: 12000 });
+    assert.equal((await cell(NEW).locator('button').textContent()).trim(), 'On Amazon list', 'nothing left to add: no "+"');
+    await cell(NEW).locator('button').click();
+    await page.waitForFunction(upc => document.querySelector(`.agent-cell[data-upc="${upc}"] button`)?.textContent.trim() === '+', NEW, { timeout: 10000 });
+    assert.deepEqual(calls.store.at(-1), { upc: NEW, platform: 'amazon', on: false, only: true, fresh: false });
+
+    // The Lister itself says where its panel is (queue-bridge.js relays 'panel-state'): the column
+    // follows at once, before the server poll would have noticed. Facebook counts as a store too.
+    const said = (active, platform) => page.evaluate(([a, p]) => window.postMessage({ source: 'sweetshelves-lister', type: 'panel-state', active: a, platform: p }, location.origin), [active, platform]);
+    await said(true, 'fb');
+    await page.waitForFunction(() => document.querySelector('#agentHead .agent-store.fb'), null, { timeout: 2000 });
+    assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+ Facebook');
+    await said(true, 'amazon');
+    await page.waitForFunction(() => document.querySelector('#agentHead .agent-store.amazon'), null, { timeout: 2000 });
+    assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+ Amazon');
+    await said(false, '');
+    await page.waitForFunction(() => document.getElementById('agentHead').textContent.trim() === '+ Listing Agent', null, { timeout: 2000 });
+    assert.equal((await cell(NEW).locator('button').textContent()).trim(), '+');
     assert.deepEqual(broken, []);
     console.log('items to list agent store test passed');
   } finally {

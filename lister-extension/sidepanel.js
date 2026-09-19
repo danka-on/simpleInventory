@@ -178,11 +178,23 @@
     if (state.connected === false || !state.platform) return;
     const platform = state.view === 'fb' ? 'fb' : state.platform;
     reported.platform = platform; reported.at = Date.now();
-    const body = JSON.stringify({ platform, follow: state.settings.followPlus !== false, open });
+    const follow = state.settings.followPlus !== false;
+    tellItemsToList({ platform, follow, open });
+    const body = JSON.stringify({ platform, follow, open });
     fetch(serverBase() + '/api/lister/panel', { method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'manual', keepalive: true,
       headers: { 'Content-Type': 'application/json', 'X-Sweet-Shelves-Lister': '1' }, body })
       .then(r => r.json()).then(d => { if (open && d?.queueStamp && reported.stamp && d.queueStamp !== reported.stamp) queueChanged(); })
       .catch(() => {});
+  }
+
+  // Items to List tabs in this Chrome hear about the panel's store right away (queue-bridge.js hands
+  // it to the page), so the Listing Agent column follows a store switch without waiting for its poll.
+  function tellItemsToList(panel) {
+    try {
+      chrome.tabs.query({ url: serverBase() + '/items-to-list*' }).then(tabs => {
+        for (const tab of tabs) chrome.tabs.sendMessage(tab.id, { type: 'ss-lister-panel-state', ...panel }).catch(() => {});
+      }).catch(() => {});
+    } catch (err) { /* no tabs access: the page's poll catches up */ }
   }
 
   // Something changed the queue elsewhere: Items to List on this computer says so at once (through

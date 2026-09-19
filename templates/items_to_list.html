@@ -371,33 +371,38 @@
     .btn-sm{padding:6px 10px;font-size:0.9rem}
     .btn-copy{background:rgba(32,201,151,0.3) !important;color:#00875a !important;border:1px solid rgba(32,201,151,0.5) !important}
     .btn-copied{background:rgba(46,204,113,0.85) !important;color:#fff !important;font-weight:600 !important}
-    /* Listing Agent column: one line per store the item is listed on, then the "+" for the store the Lister panel shows. */
-    .agent-cell{display:flex;flex-direction:column;align-items:center;gap:3px}
-    .agent-listed{font-size:11.5px;font-weight:600;color:#15803d;white-space:nowrap}
-    .agent-other{font-size:11.5px;font-weight:600;color:#b45309;white-space:nowrap}
+    /* Listing Agent column. One pill shape for every store and state, in the store's own colour:
+       solid = listed there, tinted = on that store's list in the Lister, outlined = add it there. */
+    .agent-cell{display:flex;flex-direction:column;align-items:center;gap:4px}
+    .store-pill{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:128px;padding:4px 12px;border-radius:999px;
+      border:1.5px solid transparent;font-family:inherit;font-size:12px;font-weight:700;line-height:1.25;letter-spacing:.01em;white-space:nowrap;
+      color:var(--sc-2);background:#fff;cursor:default;transition:background .12s,box-shadow .12s}
+    .store-pill.ebay{--sc:#2563eb;--sc-2:#1d4ed8;--sc-soft:#dbeafe;--sc-ink:#fff}
+    .store-pill.amazon{--sc:#f59e0b;--sc-2:#b45309;--sc-soft:#fef3c7;--sc-ink:#1f1300}
+    .store-pill.fb{--sc:#1877f2;--sc-2:#0f5fd0;--sc-soft:#dbeafe;--sc-ink:#fff}
+    .store-pill.any{--sc:#64748b;--sc-2:#334155;--sc-soft:#f1f5f9;--sc-ink:#fff}
+    .store-pill.is-listed{background:linear-gradient(135deg,var(--sc),var(--sc-2));color:var(--sc-ink);box-shadow:0 1px 3px rgba(0,0,0,.18)}
+    .store-pill.amazon.is-listed{background:linear-gradient(135deg,#ffb020,#ff9900)}
+    .store-pill.is-on{background:var(--sc-soft);border-color:var(--sc)}
+    .store-pill.is-on::before{content:'';width:7px;height:7px;border-radius:50%;background:var(--sc);flex:none}
+    .store-pill.is-add{border-color:var(--sc);border-style:dashed}
+    button.store-pill{cursor:pointer}
+    button.store-pill:hover{background:var(--sc-soft);box-shadow:0 1px 4px rgba(0,0,0,.14)}
+    button.store-pill.is-on:hover{background:#fff}
+    button.store-pill.is-on:hover::before{background:#dc2626}
+    button.store-pill:disabled{opacity:.6;cursor:progress}
+    .store-pill.any.is-add{min-width:0;padding:3px 14px;font-size:15px;border-style:solid}
+    /* The header's "the panel is on eBay" chip. */
+    .agent-store{display:inline-block;margin-left:6px;padding:1px 8px;border-radius:999px;font-size:11px;font-weight:800;color:#fff;vertical-align:middle;letter-spacing:.02em}
+    .agent-store.ebay{background:#2563eb}
+    .agent-store.amazon{background:#ff9900;color:#1f1300}
+    .agent-store.fb{background:#1877f2}
     /* Narrow window: the least important columns step aside (fitItemsTable) and titles wrap. */
     #fit-note{margin:8px 0 -4px;font-size:.85rem;color:#64748b}
     #fit-note button{background:none;border:0;padding:0;color:#2563eb;font:inherit;text-decoration:underline;cursor:pointer}
     #results table.fitted td{white-space:normal}
     #results table.fitted .title-cell a{word-break:break-word}
     #results table.fitted .title-cell{min-width:170px}
-    .agent-store{display:inline-block;margin-left:4px;padding:1px 7px;border-radius:999px;font-size:11px;font-weight:700;color:#fff;vertical-align:middle}
-    .agent-store.ebay{background:#2563eb}
-    .agent-store.amazon{background:#d97706}
-    .agent-store.fb{background:#1877f2}
-    .agent-listed.fb-on{color:#1877f2}
-    /* "On eBay list" / "On Amazon list": a solid pill in the store's own colour, readable from across the room. */
-    .agent-onlist{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;font-size:12.5px;font-weight:800;letter-spacing:.01em;white-space:nowrap;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.22)}
-    .agent-onlist::before{content:'';width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.9}
-    .agent-onlist.ebay{background:linear-gradient(135deg,#3b82f6,#1d4ed8)}
-    .agent-onlist.amazon{background:linear-gradient(135deg,#ffb020,#ff9900);color:#131921}
-    .agent-onlist.fb{background:linear-gradient(135deg,#3b8cff,#1877f2)}
-    .btn-listagent-queue.agent-on{font-weight:800 !important;letter-spacing:.01em;border:0 !important;box-shadow:0 1px 4px rgba(0,0,0,.22)}
-    .btn-listagent-queue.agent-on::before{content:'\2713  '}
-    .btn-listagent-queue.agent-on.ebay{background:linear-gradient(135deg,#3b82f6,#1d4ed8) !important;color:#fff !important}
-    .btn-listagent-queue.agent-on.amazon{background:linear-gradient(135deg,#ffb020,#ff9900) !important;color:#131921 !important}
-    .btn-listagent-queue.agent-on.fb{background:linear-gradient(135deg,#3b8cff,#1877f2) !important;color:#fff !important}
-    .btn-listagent-queue.agent-on:hover{filter:brightness(1.08)}
     /* Filter dropdown panel */
     .dropdown-panel{display:none;position:fixed;z-index:10000;min-width:280px;max-width:92vw;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px}
     .dropdown-section{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
@@ -1166,63 +1171,6 @@ function _listagentQueueKey(rawValue){
   return raw;
 }
 
-function _listagentQueueUiState(queueItem){
-  if(!queueItem){
-    return {
-      label: '+',
-      title: 'Add to Listing Agent queue',
-      disabled: false,
-      active: false
-    };
-  }
-  const status = String(queueItem.status || '').trim().toLowerCase();
-  const hasListedState = !!(
-    queueItem.listed_at ||
-    queueItem.listed_platform ||
-    queueItem.listed_ebay_at ||
-    queueItem.listed_amazon_at ||
-    queueItem.listed_listing_id ||
-    queueItem.listed_offer_id ||
-    queueItem.listed_sku ||
-    queueItem.listed_asin ||
-    queueItem.listed_url
-  );
-  if(hasListedState){
-    const hasEbay = !!(queueItem.listed_ebay_at || (queueItem.listed_platform || '').toString().toLowerCase().includes('ebay'));
-    const hasAmazon = !!(queueItem.listed_amazon_at || (queueItem.listed_platform || '').toString().toLowerCase().includes('amazon'));
-    let label, title;
-    if(hasEbay && hasAmazon){
-      label = 'Listed (eBay/Amazon) ✓';
-      title = 'Listed on eBay and Amazon via Listing Agent';
-    } else if(hasEbay){
-      label = 'Listed (eBay) ✓';
-      title = 'Listed on eBay via Listing Agent';
-    } else if(hasAmazon){
-      label = 'Listed (Amazon) ✓';
-      title = 'Listed on Amazon via Listing Agent';
-    } else {
-      label = 'Listed ✓';
-      title = 'Listed through Listing Agent';
-    }
-    return { label, title, disabled: true, active: true };
-  }
-  if(status === 'done'){
-    return {
-      label: 'Listed ✓',
-      title: 'Listed through Listing Agent',
-      disabled: true,
-      active: true
-    };
-  }
-  return {
-    label: 'In queue',
-    title: 'In Listing Agent queue (click to remove)',
-    disabled: false,
-    active: true,
-    removable: true
-  };
-}
-
 const AGENT_STORE_NAMES = { ebay: 'eBay', amazon: 'Amazon', fb: 'Facebook' };
 
 // The Lister side panel (through its queue-bridge.js on this page) reloads its list at once.
@@ -1258,40 +1206,48 @@ function agentListedStores(upc){
   return ['ebay', 'amazon', 'fb'].filter(p => (st ? st[p] === 'listed' : false) || (p !== 'fb' && fromQueue(p)));
 }
 
-// The Listing Agent cell: "Listed on eBay ✓" / "Listed on Amazon ✓" (both when both), then the button.
-function agentButton(upc, titleEnc, itemStatus, label, title, active){
-  return `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${active ? ' btn-copied' : ''}" data-upc="${esc(upc)}" data-title="${titleEnc}" data-item-status="${esc(itemStatus)}" title="${esc(title)}">${esc(label)}</button>`;
+// Store lists the item waits on in the Lister (not counting stores it is already listed on).
+function agentOnListStores(upc){
+  const st = agentStoreState[upc] || null;
+  const listed = agentListedStores(upc);
+  if(st) return ['ebay', 'amazon', 'fb'].filter(p => st[p] === 'on' && !listed.includes(p));
+  // Store lists not loaded yet: a queued row waits on every store.
+  const q = listingAgentQueueState[upc] || null;
+  return q && String(q.status || '').toLowerCase() === 'queued' ? ['ebay', 'amazon'].filter(p => !listed.includes(p)) : [];
 }
 
+// One pill per store and state. A button when clicking it does something (data-store says where).
+function agentPill(store, state, label, title, opts = {}){
+  const cls = `store-pill ${store} is-${state}${state === 'listed' ? ' agent-listed' : state === 'on' ? ' agent-onlist' : ''}`;
+  if(!opts.button) return `<div class="${cls}" title="${esc(title)}">${esc(label)}</div>`;
+  return `<button type="button" class="${cls} btn-listagent-queue" data-store="${esc(store)}" data-upc="${esc(opts.upc)}" data-title="${opts.titleEnc || ''}" data-item-status="${esc(opts.itemStatus || '')}" title="${esc(title)}">${esc(label)}</button>`;
+}
+
+// The Listing Agent cell, top to bottom: listed pills, on-list pills, then the one thing to add.
+// With the Lister panel open, its store's pill is the live one: "+ eBay" adds there, "On eBay list"
+// takes it off. Closed, the pills still say where the item stands and "+" opens the panel.
 function agentCellInner(upc, titleEnc = '', itemStatus = ''){
   const listed = agentListedStores(upc);
-  const st = agentStoreState[upc] || null;
-  // The Facebook list is opt-in (the FB tab of the Lister): say so wherever the button cannot.
-  const fbOn = st && st.fb === 'on' && !(agentPanel.active && agentPanel.platform === 'fb')
-    ? '<div class="agent-onlist fb">On Facebook list</div>' : '';
-  const lines = listed.map(p => `<div class="agent-listed">Listed on ${AGENT_STORE_NAMES[p]} \u2713</div>`).join('') + fbOn;
-  let label = '', title = '', active = false, onStore = '';
-  if(agentPanel.active){
-    const p = agentPanel.platform, name = AGENT_STORE_NAMES[p];
-    const other = p === 'ebay' ? 'amazon' : p === 'amazon' ? 'ebay' : '';
-    const otherLine = other && st && st[other] === 'on' && st[p] !== 'on'
-      ? `<div class="agent-onlist ${other}" title="Already queued for ${AGENT_STORE_NAMES[other]} in the Lister">On ${AGENT_STORE_NAMES[other]} list</div>` : '';
-    if(listed.includes(p)) return lines;
-    if(otherLine && !lines.includes(otherLine)) return lines + otherLine + agentButton(upc, titleEnc, itemStatus, `+ ${name}`, `Also add it to the ${name} list (it is already queued for ${AGENT_STORE_NAMES[other]})`, false);
-    if(st && st[p] === 'on'){ label = `On ${name} list`; title = `On the ${name} list in the Lister (click to take it off ${name})`; active = true; onStore = p; }
-    else { label = `+ ${name}`; title = `Add to the ${name} list in the Lister (the side panel is on ${name})`; }
-  } else {
-    if(listed.filter(p => p !== 'fb').length === 2) return lines;
-    const ui = _listagentQueueUiState(listingAgentQueueState[upc] || null);
-    if(ui.disabled && listed.length) return lines;
-    label = ui.label; title = ui.title; active = ui.active;
-    // Queued for one store only: say which.
-    if(ui.removable && st){
-      const on = ['ebay', 'amazon'].filter(p => st[p] === 'on');
-      if(on.length === 1) label += ' \u00b7 ' + AGENT_STORE_NAMES[on[0]];
+  const onList = agentOnListStores(upc);
+  const p = agentPanel.active ? agentPanel.platform : '';
+  const btn = { button: true, upc, titleEnc, itemStatus };
+  let html = listed.map(s => agentPill(s, 'listed', `Listed on ${AGENT_STORE_NAMES[s]} \u2713`, `Listed on ${AGENT_STORE_NAMES[s]}`)).join('');
+  onList.forEach(s => {
+    const live = !p || s === p;
+    html += agentPill(s, 'on', `On ${AGENT_STORE_NAMES[s]} list`,
+      live ? `Waiting on the ${AGENT_STORE_NAMES[s]} list in the Lister (click to take it off ${AGENT_STORE_NAMES[s]})`
+           : `Waiting on the ${AGENT_STORE_NAMES[s]} list in the Lister`, live ? btn : {});
+  });
+  if(p){
+    if(!listed.includes(p) && !onList.includes(p)){
+      const name = AGENT_STORE_NAMES[p];
+      html += agentPill(p, 'add', `+ ${name}`, onList.length
+        ? `Also add it to the ${name} list in the Lister` : `Add to the ${name} list in the Lister (the side panel is on ${name})`, btn);
     }
+  } else if(['ebay', 'amazon'].some(s => !listed.includes(s) && !onList.includes(s))){
+    html += agentPill('any', 'add', '+', 'Open the Lister side panel to pick a store list', btn);
   }
-  return lines + `<button type="button" class="btn btn-sm btn-primary btn-listagent-queue${active ? ' btn-copied' : ''}${onStore ? ` agent-on ${onStore}` : ''}" data-upc="${esc(upc)}" data-title="${titleEnc}" data-item-status="${esc(itemStatus)}" title="${esc(title)}">${esc(label)}</button>`;
+  return html;
 }
 
 // A narrow window (the Lister side panel open, a small screen): the least important columns step
@@ -1385,12 +1341,21 @@ async function pollAgentPanel(){
   }catch(err){ /* offline: keep the last answer */ }
 }
 setInterval(pollAgentPanel, 5000);
+// The Lister tells this page at once when its panel opens, closes or moves to another store
+// (queue-bridge.js relays 'panel-state'); the 5 s poll is the fallback for other devices.
+window.addEventListener('message', ev => {
+  if(ev.source !== window || !ev.data || ev.data.source !== 'sweetshelves-lister' || ev.data.type !== 'panel-state') return;
+  const next = { active: !!ev.data.active, platform: ev.data.active ? String(ev.data.platform || '') : '' };
+  if(next.active === agentPanel.active && next.platform === agentPanel.platform) return;
+  agentPanel = next;
+  refreshAgentCells();
+});
 window.addEventListener('focus', pollAgentPanel);
 document.addEventListener('visibilitychange', pollAgentPanel);
 pollAgentPanel();
 
-async function onAgentStorePlus(btn, upc){
-  const p = agentPanel.platform;
+async function onAgentStorePlus(btn, upc, store){
+  const p = store || agentPanel.platform;
   const st = agentStoreState[upc] || { queue: '' };
   const post = (url, body) => fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) })
     .then(r => r.json().catch(() => ({})).then(j => { if(!r.ok || !j.success) throw new Error(j.error || ('HTTP ' + r.status)); return j; }));
@@ -3311,48 +3276,19 @@ async function onAddToListingAgentQueue(e){
   const btn = e.currentTarget;
   const upc = (btn.dataset.upc || '').toString().trim();
   if(!upc) return;
+  const store = (btn.dataset.store || '').trim();
+  // A store pill: add to / take off that store's list (the panel's store, or any store while the panel is closed).
+  if(store && store !== 'any'){ await onAgentStorePlus(btn, upc, store); return; }
   if(agentPanel.active){ await onAgentStorePlus(btn, upc); return; }
   // Panel closed: "+" opens the Lister side panel instead of adding to every store list.
   // Without the extension (no answer), it adds to the queue as before.
-  if(!_listagentQueueUiState(listingAgentQueueState[upc] || null).removable && await openListerPanel()){
+  if(await openListerPanel()){
     [1500, 4000].forEach(ms => setTimeout(pollAgentPanel, ms));
     return;
   }
 
-  const oldText = btn.textContent;
   btn.disabled = true;
   btn.textContent = '...';
-
-  // "In queue" is a toggle: clicking it takes the UPC back out of the queue.
-  if(_listagentQueueUiState(listingAgentQueueState[upc] || null).removable){
-    try{
-      const resp = await fetch('/api/listingagent/queue/remove', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({upc})
-      });
-      const j = await resp.json().catch(()=> ({}));
-      if(resp.ok && j && j.success){
-        listingAgentQueueState[upc] = null;
-        notifyListerQueue();
-        const queueUi = _listagentQueueUiState(null);
-        btn.textContent = queueUi.label;
-        btn.title = queueUi.title;
-        btn.classList.remove('btn-copied');
-        btn.disabled = false;
-        return;
-      }
-      btn.textContent = oldText;
-      btn.disabled = false;
-      alert('Error: ' + ((j && j.error) ? j.error : ('HTTP ' + resp.status)));
-    }catch(err){
-      btn.textContent = oldText;
-      btn.disabled = false;
-      alert('Error: ' + err);
-    }
-    return;
-  }
-
   try{
     const title = btn.dataset.title ? decodeURIComponent(btn.dataset.title) : '';
     const item_status = (btn.dataset.itemStatus || '').toString().trim();
@@ -3362,24 +3298,14 @@ async function onAddToListingAgentQueue(e){
       body: JSON.stringify({upc, title, source: 'list_manager', item_status, added_mode: 'my'})
     });
     const j = await resp.json().catch(()=> ({}));
-    if(resp.ok && j && j.success){
-      listingAgentQueueState[upc] = j.item || { upc, status: 'queued', added_mode: 'my' };
-      notifyListerQueue();
-      const queueUi = _listagentQueueUiState(listingAgentQueueState[upc]);
-      btn.textContent = queueUi.label;
-      btn.title = queueUi.title;
-      btn.classList.add('btn-copied');
-      btn.disabled = queueUi.disabled;
-      return;
-    }
-    btn.textContent = oldText;
-    btn.disabled = false;
-    alert('Error: ' + ((j && j.error) ? j.error : ('HTTP ' + resp.status)));
+    if(!resp.ok || !j || !j.success) throw new Error((j && j.error) ? j.error : ('HTTP ' + resp.status));
+    listingAgentQueueState[upc] = j.item || { upc, status: 'queued', added_mode: 'my' };
+    await hydrateAgentStores([upc]);
+    notifyListerQueue();
   }catch(err){
-    btn.textContent = oldText;
-    btn.disabled = false;
-    alert('Error: ' + err);
+    alert('Error: ' + (err && err.message ? err.message : err));
   }
+  refreshAgentCells();
 }
 
 // Populate lot dropdown with newest-first lots and import dates

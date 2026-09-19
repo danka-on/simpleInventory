@@ -32,3 +32,13 @@ function onPageMessage(event) {
 }
 
 window.addEventListener('message', onPageMessage);
+
+// The side panel says which store list it shows (on open, close and every store switch): the page's
+// Listing Agent column redraws at once instead of waiting for its next poll of the server.
+try {
+  chrome.runtime.onMessage.addListener(message => {
+    if (message?.type !== 'ss-lister-panel-state') return;
+    window.postMessage({ source: 'sweetshelves-lister', type: 'panel-state',
+      active: !!message.open && message.follow !== false, platform: message.platform || '' }, location.origin);
+  });
+} catch (err) { /* orphaned copy after an update */ }
