@@ -146,7 +146,7 @@
           chips.push(`<button class="chip fb-price" type="button" data-act="useprice" data-price="${esc(s.suggested)}"${locked ? ' disabled' : ''} title="${esc(s.title || s.asin)}: ${what}${s.count ? `, ${esc(s.count)} new offers` : ''}">` +
             `<b>Amazon</b> ${esc(money(s.suggested))} <small>${what}${s.lowest && s.buyBox && s.lowest !== s.buyBox ? ` \u00b7 low ${esc(money(s.lowest))}` : ''}</small></button>`);
         } else {
-          chips.push(`<span class="chip fb-price off" title="${esc(s.error || 'No Amazon price')}"><b>Amazon</b> <small>${esc(s.error ? (s.asin ? 'no offers' : 'not found') : 'none')}</small></span>`);
+          chips.push(`<span class="chip fb-price off" title="${esc(s.error || 'No Amazon price')}"><b>Amazon</b> <small>${esc(s.error ? 'unavailable' : s.asin ? 'no offers' : 'not found')}</small></span>`);
         }
       }
       if (s.url) chips[chips.length - 1] = chips[chips.length - 1].replace(/<\/(button|span)>$/, ` <a href="${esc(s.url)}" target="_blank" rel="noopener" title="Open on ${esc(s.label)}" aria-label="Open on ${esc(s.label)}">\u2197</a></$1>`);
