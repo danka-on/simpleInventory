@@ -581,6 +581,15 @@ button.tiny.phone-btn .phone-ico { font-size: 13px; line-height: 1; }
 .fbview .fb-photos img { width: 64px; height: 64px; object-fit: cover; border-radius: 7px; background: var(--chip); flex: none; }
 .fbview .fb-two { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
 .fbview .fb-n { float: right; font-variant-numeric: tabular-nums; color: var(--faint); }
+/* Asking prices elsewhere (eBay comps, Amazon offers): press a chip to use it; Search opens the barcode on the web. */
+.fbview .fb-prices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; min-height: 24px; }
+.fbview .fb-price { border: 1px solid var(--line-2); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 9px; color: var(--ink); }
+.fbview .fb-price:not(.off):not([disabled]):hover { background: var(--green-soft); color: var(--green); border-color: var(--green); }
+.fbview .fb-price small { color: var(--muted); font-size: 10px; }
+.fbview .fb-price.off { cursor: default; color: var(--faint); }
+.fbview .fb-price a { text-decoration: none; padding-left: 2px; }
+.fbview .fb-search { margin-left: auto; }
+.fbview .fb-reprice { font-size: 11px; color: var(--muted); }
 /* The eBay/Amazon item's strip and photo card inside the FB review card, and its AI buttons. */
 .fbview .fb-edit .strip { padding: 10px 0 2px; }
 .fbview .fb-edit .sect { padding: 10px 0; }

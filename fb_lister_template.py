@@ -144,10 +144,10 @@ def validate_row(row):
     return problems
 
 
-def build_workbook(rows):
-    """Facebook's own template filled with up to 50 rows -> xlsx bytes."""
-    import openpyxl  # only needed when a workbook is built
+CSV_HEADERS = ('TITLE', 'PRICE', 'CONDITION', 'DESCRIPTION', 'CATEGORY')
 
+
+def _check_rows(rows):
     if not rows:
         raise ValueError('No listings to put in the template.')
     if len(rows) > MAX_ROWS:
@@ -156,6 +156,27 @@ def build_workbook(rows):
         problems = validate_row(row)
         if problems:
             raise ValueError(f'{row.get("upc") or row.get("title")}: fix {", ".join(problems)} first.')
+
+
+def build_csv(rows):
+    """The same rows as build_workbook, as the CSV Facebook's bulk page actually accepts (UTF-8, CRLF)."""
+    import csv
+
+    _check_rows(rows)
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator='\r\n')
+    writer.writerow(CSV_HEADERS)
+    for row in rows:
+        writer.writerow([str(row['title']).strip()[:TITLE_MAX], whole_dollars(row['price']), row['condition'],
+                         plain_text(row.get('description'), DESCRIPTION_MAX), row.get('category') or ''])
+    return out.getvalue().encode('utf-8-sig')
+
+
+def build_workbook(rows):
+    """Facebook's own template filled with up to 50 rows -> xlsx bytes."""
+    import openpyxl  # only needed when a workbook is built
+
+    _check_rows(rows)
     book = openpyxl.load_workbook(TEMPLATE_PATH)
     sheet = book[SHEET]
     for column in range(1, 6):  # clear Facebook's example row

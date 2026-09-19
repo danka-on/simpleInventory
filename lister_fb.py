@@ -20,8 +20,10 @@ import datetime
 import io
 import json
 import re
+import statistics
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from flask import Response, jsonify, request
 
@@ -30,7 +32,8 @@ from lister_routes import MUTATION_HEADER, PLATFORMS, ListerError, _absolute, _t
 
 PLATFORM = 'fb'
 OPEN = ('queued', 'ready', 'in_template')
-UPLOAD_URL = 'https://www.facebook.com/marketplace/create/item'
+UPLOAD_URL = 'https://www.facebook.com/marketplace/create/bulk'
+SEARCH_URL = 'https://www.google.com/search?q='
 HELP_URL = 'https://www.facebook.com/help/1943158472539049'
 PHOTO_LIMIT = 10
 PHOTO_MAX_BYTES = 15_000_000
@@ -49,6 +52,9 @@ class FbList:
         self.lister = lister
         self.db = lister.db
         self.track_listing = deps.get('_track_fb_listing')
+        # Price suggestions: live eBay comps (the app's own comps view) and Amazon's current offers (SP-API).
+        self.ebay_comps_view = deps.get('api_listingagent_ebay_comps')
+        self.amazon_context = deps.get('_amazon_spapi_context')
         base = deps.get('BASE_DIR')
         self.base_dir = Path(base) if base else Path('.')
 
@@ -277,6 +283,120 @@ class FbList:
             batch = self._batch(self._cursor(conn), batch_id)
         return tpl.build_workbook(json.loads(batch['rows_json'] or '[]'))
 
+    def csv_file(self, batch_id):
+        with self.db('listagent.db') as conn:
+            batch = self._batch(self._cursor(conn), batch_id)
+        return tpl.build_csv(json.loads(batch['rows_json'] or '[]'))
+
+    # -- price suggestions ----------------------------------------------------------------
+
+    def prices(self, upc):
+        """What the item sells for elsewhere right now: eBay comps and Amazon offers, plus a web search link.
+
+        Each source reports its own error instead of failing the call, so one dead API never hides the other."""
+        with self.db('listagent.db') as conn:
+            row = self._find(self._cursor(conn), upc)
+        if row is None:
+            raise ListerError('Not on the Facebook list', 404)
+        base = str(row['upc']).split('-', 1)[0].strip()
+        sources = [self._ebay_prices(base), self._amazon_prices(base)]
+        return {'upc': row['upc'], 'searchUrl': SEARCH_URL + quote(base), 'sources': sources}
+
+    def _ebay_prices(self, base):
+        out = {'source': 'ebay', 'label': 'eBay', 'url': 'https://www.ebay.com/sch/i.html?_nkw=' + quote(base) + '&LH_BIN=1',
+               'count': 0, 'low': None, 'median': None, 'high': None, 'suggested': None, 'error': ''}
+        if not self.ebay_comps_view or not getattr(self.lister, 'app', None):
+            out['error'] = 'eBay comps are not available on this server.'
+            return out
+        try:
+            data = self.lister._call_view(self.ebay_comps_view, '/api/listingagent/ebay/comps',
+                                          {'upc': base, 'limit': 20, 'sort': 'price'})
+        except Exception as e:
+            out['error'] = _text(str(e), 200) or 'eBay comps failed'
+            return out
+        if not data.get('success', True) and data.get('error'):
+            out['error'] = _text(data.get('error'), 200)
+            return out
+        prices = []
+        for comp in data.get('results') or data.get('comps') or []:
+            value = ((comp or {}).get('price') or {}).get('value') if isinstance((comp or {}).get('price'), dict) else (comp or {}).get('price')
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                continue
+            if value > 0:
+                prices.append(round(value, 2))
+        prices.sort()
+        if prices:
+            out.update({'count': len(prices), 'low': prices[0], 'high': prices[-1],
+                        'median': round(statistics.median(prices), 2), 'suggested': tpl.whole_dollars(statistics.median(prices))})
+        return out
+
+    def _amazon_prices(self, base):
+        out = {'source': 'amazon', 'label': 'Amazon', 'url': 'https://www.amazon.com/s?k=' + quote(base),
+               'asin': '', 'title': '', 'lowest': None, 'buyBox': None, 'count': 0, 'suggested': None, 'error': ''}
+        search_view = getattr(self.lister, 'amazon_catalog_view', None)
+        if not search_view or not self.amazon_context or not getattr(self.lister, 'app', None):
+            out['error'] = 'Amazon pricing is not available on this server.'
+            return out
+        try:
+            search = self.lister._call_view(search_view, '/api/listingagent/amazon/catalog_search', {'upc': base, 'mode': 'upc', 'limit': 3})
+        except Exception as e:
+            out['error'] = _text(str(e), 200) or 'Amazon catalog search failed'
+            return out
+        if not search.get('success'):
+            out['error'] = _text(search.get('error'), 200) or 'Amazon catalog search failed'
+            return out
+        hits = [h for h in (search.get('results') or []) if _text(h.get('asin'))]
+        if not hits:
+            out['error'] = 'No Amazon product carries this barcode.'
+            return out
+        out['asin'] = _text(hits[0].get('asin')).upper()
+        out['title'] = _text(hits[0].get('title'), 200)
+        out['url'] = 'https://www.amazon.com/dp/' + out['asin']
+        try:
+            out.update(self._amazon_offers(out['asin']))
+        except Exception as e:
+            out['error'] = _text(str(e), 200) or 'Amazon offers failed'
+        return out
+
+    def _amazon_offers(self, asin):
+        """Lowest landed price and the Buy Box for new offers (Product Pricing API)."""
+        from sp_api.api import Products
+
+        credentials, _, marketplace_id, marketplace = self.amazon_context()
+        result = Products(credentials=credentials, marketplace=marketplace).get_item_offers(asin, ItemCondition='New')
+        summary = (result.payload or {}).get('Summary') or {}
+        found = {'lowest': None, 'buyBox': None, 'count': 0, 'suggested': None}
+
+        def amount(entry):
+            for key in ('LandedPrice', 'ListingPrice'):
+                try:
+                    value = float(((entry or {}).get(key) or {}).get('Amount'))
+                except (TypeError, ValueError):
+                    continue
+                if value > 0:
+                    return round(value, 2)
+            return None
+
+        lowest = [amount(e) for e in summary.get('LowestPrices') or [] if str((e or {}).get('condition', '')).lower() == 'new']
+        lowest = [v for v in lowest if v]
+        if lowest:
+            found['lowest'] = min(lowest)
+        box = [amount(e) for e in summary.get('BuyBoxPrices') or [] if str((e or {}).get('condition', '')).lower() == 'new']
+        box = [v for v in box if v]
+        if box:
+            found['buyBox'] = min(box)
+        for entry in summary.get('NumberOfOffers') or []:
+            if str((entry or {}).get('condition', '')).lower() == 'new':
+                try:
+                    found['count'] += int(entry.get('OfferCount') or 0)
+                except (TypeError, ValueError):
+                    pass
+        pick = found['buyBox'] or found['lowest']
+        found['suggested'] = tpl.whole_dollars(pick) if pick else None
+        return found
+
     def batch_listed(self, batch_id, *, actor=''):
         with self.db('listagent.db') as conn:
             cur = self._cursor(conn)
@@ -404,6 +524,12 @@ def register(app, lister, deps):
         except Exception as e:
             return failure(e, 'lister:fb:item')
 
+    def api_lister_fb_prices(upc):
+        try:
+            return jsonify({'success': True, **fb.prices(upc)})
+        except Exception as e:
+            return failure(e, 'lister:fb:prices')
+
     def api_lister_fb_remove(upc):
         try:
             guard()
@@ -441,6 +567,15 @@ def register(app, lister, deps):
         except Exception as e:
             return failure(e, 'lister:fb:workbook')
 
+    def api_lister_fb_batch_csv(batch_id):
+        try:
+            data = fb.csv_file(batch_id)
+            name = f'facebook-marketplace-{int(batch_id)}.csv'
+            return Response(data, mimetype='text/csv',
+                            headers={'Content-Disposition': f'attachment; filename="{name}"', 'Cache-Control': 'no-store'})
+        except Exception as e:
+            return failure(e, 'lister:fb:csv')
+
     def api_lister_fb_batch_listed(batch_id):
         try:
             guard()
@@ -467,9 +602,11 @@ def register(app, lister, deps):
     app.add_url_rule('/api/lister/fb/categories', 'api_lister_fb_categories', api_lister_fb_categories)
     app.add_url_rule('/api/lister/fb/item/<upc>', 'api_lister_fb_item', api_lister_fb_item, methods=['GET', 'POST'])
     app.add_url_rule('/api/lister/fb/item/<upc>/remove', 'api_lister_fb_remove', api_lister_fb_remove, methods=['POST'])
+    app.add_url_rule('/api/lister/fb/item/<upc>/prices', 'api_lister_fb_prices', api_lister_fb_prices)
     app.add_url_rule('/api/lister/fb/item/<upc>/photos.zip', 'api_lister_fb_photos', api_lister_fb_photos)
     app.add_url_rule('/api/lister/fb/build', 'api_lister_fb_build', api_lister_fb_build, methods=['POST'])
     app.add_url_rule('/api/lister/fb/batch/<int:batch_id>.xlsx', 'api_lister_fb_batch_file', api_lister_fb_batch_file)
+    app.add_url_rule('/api/lister/fb/batch/<int:batch_id>.csv', 'api_lister_fb_batch_csv', api_lister_fb_batch_csv)
     app.add_url_rule('/api/lister/fb/batch/<int:batch_id>/listed', 'api_lister_fb_batch_listed', api_lister_fb_batch_listed,
                      methods=['POST'])
     app.add_url_rule('/api/lister/fb/batch/<int:batch_id>/cancel', 'api_lister_fb_batch_cancel', api_lister_fb_batch_cancel,

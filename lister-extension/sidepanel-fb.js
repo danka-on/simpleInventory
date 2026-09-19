@@ -20,6 +20,8 @@
   const fb = {
     open: false, items: [], counts: {}, batches: [], listedToday: 0, uploadUrl: '', helpUrl: '', maxRows: 50,
     upc: null, item: null, info: null, aiBusy: '', itemError: '', loaded: false, error: '', armed: null, armTimer: null, searchTimer: null,
+    prices: {},  // upc -> { loading, error, searchUrl, sources } (asking prices on eBay / Amazon)
+    uploading: 0,  // workbook id being sent to Facebook
   };
 
   // -- data ---------------------------------------------------------------------------------
@@ -48,6 +50,7 @@
     renderItem();
     // The full Lister item (the same one the eBay/Amazon view shows): photos, rack and store status.
     void loadInfo(upc);
+    void loadPrices(upc);
     P().renderActionBar();
     const done = P().busy('Opening the item…');
     try {
@@ -93,6 +96,76 @@
     } finally {
       fb.aiBusy = ''; done(); renderItem();
     }
+  }
+
+  // What the item goes for on eBay (live comps) and Amazon (current offers); cached per item for the session.
+  async function loadPrices(upc, { force = false } = {}) {
+    const have = fb.prices[upc];
+    if (have && !force && (have.loading || !have.error)) { if (!have.loading) renderPrices(); return; }
+    fb.prices[upc] = { loading: true, error: '', searchUrl: '', sources: [] };
+    renderPrices();
+    try {
+      const data = await P().api('/api/lister/fb/item/' + encodeURIComponent(upc) + '/prices');
+      fb.prices[upc] = { loading: false, error: '', searchUrl: data.searchUrl || '', sources: data.sources || [] };
+    } catch (error) {
+      fb.prices[upc] = { loading: false, error: error.message || String(error), searchUrl: '', sources: [] };
+    }
+    if (fb.upc === upc) renderPrices();
+  }
+
+  function searchUrlFor(upc) {
+    const cached = fb.prices[upc];
+    return (cached && cached.searchUrl) || 'https://www.google.com/search?q=' + encodeURIComponent(String(upc || '').split('-')[0]);
+  }
+
+  function money(value) {
+    if (value == null || value === '') return '';
+    const n = Number(value);
+    return Number.isFinite(n) ? '$' + (Number.isInteger(n) ? n : n.toFixed(2)) : '';
+  }
+
+  // One chip per source: press it to put that price in the box; the small text says what it came from.
+  function pricesHtml() {
+    const upc = fb.upc;
+    const p = upc ? fb.prices[upc] : null;
+    const locked = fb.item && fb.item.status === 'in_template';
+    const search = `<button class="mini fb-search" type="button" data-act="search" title="Search the web for this barcode in a new tab">\u{1F50D} Search</button>`;
+    if (!p || p.loading) return `<span class="muted small"><span class="spin"></span> Asking eBay and Amazon\u2026</span>${search}`;
+    const chips = [];
+    for (const s of p.sources) {
+      if (s.source === 'ebay') {
+        if (s.suggested) {
+          chips.push(`<button class="chip fb-price" type="button" data-act="useprice" data-price="${esc(s.suggested)}"${locked ? ' disabled' : ''} title="${esc(s.count)} eBay listings with this barcode, ${esc(money(s.low))}\u2013${esc(money(s.high))}; the middle one">` +
+            `<b>eBay</b> ${esc(money(s.suggested))} <small>${esc(s.count)} listed \u00b7 ${esc(money(s.low))}\u2013${esc(money(s.high))}</small></button>`);
+        } else {
+          chips.push(`<span class="chip fb-price off" title="${esc(s.error || 'No eBay listing carries this barcode')}"><b>eBay</b> <small>${esc(s.error ? 'unavailable' : 'none')}</small></span>`);
+        }
+      } else if (s.source === 'amazon') {
+        if (s.suggested) {
+          const what = s.buyBox ? 'Buy Box' : 'lowest new offer';
+          chips.push(`<button class="chip fb-price" type="button" data-act="useprice" data-price="${esc(s.suggested)}"${locked ? ' disabled' : ''} title="${esc(s.title || s.asin)}: ${what}${s.count ? `, ${esc(s.count)} new offers` : ''}">` +
+            `<b>Amazon</b> ${esc(money(s.suggested))} <small>${what}${s.lowest && s.buyBox && s.lowest !== s.buyBox ? ` \u00b7 low ${esc(money(s.lowest))}` : ''}</small></button>`);
+        } else {
+          chips.push(`<span class="chip fb-price off" title="${esc(s.error || 'No Amazon price')}"><b>Amazon</b> <small>${esc(s.error ? (s.asin ? 'no offers' : 'not found') : 'none')}</small></span>`);
+        }
+      }
+      if (s.url) chips[chips.length - 1] = chips[chips.length - 1].replace(/<\/(button|span)>$/, ` <a href="${esc(s.url)}" target="_blank" rel="noopener" title="Open on ${esc(s.label)}" aria-label="Open on ${esc(s.label)}">\u2197</a></$1>`);
+    }
+    if (p.error) chips.push(`<span class="small fb-bad">${esc(p.error)}</span>`);
+    return chips.join('') + search + `<button class="link small fb-reprice" type="button" data-act="reprice" title="Ask eBay and Amazon again">refresh</button>`;
+  }
+
+  function renderPrices() {
+    const box = $('fbPrices');
+    if (box) box.innerHTML = pricesHtml();
+  }
+
+  function usePrice(value) {
+    const input = $('fbPrice');
+    if (!input || input.disabled) return;
+    input.value = String(Math.max(1, Math.round(Number(value) || 0)));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
   }
 
   function backToList() {
@@ -181,6 +254,102 @@
     setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 10000);
   }
 
+  // -- upload to Facebook ---------------------------------------------------------------------
+  // Facebook's "Create multiple listings" page takes a CSV through a file box; there is no API.
+  // The panel fetches the batch as CSV (the fetch carries the Cloudflare sign-in), opens the page
+  // and drops the file into that box from a page script. Photos still go on each listing by hand.
+
+  // Runs inside the Facebook tab (serialised by chrome.scripting, so it must stand on its own).
+  async function fbUploadInPage(payload) {
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const text = el => String(el.innerText || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+    const seen = el => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+    if (window.__ssFbUploading) return { ok: false, error: 'An upload is already running in this tab.' };
+    window.__ssFbUploading = true;
+    try {
+      const bytes = Uint8Array.from(atob(payload.base64), c => c.charCodeAt(0));
+      const file = new File([bytes], payload.name, { type: payload.mime });
+      const opener = /\b(multiple listings|bulk|spreadsheet|csv|upload (a |your )?file)\b/i;
+      let clicked = 0;
+      for (let tick = 0; tick < 90; tick++) {  // up to 45 s for the page to build itself
+        if (/\/(login|checkpoint)/.test(location.pathname)) return { ok: false, error: 'Facebook wants a sign-in in this tab first.' };
+        const inputs = [...document.querySelectorAll('input[type="file"]')]
+          .filter(input => !/image|video/i.test(input.accept || '') || /csv|sheet|excel|text/i.test(input.accept || ''));
+        const input = inputs.find(i => /csv|sheet|excel|text/i.test(i.accept || '')) || inputs[0];
+        if (input) {
+          const transfer = new DataTransfer();
+          transfer.items.add(file);
+          input.files = transfer.files;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          return { ok: true, accept: input.accept || '', clicked };
+        }
+        // No file box yet: the page may want the multiple-listings option pressed first.
+        if (tick % 4 === 0) {
+          const control = [...document.querySelectorAll('a, button, [role="button"], [role="link"], [role="menuitem"], label')]
+            .find(el => seen(el) && opener.test(text(el)) && !/photo|video/i.test(text(el)));
+          if (control) { control.click(); clicked++; }
+        }
+        await sleep(500);
+      }
+      return { ok: false, error: 'No file box turned up on this Facebook page. Use "⬇ File again" and choose the file there.' };
+    } catch (error) {
+      return { ok: false, error: String(error && error.message || error) };
+    } finally {
+      window.__ssFbUploading = false;
+    }
+  }
+
+  function waitForTab(tabId, timeoutMs = 30000) {
+    return new Promise(resolve => {
+      let settled = false;
+      const finish = () => { if (settled) return; settled = true; chrome.tabs.onUpdated.removeListener(onUpdated); resolve(); };
+      const onUpdated = (id, change) => { if (id === tabId && change.status === 'complete') finish(); };
+      chrome.tabs.onUpdated.addListener(onUpdated);
+      chrome.tabs.get(tabId).then(tab => { if (tab && tab.status === 'complete') finish(); }).catch(finish);
+      setTimeout(finish, timeoutMs);
+    });
+  }
+
+  async function fetchBase64(path) {
+    const response = await fetch(P().serverBase() + path, {
+      credentials: 'include', cache: 'no-store', redirect: 'manual', headers: { 'X-Sweet-Shelves-Lister': '1' } });
+    if (!response.ok) {
+      let message = 'HTTP ' + response.status;
+      try { message = (await response.json()).error || message; } catch { /* not json */ }
+      throw new Error(message);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(binary);
+  }
+
+  async function uploadToFacebook(id) {
+    if (fb.uploading) return;
+    fb.uploading = id;
+    renderList();
+    const done = P().busy(`Sending workbook #${id} to Facebook…`);
+    try {
+      const name = `facebook-marketplace-${id}.csv`;
+      const base64 = await fetchBase64(`/api/lister/fb/batch/${id}.csv`);
+      const tab = await chrome.tabs.create({ url: fb.uploadUrl || 'https://www.facebook.com/marketplace/create/bulk', active: true });
+      await waitForTab(tab.id);
+      await new Promise(resolve => setTimeout(resolve, 1500));  // Facebook draws the form after "complete"
+      const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: fbUploadInPage,
+        args: [{ name, base64, mime: 'text/csv' }] });
+      const result = (results && results[0] && results[0].result) || { ok: false, error: 'The Facebook page gave no answer.' };
+      if (!result.ok) throw new Error(result.error || 'Upload failed');
+      P().toast(`Workbook #${id} is in Facebook's file box. Check the rows there, publish, then add photos and press Mark listed here.`);
+    } catch (error) {
+      P().toast(error.message || String(error), true);
+    } finally {
+      fb.uploading = 0;
+      done();
+      renderList();
+    }
+  }
+
   async function build() {
     const done = P().busy('Building the Facebook workbook…');
     try {
@@ -253,11 +422,12 @@
       <div class="fb-batch">
         <div><b>Workbook #${b.id}</b> · ${b.count} item${b.count === 1 ? '' : 's'} <span class="muted small">${esc((b.createdAt || '').replace('T', ' ').slice(0, 16))}</span></div>
         <ol class="fb-steps small">
-          <li>Upload the file on Facebook (Marketplace → Create new listing → the bulk / spreadsheet option).</li>
+          <li>Press <b>Upload to Facebook</b>: it opens Facebook's multiple-listings page and drops the file in. Check the rows there and publish.</li>
           <li>Add the photos to each new listing (open an item here → Save photos).</li>
           <li>Come back and press Mark listed.</li>
         </ol>
         <div class="row tight">
+          <button class="mini primary" type="button" data-act="upload" data-id="${b.id}"${fb.uploading ? ' disabled' : ''}>${fb.uploading === b.id ? '<span class="spin"></span> Sending…' : '⬆ Upload to Facebook'}</button>
           <button class="mini" type="button" data-act="download" data-id="${b.id}">⬇ File again</button>
           <button class="mini" type="button" data-act="facebook">↗ Facebook</button>
           <button class="mini primary" type="button" data-act="listed" data-id="${b.id}">${fb.armed === 'listed' + b.id ? 'Sure? Click again' : '✓ Mark listed'}</button>
@@ -328,6 +498,7 @@
           <label>Price (whole $)<input id="fbPrice" type="number" min="1" step="1" inputmode="numeric" value="${esc(d.price ?? '')}"></label>
           <label>Condition<select id="fbCond">${info.conditions.map(c => `<option${c === d.condition ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
         </div>
+        <div id="fbPrices" class="fb-prices" aria-label="Asking prices elsewhere">${pricesHtml()}</div>
         <label>Category<select id="fbCat"><option value="">(none)</option>${categories.map(c => `<option value="${esc(c)}"${c === d.category ? ' selected' : ''}>${esc(c.replace(/\/\//g, ' › '))}</option>`).join('')}</select></label>
         <input id="fbCatSearch" type="search" placeholder="Search all Facebook categories…" aria-label="Search Facebook categories">
         <div id="fbCatResults" class="fb-results"></div>
@@ -402,6 +573,10 @@
           case 'clearall': armed('clearall', () => clearAll()); break;
           case 'additems': chrome.tabs.create({ url: P().serverBase() + '/items-to-list' }); break;
           case 'photos': void savePhotos(); break;
+          case 'search': chrome.tabs.create({ url: searchUrlFor(fb.upc) }); break;
+          case 'reprice': void loadPrices(fb.upc, { force: true }); break;
+          case 'useprice': usePrice(act.dataset.price); break;
+          case 'upload': void uploadToFacebook(Number(id)); break;
           case 'ai-title': void aiText('title'); break;
           case 'ai-description': void aiText('description'); break;
           case 'facebook': openFacebook(); break;

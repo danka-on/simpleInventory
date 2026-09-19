@@ -672,6 +672,9 @@ def register_routes():
         '_telegram_chat_for_email': ss_telegram.telegram_chat_for_email,
         # FB list: "Mark listed" records the Facebook listing where the rest of the app tracks them.
         '_track_fb_listing': ss_facebook._track_fb_listing,
+        # FB review: asking prices from eBay comps and Amazon's current offers next to the Price box.
+        'api_listingagent_ebay_comps': ss_ebay_catalog.api_listingagent_ebay_comps,
+        '_amazon_spapi_context': ss_amazon_catalog._amazon_spapi_context,
         'BASE_DIR': BASE_DIR,
     })
 
