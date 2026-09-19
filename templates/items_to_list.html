@@ -3422,7 +3422,57 @@ async function initializeItemsToList(){
   await loadItems(null, { historyMode: 'replace' });
   const qInput = document.getElementById('filter-q');
   if(qInput) qInput.focus();
+  restoreReturnScroll();
 }
+
+// Coming back to this tab (from eBay / Amazon): reload right away so listed rows are fresh,
+// and put the page back where it was.
+const RETURN_SCROLL_KEY = 'itl_return_scroll';
+let tabHiddenAt = 0;
+function restoreReturnScroll(){
+  let saved = null;
+  try{
+    saved = JSON.parse(sessionStorage.getItem(RETURN_SCROLL_KEY) || 'null');
+    sessionStorage.removeItem(RETURN_SCROLL_KEY);
+  }catch(err){ /* private mode */ }
+  if(!saved || saved.url !== window.location.href || !Number.isFinite(saved.y)) return;
+  // Pin the row that was at the top of the screen (thumbnails and cells still grow after render).
+  const place = () => {
+    const row = saved.rowId ? document.querySelector(`.marketplace-checkbox[data-id="${CSS.escape(saved.rowId)}"]`)?.closest('tr') : null;
+    if(row) window.scrollBy(0, row.getBoundingClientRect().top - saved.rowTop);
+    else window.scrollTo(0, saved.y);
+  };
+  let userScrolled = false;
+  const stop = () => { userScrolled = true; };
+  ['wheel', 'touchstart', 'keydown', 'mousedown'].forEach(ev => window.addEventListener(ev, stop, { once: true, passive: true }));
+  window.requestAnimationFrame(place);
+  [300, 800, 1600].forEach(ms => setTimeout(() => { if(!userScrolled) place(); }, ms));
+}
+function topVisibleRowAnchor(){
+  for(const tr of document.querySelectorAll('tbody tr')){
+    const rect = tr.getBoundingClientRect();
+    if(rect.bottom <= 0) continue;
+    const id = tr.querySelector('.marketplace-checkbox[data-id]')?.dataset.id || '';
+    return id ? { rowId: id, rowTop: rect.top } : {};
+  }
+  return {};
+}
+function canReloadOnReturn(){
+  if(pendingMarketplaceSaves > 0) return false;
+  // Don't throw away an open modal or something being typed.
+  if(Array.from(document.querySelectorAll('.modal')).some(m => m.style.display && m.style.display !== 'none')) return false;
+  const el = document.activeElement;
+  if(el && el.id !== 'filter-q' && (el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.value && !['checkbox','radio','button'].includes(el.type)))) return false;
+  return true;
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden'){ tabHiddenAt = Date.now(); return; }
+  const wasAway = tabHiddenAt && (Date.now() - tabHiddenAt) > 1000;
+  tabHiddenAt = 0;
+  if(!wasAway || !canReloadOnReturn()) return;
+  try{ sessionStorage.setItem(RETURN_SCROLL_KEY, JSON.stringify({ url: window.location.href, y: window.scrollY, ...topVisibleRowAnchor() })); }catch(err){ /* private mode */ }
+  window.location.reload();
+});
 initializeItemsToList();
 // Back button navigates home; using button confines clickable area to the button
 const backBtn = document.getElementById('back-btn');
