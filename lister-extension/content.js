@@ -288,6 +288,12 @@
         used.add(index);
         (ok ? report.filled : report.skipped).push({ target: 'condition', value: labels[0], label: descriptors[index].labelText || 'Condition', reason: ok ? '' : 'no matching option' });
         if (ok) flash(elements[index]);
+      } else if (store === 'amazon' && conditionDropdown() && labels.length) {
+        const dd = conditionDropdown();
+        let ok = false;
+        try { ok = setKatDropdown(dd, labels); } catch { ok = false; }
+        (ok ? report.filled : report.skipped).push({ target: 'condition', value: labels[0], label: 'Item Condition', reason: ok ? '' : 'no matching option' });
+        if (ok) flash(dd);
       } else {
         report.unmatched.push('condition');
       }
@@ -327,6 +333,8 @@
         try { ok = setField(elements[hit.index], value); } catch { ok = false; }
         if (ok) flash(elements[hit.index]);
         (ok ? report.filled : report.skipped).push({ target: 'matchLowest', value, label: 'Lowest price read from the page (' + read.label + ')', reason: ok ? '' : 'could not type it' });
+      } else if (!read) {
+        matchLowestPriceWhenShown(values, store);  // the offer panel and its link may still be loading
       }
     }
     return fillAspects(report, descriptors, elements, used, aspects);
@@ -402,7 +410,73 @@
     if (attempts > 0) setTimeout(() => keepMerchantFulfilled(values, store, attempts - 1), 1000);
   }
 
-  // Both stores offer the number themselves - Seller Central as "Match lowest price: USD$29.40"
+  // Seller Central's Item Condition is a Katal dropdown (kat-dropdown name="condition_type-...")
+  // whose options live in its shadow root as kat-option elements: not a <select>, so the field
+  // matcher never sees it. It opens on its header and takes a click on the option.
+  function conditionDropdown() {
+    return deepQuery('kat-dropdown').find(dd => isVisible(dd) &&
+      /condition/i.test([dd.getAttribute('name'), dd.getAttribute('label'), dd.getAttribute('aria-label'), dd.getAttribute('kat-aria-label'), dd.id].filter(Boolean).join(' ')));
+  }
+
+  function dropdownOptions(dd) {
+    const own = Array.isArray(dd.options) ? dd.options.map(o => ({ name: String(o.name ?? o.label ?? o.value ?? ''), value: String(o.value ?? '') })) : [];
+    if (own.length) return own;
+    return deepQuery('kat-option, [role=option]', dd).map(o => ({ name: clip(o.textContent || ''), value: String(o.getAttribute('value') || '') }));
+  }
+
+  function dropdownText(dd) {
+    const value = String(dd.value || '');
+    if (!value) return '';
+    const option = dropdownOptions(dd).find(o => o.value === value);
+    return option ? option.name : value;
+  }
+
+  function setKatDropdown(dd, labels) {
+    const options = dropdownOptions(dd);
+    const index = M.chooseOption(options.map(o => o.name), labels);
+    if (index < 0) return false;
+    const want = options[index].value;
+    if (String(dd.value || '') === want) return true;
+    const header = dd.shadowRoot && dd.shadowRoot.querySelector('.select-header, [part~="dropdown-header"]');
+    try { if (header) header.click(); } catch { /* ignore */ }
+    const option = deepQuery('kat-option, [role=option]', dd).find(o => String(o.getAttribute('value') || '') === want || clip(o.textContent || '') === options[index].name);
+    try { if (option) option.click(); } catch { /* ignore */ }
+    if (String(dd.value || '') !== want) {
+      try { dd.value = want; } catch { /* read-only */ }
+      for (const type of ['input', 'change']) {
+        try { dd.dispatchEvent(new CustomEvent(type, { bubbles: true, composed: true, detail: { value: want } })); } catch { /* ignore */ }
+      }
+    }
+    return String(dd.value || '') === want;
+  }
+
+  // The "Match lowest price" link can draw after the form (the offer panel loads late): keep
+  // looking for it, and only while the price box still holds nothing or our own figure.
+  function matchLowestPriceWhenShown(values, store, attempts = 16) {
+    setTimeout(() => {
+      const elements = collect();
+      const descriptors = elements.map(describe);
+      const hit = M.assign(descriptors, ['price']).price;
+      if (hit) {
+        const current = String(descriptors[hit.index].value || '').replace(/[$,\s]/g, '');
+        const ours = values.price != null ? Number(values.price) : null;
+        if (current && (ours == null || Number(current) !== ours)) return;  // typed by the user or the page
+      }
+      const lowest = matchLowestPrice(store);
+      if (lowest && lowest.ok) return;
+      if (hit) {
+        const read = M.lowestPrice(document.body ? document.body.innerText.slice(0, 40000) : '');
+        if (read) {
+          let ok = false;
+          try { ok = setField(elements[hit.index], read.price.toFixed(2)); } catch { ok = false; }
+          if (ok) { flash(elements[hit.index]); return; }
+        }
+      }
+      if (attempts > 0) matchLowestPriceWhenShown(values, store, attempts - 1);
+    }, 500);
+  }
+
+  // Both stores offer the number themselves - Seller Central as "Match lowest price: USD$29.40\"
   // under the price box, eBay beside its own - and pressing it beats typing our reading of it.
   // The wrappers around the link carry the same words, so the innermost match is the control.
   function matchLowestPrice() {
@@ -985,6 +1059,16 @@
     const photos = photoState();
     // A ready-made Amazon catalogue listing carries the catalogue's pictures: photos are optional there.
     if (photos) rows.unshift({ index: -1, target: 'photos', required: store !== 'amazon', done: photos.count > 0, label: 'Photos', suggestion: store === 'amazon' ? 'Optional on a catalogue listing' : 'Send to page or drag from the panel', tag: 'photos', kind: 'photos', el: photos.el });
+    // Seller Central's Item Condition dropdown: on the list, and a checkpoint even once it holds a
+    // value (the page can arrive with a condition of its own), so the HUD walks past it before Submit.
+    if (store === 'amazon' && !rows.some(r => r.target === 'condition')) {
+      const dd = conditionDropdown();
+      if (dd) {
+        const text = dropdownText(dd);
+        rows.push({ index: -1, target: 'condition', required: true, done: Boolean(text), label: 'Item Condition',
+          suggestion: values.condition ? ((M.conditionLabels(values.condition, store) || [])[0] || '') : '', tag: 'dropdown', kind: 'dropdown', el: dd, value: text, confirm: true });
+      }
+    }
     const payment = store === 'amazon' ? null : policyState();
     // Only worth a row while it is still empty: once a policy is picked there is nothing to do.
     if (payment && !payment.done) rows.push({ index: -1, target: 'paymentPolicy', required: true, done: false, label: 'Payment policy', suggestion: 'Pick a payment policy', tag: 'policy', kind: 'policy', el: payment.el, value: payment.value });
@@ -1020,7 +1104,7 @@
   }
 
   function guideElement(row) {
-    return row.kind === 'photos' || row.kind === 'policy' ? row.el : guide.elements[row.index];
+    return row.kind === 'photos' || row.kind === 'policy' || row.kind === 'dropdown' ? row.el : guide.elements[row.index];
   }
 
   function guideStyle(row, state) {
@@ -1044,8 +1128,10 @@
   }
 
   // The page's own "List it" / "Save and finish" button: scroll there and flash it (the user presses it).
-  function findSubmitButton() {
-    const words = /^(list it|list item|list your item|save and finish|save and continue|submit listing|publish|list now|continue to listing)$/i;
+  function findSubmitButton(store = '') {
+    const words = store === 'amazon'
+      ? /^(save and finish|save and continue|submit listing|submit|publish|list now)$/i
+      : /^(list it|list item|list your item|save and finish|save and continue|submit listing|publish|list now|continue to listing)$/i;
     // Seller Central's buttons are Katal components: the words sit on the host's label attribute.
     const candidates = deepQuery('button, input[type=submit], a[role=button], [role=button], kat-button')
       .filter(isVisible)
@@ -1063,14 +1149,14 @@
   // "All set - List it" on the HUD means it: the page's own List it / Save and finish is pressed, and the
   // side panel is told, so it can count the item as listed once the store moves on from the form.
   function goToSubmit() {
-    const button = findSubmitButton();
+    let page = {};
+    try { page = detect(); } catch { /* the panel falls back to what it knows */ }
+    const button = findSubmitButton(page.store || '');
     if (!button) { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); return false; }
     try { button.scrollIntoView({ block: 'center', behavior: 'smooth' }); button.focus({ preventScroll: true }); } catch { /* ignore */ }
     const previous = button.style.boxShadow;
     button.style.boxShadow = '0 0 0 4px rgba(22,163,74,.75)';
     setTimeout(() => { button.style.boxShadow = previous; }, 2500);
-    let page = {};
-    try { page = detect(); } catch { /* the panel falls back to what it knows */ }
     chrome.runtime.sendMessage({ type: 'ss-lister-submitted', store: page.store || '', sku: page.sku || '', url: location.href }).catch(() => {});
     setTimeout(() => { try { button.click(); } catch { /* gone */ } }, 300);
     return true;
@@ -1564,6 +1650,7 @@
     for (const row of guide.rows) {
       if (row.kind === 'photos') { const photos = photoState(); row.done = Boolean(photos && photos.count > 0); if (photos) row.el = photos.el; }
       else if (row.kind === 'policy') { const policy = policyState(); row.done = Boolean(policy && policy.done); row.value = policy ? policy.value : ''; if (policy) row.el = policy.el; }
+      else if (row.kind === 'dropdown') { const dd = conditionDropdown(); if (dd) row.el = dd; row.value = dd ? dropdownText(dd) : ''; row.done = Boolean(row.value); }
       else {
         const d = describe(guide.elements[row.index]);
         row.done = !M.isEmptyValue(d);
@@ -1577,7 +1664,13 @@
     if (!guide) return guideState();
     guideRefresh();
     const open = guide.rows.map((r, i) => (rowOpen(r) ? i : -1)).filter(i => i >= 0);
-    if (!open.length) { guide.index = -1; guideRender(); notifyGuide(); return guideState(); }
+    if (!open.length) {
+      guide.index = -1; guideRender(); notifyGuide();
+      // Seller Central: the walk ends at the condition; stepping past it with everything in place
+      // is the "done", so the page's Submit is pressed for the user (a refresh never does this).
+      if (guide.options.store === 'amazon' && guide.options.autoSubmit !== false && guide.rows.length) goToSubmit();
+      return guideState();
+    }
     const after = open.find(i => i > guide.index);
     guide.index = after !== undefined ? after : open[0];
     markSeen(guide.rows[guide.index]);  // landing on it is the look it was asking for
@@ -1600,6 +1693,13 @@
   function guideUse() {
     if (!guide) return guideState();
     const current = guide.rows[guide.index];
+    if (current && current.kind === 'dropdown' && current.suggestion) {
+      const labels = M.conditionLabels((guide.options.values || {}).condition, guide.options.store) || [current.suggestion];
+      let ok = false;
+      try { ok = setKatDropdown(current.el, labels); } catch { ok = false; }
+      if (ok) flash(current.el);
+      return guideNext();
+    }
     if (!current || !current.suggestion || current.kind !== 'field') return guideState();
     const el = guide.elements[current.index];
     const options = {};

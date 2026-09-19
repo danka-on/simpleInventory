@@ -508,7 +508,7 @@ const successPage = `<!doctype html><title>Your item is listed | eBay</title><h1
     assert.ok(rowFor('Color').dot.includes('220, 38, 38'), 'the empty required Color field is red');
     assert.ok(rowFor('Title').dot.includes('22, 163, 74'), 'the filled title is green');
     assert.ok(rowFor('Quantity').text.includes('· 1'), 'the quantity row shows the entered quantity: ' + rowFor('Quantity').text);
-    assert.ok(!rowFor('UPC'), 'the UPC is not on the checklist');
+    assert.ok(rowFor('UPC') && rowFor('UPC').dot.includes('22, 163, 74'), 'the filled UPC is on the eBay checklist, green: ' + JSON.stringify(rows));
     // The warehouse count sits under the store's own quantity box while the listing is being set up.
     const qtyTag = await store.$eval('[data-ss-qty]', el => ({ text: el.textContent, bg: el.style.background, shown: el.style.display }));
     assert.ok(qtyTag.text.includes('1 on the rack') && qtyTag.text.includes('B-1'), 'the quantity badge shows the rack count and position: ' + qtyTag.text);
