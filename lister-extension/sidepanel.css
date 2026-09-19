@@ -108,16 +108,23 @@ h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 
 /* -- header: the store you are working, and nothing else ------------------------------------- */
-.top { display: flex; align-items: stretch; background: var(--card); border-bottom: 1px solid var(--line); }
-.stores { display: flex; flex: 1; }
-.store { flex: 1; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 11px 8px 9px; font-weight: 600; color: var(--faint); display: flex; align-items: center; justify-content: center; gap: 7px; }
-.store:hover { color: var(--muted); background: none; filter: none; }
-.store .n { font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums; opacity: .85; }
-.store[aria-selected="true"] { color: var(--ink); border-bottom-color: currentColor; }
-.store.ebay[aria-selected="true"] { color: var(--ebay); background: var(--ebay-soft); }
-.store.amazon[aria-selected="true"] { color: var(--amazon); background: var(--amazon-soft); }
-.store.fb[aria-selected="true"] { color: var(--fb); background: var(--fb-soft); }
-.sys { display: flex; align-items: center; gap: 2px; padding: 0 6px 0 8px; border-left: 1px solid var(--line-2); }
+/* Two rows: a slim status strip, then the four tabs across the full width so none is ever clipped. */
+.top { display: flex; flex-direction: column; background: var(--card); border-bottom: 1px solid var(--line); }
+/* One pill strip: every tab is a real button, the chosen one is filled in its store's colour. */
+.stores { display: flex; min-width: 0; gap: 5px; padding: 4px 8px 9px; }
+.store { flex: 1; min-width: 0; background: var(--card-2); border: 1.5px solid var(--line); border-radius: 999px; padding: 8px 8px; font-size: 13.5px; font-weight: 700; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; cursor: pointer; transition: background .12s, color .12s, border-color .12s; }
+.store:hover { color: var(--ink); background: var(--chip); border-color: var(--line-2); filter: none; }
+.store .n { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 18px; padding: 1px 6px; border-radius: 999px; background: var(--chip); color: var(--muted); line-height: 1.3; }
+.store .n:empty { display: none; }
+.store[aria-selected="true"] { color: var(--bg); border-color: transparent; background: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.store[aria-selected="true"] .n { background: rgba(255,255,255,.22); color: #fff; }
+.store.ebay { color: var(--ebay); }
+.store.amazon { color: var(--amazon); }
+.store.fb { color: var(--fb); }
+.store.ebay[aria-selected="true"] { color: #fff; background: var(--ebay); }
+.store.amazon[aria-selected="true"] { color: #fff; background: var(--amazon); }
+.store.fb[aria-selected="true"] { color: #fff; background: var(--fb); }
+.sys { order: -1; display: flex; align-items: center; justify-content: flex-end; gap: 2px; padding: 4px 6px 0; }
 .conn { width: 9px; height: 9px; padding: 0; border-radius: 50%; border: 0; background: var(--faint); flex: none; }
 .conn.ok { background: var(--green); }
 .conn.bad { background: var(--red); }
@@ -440,8 +447,9 @@ label.sw .txt small { font-size: 11px; color: var(--muted); }
 /* "+ NEW" ------------------------------------------------------------------------------------
    A third tab beside the two stores, because starting an item is a different job from working
    the queue, not a filter on it. */
-.store.new { flex: 0 0 auto; padding-left: 12px; padding-right: 12px; font-size: 12px; letter-spacing: .02em; }
-.store.new[aria-selected="true"] { color: var(--green); }
+.store.new { flex: 0 0 auto; padding-left: 12px; padding-right: 12px; font-size: 12px; letter-spacing: .02em; color: var(--green); border-style: dashed; border-color: var(--green); }
+.store.new:hover { background: var(--green-soft); color: var(--green); border-style: solid; }
+.store.new[aria-selected="true"] { color: #fff; background: var(--green); border-style: solid; }
 
 .newitem[hidden] { display: none; }
 .newitem .card { margin: 8px; }
@@ -559,7 +567,7 @@ button.tiny.phone-btn .phone-ico { font-size: 13px; line-height: 1; }
 .fbview .fb-batch + .fb-batch { border-top: 1px solid var(--line-2); margin-top: 8px; padding-top: 8px; }
 .fbview .fb-steps { margin: 6px 0 0; padding-left: 18px; color: var(--muted); }
 .fbview .fb-list { max-height: none; }
-.fbview .fb-clear { margin-top: 6px; }
+.fbview .fb-acts { padding: 4px 8px 0; }
 .fbview .fb-row.ready .stripe { background: var(--green); }
 .fbview .fb-status { font-weight: 600; color: var(--muted); }
 .fbview .fb-status.ready { color: var(--green); }

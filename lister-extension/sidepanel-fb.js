@@ -287,7 +287,10 @@
         <div class="fb-title"><span class="fb-mark" aria-hidden="true">f</span> Facebook Marketplace</div>
         <div class="small muted">${summary}</div>
         ${fb.error ? `<div class="small fb-bad">${esc(fb.error)}</div>` : ''}
-        ${open.length ? `<div class="row tight fb-clear"><button class="mini danger" type="button" data-act="clearall" title="Take every item still to review or ready off the Facebook list">${fb.armed === 'clearall' ? `Sure? Click again to clear ${open.length}` : 'Clear all'}</button></div>` : ''}
+      </div>
+      <div class="listacts fb-acts">
+        <button id="fbAddItems" class="addbtn" type="button" data-act="additems" title="Opens Items to List in a new tab. Press + there while this FB tab is open and the item shows up here right away."><span class="addplus" aria-hidden="true">+</span><span class="addtxt"><b>Add items</b><small>from Items to List &#x2197;</small></span></button>
+        ${open.length ? `<div class="lstack fb-clear"><button class="lact danger" type="button" data-act="clearall" title="Take every item still to review or ready off the Facebook list">${fb.armed === 'clearall' ? `Sure? Click again to clear ${open.length}` : 'Clear all'}</button></div>` : ''}
       </div>
       ${batches ? `<div class="card fb-batches">${batches}</div>` : ''}
       <div class="list fb-list">${rows}${empty}</div>`);
@@ -397,6 +400,7 @@
           case 'remove': void remove(fb.upc); break;
           case 'fbremove': void remove(act.dataset.upc); break;
           case 'clearall': armed('clearall', () => clearAll()); break;
+          case 'additems': chrome.tabs.create({ url: P().serverBase() + '/items-to-list' }); break;
           case 'photos': void savePhotos(); break;
           case 'ai-title': void aiText('title'); break;
           case 'ai-description': void aiText('description'); break;
