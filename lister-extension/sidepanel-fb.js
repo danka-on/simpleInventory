@@ -133,6 +133,24 @@
     else backToList();
   }
 
+  async function clearAll() {
+    const open = fb.items.filter(it => it.status === 'queued' || it.status === 'ready');
+    if (!open.length) return;
+    const done = P().busy(`Clearing ${open.length} from the Facebook list\u2026`);
+    let cleared = 0;
+    try {
+      for (const it of open) {
+        try { await P().api('/api/lister/fb/item/' + encodeURIComponent(it.upc) + '/remove', { method: 'POST', body: {} }); cleared++; }
+        catch (error) { /* counted below */ }
+      }
+    } finally {
+      done();
+    }
+    const missed = open.length - cleared;
+    P().toast(`Cleared ${cleared} from Facebook` + (missed ? ` \u2014 ${missed} could not be removed` : ''), Boolean(missed));
+    backToList();
+  }
+
   async function remove(upc) {
     const done = P().busy('Taking it off the Facebook list…');
     try {
@@ -246,6 +264,7 @@
           <button class="mini" type="button" data-act="cancel" data-id="${b.id}">${fb.armed === 'cancel' + b.id ? 'Sure? Click again' : '↩ Put back'}</button>
         </div>
       </div>`).join('');
+    const open = fb.items.filter(it => it.status === 'queued' || it.status === 'ready');
     const rows = fb.items.map(it => {
       const bad = (it.problems || []).length;
       return `
@@ -258,7 +277,7 @@
             ${it.price != null ? `<span>$${esc(it.price)}</span>` : ''}${bad ? `<span class="fb-bad">fix ${esc(it.problems.join(', '))}</span>` : ''}
             <span class="upc">${esc(it.upc)}</span></div>
         </div>
-        <span></span>
+        <span class="state">${it.status === 'in_template' ? '' : `<button class="remove" type="button" data-act="fbremove" data-upc="${esc(it.upc)}" aria-label="Remove" title="Take it off the Facebook list">\u00d7</button>`}</span>
       </div>`;
     }).join('');
     const empty = fb.loaded && !fb.items.length
@@ -268,6 +287,7 @@
         <div class="fb-title"><span class="fb-mark" aria-hidden="true">f</span> Facebook Marketplace</div>
         <div class="small muted">${summary}</div>
         ${fb.error ? `<div class="small fb-bad">${esc(fb.error)}</div>` : ''}
+        ${open.length ? `<div class="row tight fb-clear"><button class="mini danger" type="button" data-act="clearall" title="Take every item still to review or ready off the Facebook list">${fb.armed === 'clearall' ? `Sure? Click again to clear ${open.length}` : 'Clear all'}</button></div>` : ''}
       </div>
       ${batches ? `<div class="card fb-batches">${batches}</div>` : ''}
       <div class="list fb-list">${rows}${empty}</div>`);
@@ -375,6 +395,8 @@
           case 'back': backToList(); break;
           case 'save': void save({ ready: false }).then(ok => ok && load({ quiet: true })); break;
           case 'remove': void remove(fb.upc); break;
+          case 'fbremove': void remove(act.dataset.upc); break;
+          case 'clearall': armed('clearall', () => clearAll()); break;
           case 'photos': void savePhotos(); break;
           case 'ai-title': void aiText('title'); break;
           case 'ai-description': void aiText('description'); break;
