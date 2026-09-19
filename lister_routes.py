@@ -104,6 +104,28 @@ def _loads(text, default):
     return value if value is not None else default
 
 
+def _local_dt(stamp):
+    """An ISO stamp as a naive local datetime (store stamps are UTC 'Z', queue stamps local); None if unreadable."""
+    text = _text(stamp)
+    if not text:
+        return None
+    try:
+        value = datetime.datetime.fromisoformat(text.replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    if value.tzinfo is not None:
+        value = value.astimezone().replace(tzinfo=None)
+    return value
+
+
+def _price(value):
+    """A store's price column ('12.99', '$12.99', 12.99) as a number, or None."""
+    try:
+        return round(float(re.sub(r'[^0-9.]', '', _text(value))), 2) if re.search(r'\d', _text(value)) else None
+    except ValueError:
+        return None
+
+
 def _order_key(stamp):
     """ISO timestamps sort as text; turn one into a number so newest-first sorting needs no parsing."""
     digits = re.sub(r'\D', '', str(stamp or ''))[:14]
@@ -720,6 +742,7 @@ class Lister:
         self._jobs_lock = threading.Lock()
         self._preloads = {}
         self._preload_all = {'running': False, 'upcs': [], 'done': 0, 'startedAt': '', 'finishedAt': ''}
+        self._reconcile_last = None
 
     # -- storage -----------------------------------------------------------------------------
 
@@ -852,6 +875,27 @@ class Lister:
                 PRIMARY KEY (upc, platform)
             )
         ''')
+        # Where the store tab went after the HUD pressed the store's own submit: the pages eBay / Seller
+        # Central really show after a listing, so success detection can be fitted to them.
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS lister_breadcrumbs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                upc TEXT,
+                platform TEXT,
+                stage TEXT,
+                url TEXT,
+                kind TEXT,
+                listing_id TEXT,
+                success INTEGER NOT NULL DEFAULT 0,
+                title TEXT,
+                headline TEXT,
+                version TEXT,
+                actor TEXT,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        # Small key/value slots (the store-sync reconcile's last run, shared by every worker).
+        cur.execute('CREATE TABLE IF NOT EXISTS lister_meta (key TEXT PRIMARY KEY, value TEXT)')
         # Which store list the side panel has open, per signed-in person, so Items to List can
         # make its "+" add to that store only. A heartbeat: an old row means the panel is closed.
         cur.execute('''
@@ -1022,6 +1066,8 @@ class Lister:
         variants = self._variants(upc)
         base = variants[0].split('-', 1)[0]
         keys = {v for v in variants} | {base, base.lstrip('0')}
+        if base.isdigit() and len(base) == 12:
+            keys.add('0' + base)  # the eBay sync stores some UPCs as 13-digit EANs (0810071427688)
         keys = tuple(k for k in keys if k)
         placeholders = ','.join('?' for _ in keys)
         out = {'ebay': [], 'amazon': []}
@@ -1112,8 +1158,9 @@ class Lister:
         row['effects'] = _loads(row.pop('effects_json', None), {})
         return row
 
-    def record_link(self, data, *, actor='', base_url='http://localhost/'):
+    def record_link(self, data, *, actor='', base_url='http://localhost/', source='extension'):
         clean = validate_link(data)
+        source = source if source in ('extension', 'sync') else 'extension'
         kind = 'existing' if _text(data.get('kind')) == 'existing' else 'listed'
         proposal_id = data.get('proposal_id') or data.get('proposalId')
         upc = _text(data.get('upc'))
@@ -1146,7 +1193,10 @@ class Lister:
                     clean['url'] = f"https://www.amazon.com/dp/{clean['asin']}"
 
             # Duplicate guard: the same live listing should not be linked twice.
-            key_col, key_val = ('listing_id', clean['listing_id']) if clean['platform'] == 'ebay' else ('sku', clean['sku'] or None)
+            if clean['platform'] == 'ebay':
+                key_col, key_val = 'listing_id', clean['listing_id']
+            else:  # Amazon: the seller SKU, or the ASIN when only that is known
+                key_col, key_val = ('sku', clean['sku']) if clean['sku'] else ('asin', clean['asin'] or None)
             if key_val:
                 cur.execute(f'SELECT * FROM listing_links WHERE platform = ? AND {key_col} = ? ORDER BY id DESC LIMIT 1', (clean['platform'], key_val))
                 existing = _row(cur.fetchone())
@@ -1173,10 +1223,11 @@ class Lister:
             effects['steps'].append(f"listing queue marked listed on {clean['platform']}")
         except Exception as e:  # the queue is best effort; the link row below is the durable record
             effects['queue_error'] = str(e)[:300]
-        # /items-to-list Marketplaces box for this UPC (source shows as "Listing Agent").
+        # /items-to-list Marketplaces box for this UPC (source shows as "Listing Agent"). Items to List
+        # rows hold the catalog UPC, never a unit's -N.
         if self.mark_bol_listed:
             try:
-                marked = self.mark_bol_listed(clean['platform'], upc=upc)
+                marked = self.mark_bol_listed(clean['platform'], upc=_base_upc(upc))
                 if isinstance(marked, dict) and marked.get('success') is False:
                     effects['bol_error'] = _text(marked.get('error'), 200)
                 else:
@@ -1220,11 +1271,11 @@ class Lister:
             cur.execute('''
                 INSERT INTO listing_links (upc, proposal_id, platform, listing_id, offer_id, sku, asin, store_upc, url,
                                            title, price, quantity, note, effects_json, created_by, source, kind, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'extension', ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (upc, proposal['id'] if proposal else None, clean['platform'], clean['listing_id'] or None,
                   clean['offer_id'] or None, clean['sku'] or None, clean['asin'] or None, clean['store_upc'] or None,
                   clean['url'] or None, clean['title'] or None, clean['price'], clean['quantity'], clean['note'] or None,
-                  json.dumps(effects, default=str), actor or None, kind, _now()))
+                  json.dumps(effects, default=str), actor or None, source, kind, _now()))
             link_id = cur.lastrowid
             conn.commit()
             cur.execute('SELECT * FROM listing_links WHERE id = ?', (link_id,))
@@ -1246,12 +1297,15 @@ class Lister:
                 if not self._has_table(cur, 'SEARCHRACK'):
                     return rows
                 placeholders = ','.join('?' for _ in variants)
+                # The unit itself first (its exact code, "-2" included), then the base UPC, then its siblings:
+                # rows[0] is what a link writes its warehouse match and Finder alias against.
                 cur.execute(f'''
                     SELECT ID, BARCODE, TITLE, ITEM_POSITION, QUANTITY, IMAGE
                     FROM SEARCHRACK
                     WHERE COALESCE(QUANTITY, 0) > 0 AND (TRIM(COALESCE(BARCODE, '')) IN ({placeholders}) OR BARCODE LIKE ?)
-                    ORDER BY CASE WHEN BARCODE LIKE '%-%' THEN 1 ELSE 0 END, ID ASC
-                ''', (*variants, f'{base}-%'))
+                    ORDER BY CASE WHEN TRIM(COALESCE(BARCODE, '')) IN ({placeholders}) THEN 0
+                                  WHEN BARCODE LIKE '%-%' THEN 2 ELSE 1 END, ID ASC
+                ''', (*variants, f'{base}-%', *variants))
                 for r in cur.fetchall():
                     r = _row(r)
                     rows.append({'id': int(r['ID']), 'barcode': _text(r.get('BARCODE')), 'title': _text(r.get('TITLE')),
@@ -1367,16 +1421,27 @@ class Lister:
                                     listed_platform = NULL, listed_at = NULL WHERE id = ?''', (queue_row['id'],))
                     link['queue_reverted'] = True
             conn.commit()
+        # The listing log row this link wrote would otherwise still trace sales to this unit - whether or
+        # not the queue went back (a removed link is never this unit's listing). A reverted queue also
+        # drops the "submitted" row the HUD's press left behind.
+        try:
+            with self.db('listinglog.db') as conn:
+                cur = conn.cursor()
+                if self._has_table(cur, 'listing_log'):
+                    cur.execute('''DELETE FROM listing_log WHERE LOWER(COALESCE(source, '')) = 'lister' AND platform = ? AND upc = ?
+                                   AND (COALESCE(listing_id, '') = ? OR COALESCE(sku, '') = ? OR COALESCE(asin, '') = ?)''',
+                                (link['platform'], link['upc'], _text(link.get('listing_id')) or '-', _text(link.get('sku')) or '-', _text(link.get('asin')) or '-'))
+                    if link.get('queue_reverted'):
+                        cur.execute('''DELETE FROM listing_log WHERE LOWER(COALESCE(source, '')) = 'lister-submitted'
+                                       AND platform = ? AND upc = ?''', (link['platform'], link['upc']))
+                    conn.commit()
+        except sqlite3.Error:
+            pass
         if link.get('queue_reverted'):
-            # The listing log row this link wrote would otherwise still trace sales to this unit.
             try:
-                with self.db('listinglog.db') as conn:
-                    cur = conn.cursor()
-                    if self._has_table(cur, 'listing_log'):
-                        cur.execute('''DELETE FROM listing_log WHERE LOWER(COALESCE(source, '')) = 'lister' AND platform = ? AND upc = ?
-                                       AND (COALESCE(listing_id, '') = ? OR COALESCE(sku, '') = ? OR COALESCE(asin, '') = ?)''',
-                                    (link['platform'], link['upc'], _text(link.get('listing_id')), _text(link.get('sku')) or '-', _text(link.get('asin')) or '-'))
-                        conn.commit()
+                with self.db('listagent.db') as conn:
+                    conn.execute('DELETE FROM lister_submissions WHERE upc = ? AND platform = ?', (link['upc'], link['platform']))
+                    conn.commit()
             except sqlite3.Error:
                 pass
             if any('Items to List marked listed' in step for step in (effects.get('steps') or [])):
@@ -1384,7 +1449,8 @@ class Lister:
                     with self.db('bol.db') as conn:
                         cur = conn.cursor()
                         if self._has_table(cur, 'bol_items'):
-                            keys = tuple({link['upc'], link['upc'].lstrip('0') or link['upc'], *self._variants(link['upc'])})
+                            base = _base_upc(link['upc'])
+                            keys = tuple({base, base.lstrip('0') or base, *self._variants(link['upc'])})
                             cur.execute(f'''UPDATE bol_items SET listed_{platform} = 0, listed_{platform}_date = NULL, listed_{platform}_source = NULL
                                             WHERE TRIM(COALESCE(upc, '')) IN ({','.join('?' for _ in keys)}) AND listed_{platform}_source = 'listing_center' ''', keys)
                             conn.commit()
@@ -2166,6 +2232,255 @@ class Lister:
             conn.commit()
             return 'removed'
 
+    # -- store sync -> links (the step that closes the loop when the page detection missed it) ------
+
+    RECONCILE_DAYS = 45
+    RECONCILE_EVERY = 20 * 60
+    GRACE = datetime.timedelta(hours=1)
+
+    def reconcile_stores(self, *, days=None, dry_run=False, actor='store-sync'):
+        """Link listings the store sync brought in to the Lister unit they came from.
+
+        A listing belongs to a unit when its SKU is the unit's code, or its UPC is the unit's UPC and it
+        went live after the unit was queued (and before a cleared row was cleared). Queue rows of every
+        status count - "Clear all" and the X removed listed items too - and so do HUD submissions still
+        waiting for their item number. A UPC shared by two open units is left alone (reported)."""
+        days = int(days or self.RECONCILE_DAYS)
+        since = datetime.datetime.now() - datetime.timedelta(days=days)
+        since_utc = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            self.init_listagent(cur)
+            cur.execute('''SELECT id, upc, title, status, added_at, removed_at, listed_ebay_at, listed_amazon_at
+                           FROM listing_queue WHERE added_at >= ? ORDER BY id ASC''', (since.isoformat(),))
+            rows = [_row(r) for r in cur.fetchall()]
+            cur.execute('SELECT upc, platform, sku, created_at FROM lister_submissions')
+            submissions = [_row(r) for r in cur.fetchall()]
+            cur.execute('SELECT upc, platform, listing_id, sku, asin FROM listing_links')
+            links = [_row(r) for r in cur.fetchall()]
+
+        units = {}
+        for row in rows:  # oldest first, so a unit ends up with its newest queue row
+            code = self.format_upc12(row['upc'])
+            if not code:
+                continue
+            units[code] = {'upc': code, 'row': row, 'added': _local_dt(row.get('added_at')),
+                           'removed': _local_dt(row.get('removed_at')) if row.get('status') == 'removed' else None,
+                           'submitted': set(), 'title': _text(row.get('title'), 200)}
+        for sub in submissions:
+            code = self.format_upc12(sub['upc'])
+            if not code:
+                continue
+            unit = units.setdefault(code, {'upc': code, 'row': None, 'removed': None, 'submitted': set(), 'title': '',
+                                           'added': (_local_dt(sub.get('created_at')) or since) - datetime.timedelta(hours=2)})
+            unit['submitted'].add(sub['platform'])
+        linked_units = {(self.format_upc12(l['upc']), l['platform']) for l in links}
+        linked_keys = {(l['platform'], _text(v).lower()) for l in links for v in (l.get('listing_id'), l.get('sku'), l.get('asin')) if _text(v)}
+
+        def open_on(unit, platform):
+            """Still waiting for this store's listing: not linked, and not marked listed some other way."""
+            if (unit['upc'], platform) in linked_units:
+                return False
+            row = unit['row'] or {}
+            return not row.get(f'listed_{platform}_at') or platform in unit['submitted']
+
+        def digits(value):
+            text = _text(value)
+            return text.lstrip('0') if text.isdigit() else ''
+
+        def fits_dates(unit, listed_at):
+            if listed_at is None:
+                return True
+            if unit['added'] and listed_at < unit['added'] - self.GRACE:
+                return False  # on the store before it was queued: someone else's listing of that UPC
+            if unit['removed'] and listed_at > unit['removed'] + self.GRACE:
+                return False  # listed after the row was cleared: not this queue's doing
+            return True
+
+        def pick(candidates, platform):
+            if len(candidates) <= 1:
+                return candidates[0] if candidates else None
+            for narrow in (lambda u: platform in u['submitted'], lambda u: (u['row'] or {}).get('status') in ('queued', 'done')):
+                subset = [u for u in candidates if narrow(u)]
+                if len(subset) == 1:
+                    return subset[0]
+                candidates = subset or candidates
+            return None
+
+        report = {'checked': {'ebay': 0, 'amazon': 0}, 'linked': [], 'ambiguous': [], 'existing': [], 'errors': [],
+                  'dry_run': bool(dry_run)}
+
+        # eBay: every listing that went live in the window, oldest first.
+        ebay = []
+        try:
+            with self.db('ebayStore.db') as conn:
+                cur = conn.cursor()
+                if self._has_table(cur, 'INVENTORY'):
+                    cur.execute('''SELECT ItemID, SKU, UPC, Title, URL, Price, List_Date FROM INVENTORY
+                                   WHERE COALESCE(List_Date, '') >= ? AND TRIM(COALESCE(ItemID, '')) <> ''
+                                   ORDER BY List_Date ASC, ID ASC''', (since_utc,))
+                    ebay = [_row(r) for r in cur.fetchall()]
+        except sqlite3.Error as e:
+            report['errors'].append('ebay: ' + str(e)[:200])
+        for listing in ebay:
+            item_id = _text(listing.get('ItemID'))
+            if ('ebay', item_id.lower()) in linked_keys:
+                continue
+            report['checked']['ebay'] += 1
+            sku = _text(listing.get('SKU'))
+            sku = '' if sku.lower() in ('none', 'null') else sku
+            listed_at = _local_dt(listing.get('List_Date'))
+            open_units = [u for u in units.values() if open_on(u, 'ebay') and fits_dates(u, listed_at)]
+            candidates = [u for u in open_units if sku and self.format_upc12(sku) == u['upc']]
+            if not candidates and digits(listing.get('UPC')):
+                candidates = [u for u in open_units if digits(_base_upc(u['upc'])) == digits(listing.get('UPC'))]
+            if not candidates:
+                continue
+            unit = pick(candidates, 'ebay')
+            if not unit:
+                report['ambiguous'].append({'platform': 'ebay', 'listing_id': item_id, 'units': [u['upc'] for u in candidates]})
+                continue
+            body = {'platform': 'ebay', 'upc': unit['upc'], 'listing_id': item_id, 'sku': sku,
+                    'store_upc': _text(listing.get('UPC')), 'title': _text(listing.get('Title'), 200) or unit['title'],
+                    'url': _text(listing.get('URL')) if _text(listing.get('URL')).lower().startswith('https://') else '',
+                    'price': _price(listing.get('Price')), 'kind': 'listed',
+                    'note': 'matched by the store sync (eBay listed ' + _text(listing.get('List_Date'))[:16] + ')'}
+            if self._reconcile_apply(unit, 'ebay', body, report, actor=actor, dry_run=dry_run):
+                linked_units.add((unit['upc'], 'ebay'))
+                linked_keys.add(('ebay', item_id.lower()))
+
+        # Amazon: our SKU is the unit's code, so only an exact SKU says whose listing it is.
+        amazon = []
+        codes = {u['upc'].lower(): u for u in units.values()}
+        try:
+            with self.db('amazonStore.db') as conn:
+                cur = conn.cursor()
+                if self._has_table(cur, 'ITEMS') and codes:
+                    keys = tuple(codes)
+                    cur.execute(f'''SELECT ASIN, SKU, UPC, TITLE, PRICE FROM ITEMS
+                                    WHERE LOWER(TRIM(COALESCE(SKU, ''))) IN ({','.join('?' for _ in keys)})''', keys)
+                    amazon = [_row(r) for r in cur.fetchall()]
+        except sqlite3.Error as e:
+            report['errors'].append('amazon: ' + str(e)[:200])
+        for listing in amazon:
+            sku = _text(listing.get('SKU'))
+            asin = _text(listing.get('ASIN')).upper()
+            if ('amazon', sku.lower()) in linked_keys or (asin and ('amazon', asin.lower()) in linked_keys):
+                continue
+            report['checked']['amazon'] += 1
+            unit = codes.get(sku.lower())
+            if not unit or not open_on(unit, 'amazon'):
+                continue
+            # Without a listing date, only a unit the HUD submitted (or a suffixed unit, whose code no older
+            # listing can carry) is the Lister's own; a bare UPC SKU may be an older listing of ours.
+            own = 'amazon' in unit['submitted'] or is_suffixed(unit['upc'])
+            if not own:  # reported only; the panel's "Use that listing" is the person's call
+                report['existing'].append({'platform': 'amazon', 'upc': unit['upc'], 'sku': sku, 'asin': asin})
+                continue
+            body = {'platform': 'amazon', 'upc': unit['upc'], 'sku': sku, 'asin': asin if _ASIN_RE.match(asin) else '',
+                    'store_upc': _text(listing.get('UPC')), 'title': _text(listing.get('TITLE'), 200) or unit['title'],
+                    'price': _price(listing.get('PRICE')), 'kind': 'listed',
+                    'note': 'matched by the store sync (Amazon SKU ' + sku + ')'}
+            if self._reconcile_apply(unit, 'amazon', body, report, actor=actor, dry_run=dry_run):
+                linked_units.add((unit['upc'], 'amazon'))
+                linked_keys.add(('amazon', sku.lower()))
+        return report
+
+    def _reconcile_apply(self, unit, platform, body, report, *, actor, dry_run):
+        entry = {'platform': platform, 'upc': unit['upc'], 'listing_id': body.get('listing_id') or '', 'sku': body.get('sku') or '',
+                 'asin': body.get('asin') or '', 'kind': body['kind'], 'queue_status': (unit['row'] or {}).get('status') or ''}
+        if dry_run:
+            report['linked'].append(entry)
+            return True
+        row = unit['row']
+        if row and row.get('status') == 'removed':
+            # Cleared from the list after it went live: the row comes back as done (it was listed), and the
+            # other store - which it was cleared from too - is skipped so it does not reappear there.
+            other = 'amazon' if platform == 'ebay' else 'ebay'
+            with self.db('listagent.db') as conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE listing_queue SET status = 'done' WHERE id = ? AND status = 'removed'", (row['id'],))
+                if not row.get(f'listed_{other}_at'):
+                    cur.execute('''INSERT OR IGNORE INTO lister_queue_state (upc, platform, state, actor, created_at)
+                                   VALUES (?, ?, 'skipped', ?, ?)''', (unit['upc'], other, actor, _now()))
+                conn.commit()
+            entry['revived'] = True
+        try:
+            result = self.record_link(body, actor=actor, source='sync')
+        except ListerError as e:
+            entry['error'] = str(e)
+            report['errors'].append(entry)
+            return False
+        entry['link_id'] = (result.get('link') or {}).get('id')
+        entry['duplicate'] = bool(result.get('duplicate'))
+        report['linked'].append(entry)
+        return True
+
+    def maybe_reconcile(self, *, every=None):
+        """One reconcile per `every` seconds, whichever thread or worker gets there first."""
+        every = self.RECONCILE_EVERY if every is None else every
+        now = time.time()
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute("INSERT OR IGNORE INTO lister_meta (key, value) VALUES ('reconcile_at', '0')")
+            cur.execute("UPDATE lister_meta SET value = ? WHERE key = 'reconcile_at' AND CAST(value AS REAL) < ?", (str(now), now - every))
+            claimed = cur.rowcount == 1
+            conn.commit()
+        if not claimed:
+            return None
+        report = self.reconcile_stores()
+        report['ran_at'] = _now()
+        self._reconcile_last = report
+        if report['linked'] and self.bump_data_version:
+            try:
+                self.bump_data_version()
+            except Exception:
+                pass
+        return report
+
+    def reconcile_loop(self, *, first_delay=90, tick=300):
+        time.sleep(first_delay)
+        while True:
+            try:
+                # db_connection keeps its connections on flask.g: a thread outside any request needs its own context.
+                with self.app.app_context():
+                    self.maybe_reconcile()
+            except Exception as e:  # never let the loop die; the next tick tries again
+                self._reconcile_last = {'error': str(e)[:300], 'ran_at': _now()}
+            time.sleep(tick)
+
+    # -- breadcrumbs: what the store tab showed after a submit ------------------------------------
+
+    def breadcrumb(self, data, *, actor=''):
+        data = data or {}
+        url = _text(data.get('url'), 600)
+        if not url:
+            raise ListerError('url is required')
+        platform = _text(data.get('platform')).lower()
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('''INSERT INTO lister_breadcrumbs (upc, platform, stage, url, kind, listing_id, success, title, headline,
+                                                           version, actor, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (self.format_upc12(_text(data.get('upc'))) or None, platform if platform in PLATFORMS else None,
+                         _text(data.get('stage'), 40), url, _text(data.get('kind'), 40), _text(data.get('listing_id'), 40),
+                         1 if data.get('success') else 0, _text(data.get('title'), 200), _text(data.get('headline'), 300),
+                         _text(data.get('version'), 20), actor or None, _now()))
+            crumb_id = cur.lastrowid
+            cur.execute('DELETE FROM lister_breadcrumbs WHERE id <= (SELECT MAX(id) - 5000 FROM lister_breadcrumbs)')
+            conn.commit()
+            return crumb_id
+
+    def breadcrumbs(self, *, limit=100):
+        with self.db('listagent.db') as conn:
+            cur = conn.cursor()
+            self.init_tables(cur)
+            cur.execute('SELECT * FROM lister_breadcrumbs ORDER BY id DESC LIMIT ?', (max(1, min(int(limit or 100), 1000)),))
+            return [_row(r) for r in cur.fetchall()]
+
     # -- Items to List "+" that follows the side panel's open store ---------------------------
 
     PANEL_FRESH_SECONDS = 45
@@ -2322,7 +2637,8 @@ class Lister:
                     with self.db('bol.db') as conn:
                         cur = conn.cursor()
                         if self._has_table(cur, 'bol_items'):
-                            keys = tuple({upc, upc.lstrip('0') or upc, *self._variants(upc)})
+                            base = _base_upc(upc)
+                            keys = tuple({base, base.lstrip('0') or base, *self._variants(upc)})
                             cur.execute(f'''UPDATE bol_items SET listed_{platform} = 0, listed_{platform}_date = NULL, listed_{platform}_source = NULL
                                             WHERE TRIM(COALESCE(upc, '')) IN ({','.join('?' for _ in keys)}) AND listed_{platform}_source = 'listing_center' ''', keys)
                             conn.commit()
@@ -2342,8 +2658,11 @@ class Lister:
             steps.append('queue: ' + str(e)[:200])
         if self.mark_bol_listed:
             try:
-                self.mark_bol_listed(platform, upc=upc)
-                steps.append(f'Items to List marked listed on {platform}')
+                marked = self.mark_bol_listed(platform, upc=_base_upc(upc))
+                if isinstance(marked, dict) and marked.get('success') is False:
+                    steps.append('Items to List: ' + _text(marked.get('error'), 200))
+                else:
+                    steps.append(f'Items to List marked listed on {platform}')
             except Exception as e:
                 steps.append('Items to List: ' + str(e)[:200])
         finalized = self.finalize_queue(upc)
@@ -2991,6 +3310,17 @@ class Lister:
 
     # -- extension update feed -------------------------------------------------------------
 
+    def served_version(self):
+        """The Lister version the update feed hands out (latest.json); VERSION when nothing is published."""
+        try:
+            path = self.feed_dir / 'latest.json'
+            stamp = path.stat().st_mtime
+            if getattr(self, '_version_cache', (None, None))[0] != stamp:
+                self._version_cache = (stamp, _text(json.loads(path.read_text(encoding='utf-8')).get('version'), 20))
+            return self._version_cache[1] or VERSION
+        except (OSError, ValueError, AttributeError):
+            return VERSION
+
     def feed_file(self, filename):
         if not self.feed_dir.is_dir():
             return None
@@ -3060,7 +3390,7 @@ def register(app, deps):
         return response
 
     def api_lister_ping():
-        return jsonify({'success': True, 'version': VERSION, 'server_time': _now(),
+        return jsonify({'success': True, 'version': lister.served_version(), 'server_time': _now(),
                         'user': _text(request.headers.get('Cf-Access-Authenticated-User-Email'), 120),
                         'mutation_header': MUTATION_HEADER})
 
@@ -3068,7 +3398,7 @@ def register(app, deps):
         try:
             items, counts = lister.items(scope=request.args.get('scope') or 'selected',
                                          platform=_text(request.args.get('platform')).lower(), base_url=base_url())
-            return jsonify({'success': True, 'items': items, 'counts': counts, 'version': VERSION})
+            return jsonify({'success': True, 'items': items, 'counts': counts, 'version': lister.served_version()})
         except Exception as e:
             return failure(e, 'lister:items')
 
@@ -3154,7 +3484,7 @@ def register(app, deps):
     def api_lister_queue():
         try:
             result = lister.queue(platform=_text(request.args.get('platform') or 'ebay').lower(), base_url=base_url())
-            return jsonify({'success': True, 'version': VERSION, **result})
+            return jsonify({'success': True, 'version': lister.served_version(), **result})
         except Exception as e:
             return failure(e, 'lister:queue')
 
@@ -3351,6 +3681,36 @@ def register(app, deps):
     def lister_ledger_page():
         return render_template('lister_ledger.html')
 
+    def api_lister_reconcile():
+        """GET: the last store-sync reconcile. POST: run it now (dry_run to only see what it would link)."""
+        try:
+            if request.method == 'GET':
+                return jsonify({'success': True, 'last': lister._reconcile_last})
+            guard_mutation()
+            data = request.get_json(silent=True) or {}
+            report = lister.reconcile_stores(days=data.get('days'), dry_run=bool(data.get('dry_run')), actor=actor())
+            if not report['dry_run']:
+                report['ran_at'] = _now()
+                lister._reconcile_last = report
+                if report['linked'] and lister.bump_data_version:
+                    try:
+                        lister.bump_data_version()
+                    except Exception:
+                        pass
+            return jsonify({'success': True, **report})
+        except Exception as e:
+            return failure(e, 'lister:reconcile')
+
+    def api_lister_breadcrumbs():
+        try:
+            if request.method == 'GET':
+                return jsonify({'success': True, 'breadcrumbs': lister.breadcrumbs(limit=request.args.get('limit') or 100)})
+            guard_mutation()
+            crumb_id = lister.breadcrumb(request.get_json(silent=True) or {}, actor=actor())
+            return jsonify({'success': True, 'id': crumb_id}), 201
+        except Exception as e:
+            return failure(e, 'lister:breadcrumb')
+
     app.add_url_rule('/api/lister/queue', 'api_lister_queue', api_lister_queue)
     app.add_url_rule('/api/lister/queue/<upc>', 'api_lister_queue_detail', api_lister_queue_detail)
     app.add_url_rule('/api/lister/queue/<upc>/prepare', 'api_lister_queue_prepare', api_lister_queue_prepare, methods=['POST'])
@@ -3384,6 +3744,11 @@ def register(app, deps):
     app.add_url_rule('/api/lister/links/<int:link_id>', 'api_lister_link_delete', api_lister_link_delete, methods=['DELETE'])
     app.add_url_rule('/api/lister/resolve', 'api_lister_resolve', api_lister_resolve)
     app.add_url_rule('/api/lister/events', 'api_lister_events', api_lister_events, methods=['POST'])
+    app.add_url_rule('/api/lister/reconcile', 'api_lister_reconcile', api_lister_reconcile, methods=['GET', 'POST'])
+    app.add_url_rule('/api/lister/breadcrumbs', 'api_lister_breadcrumbs', api_lister_breadcrumbs, methods=['GET', 'POST'])
+    # Store sync -> links every 20 minutes (the host opts in; tests and one-off scripts do not start it).
+    if deps.get('lister_reconcile_loop'):
+        threading.Thread(target=lister.reconcile_loop, name='lister-reconcile', daemon=True).start()
     import lister_new_item
     lister_new_item.register(app, lister, deps)
     import lister_stats

@@ -3,6 +3,7 @@
 Runs against temporary databases through the real sweetshelves helpers; nothing reaches a store.
 """
 from contextlib import closing
+import datetime
 import json
 import os
 from pathlib import Path
@@ -1276,6 +1277,158 @@ class ListerTestCase(unittest.TestCase):
             self.assertIn(b'<svg', res.data)
             self.assertEqual(res.headers['Content-Type'], 'image/svg+xml; charset=utf-8')
         self.assertEqual(self.client.get('/api/lister/qr').status_code, 400)
+
+
+    # -- traceability: the store sync closes the loop, suffixed units land on themselves -------------
+
+    def store_listing(self, item_id, *, upc='', sku='None', listed='2026-09-18T13:06:54.000Z', title='Listed thing'):
+        with closing(sqlite3.connect(self.root / 'ebayStore.db')) as conn:
+            have = {r[1] for r in conn.execute('PRAGMA table_info(INVENTORY)')}
+            for col in ('List_Date', 'URL', 'Price'):
+                if col not in have:
+                    conn.execute(f'ALTER TABLE INVENTORY ADD COLUMN {col} TEXT')
+            conn.execute('''INSERT INTO INVENTORY (Title, ItemID, SKU, UPC, List_State, List_Date, URL, Price)
+                            VALUES (?, ?, ?, ?, 'Active', ?, ?, '19.99')''',
+                         (title, item_id, sku, upc, listed, f'https://www.ebay.com/itm/{item_id}'))
+            conn.commit()
+
+    def test_a_suffixed_unit_links_to_its_own_rack_row_and_ticks_the_base_upc_on_items_to_list(self):
+        unit = UPC + '-1'
+        self.queue_add(unit, 'Lenox plate damaged', '2026-09-18T08:00:00')
+        res = self.client.post('/api/lister/links', json={'upc': unit, 'platform': 'ebay', 'listing_id': '334455667788'})
+        self.assertEqual(res.status_code, 201, res.get_json())
+        effects = res.get_json()['link']['effects']
+        self.assertEqual(effects['inventory_match']['searchrack_id'], 2, 'the -1 unit, not the base row')
+        self.assertEqual(effects['inventory_match']['inventory_barcode'], unit)
+        self.assertEqual(effects['rack_ids'][0], 2)
+        self.assertEqual(self.bol_marks, [('ebay', UPC)], 'Items to List rows hold the base UPC')
+        # The base unit still resolves to its own row first.
+        with self.app.app_context():
+            self.assertEqual(self.lister.rack_rows(UPC)[0]['id'], 1)
+
+    def test_a_submitted_suffixed_unit_ticks_the_base_upc(self):
+        unit = UPC + '-1'
+        self.queue_add(unit, 'Lenox plate damaged', '2026-09-18T08:00:00')
+        self.client.post(f'/api/lister/queue/{unit}/submitted', json={'platform': 'ebay'})
+        self.assertEqual(self.bol_marks, [('ebay', UPC)])
+
+    def test_amazon_links_without_a_sku_are_guarded_by_the_asin(self):
+        body = {'upc': UPC, 'platform': 'amazon', 'asin': 'B0ABCDEF12'}
+        self.assertEqual(self.client.post('/api/lister/links', json=body).status_code, 201)
+        again = self.client.post('/api/lister/links', json=body)
+        self.assertEqual(again.status_code, 200)
+        self.assertTrue(again.get_json()['duplicate'])
+        other = self.client.post('/api/lister/links', json={**body, 'upc': '012345678905'})
+        self.assertEqual(other.status_code, 409)
+
+    def test_store_listings_find_a_13_digit_ebay_upc(self):
+        self.store_listing('188947499008', upc='0810071427688')
+        with self.app.app_context():
+            found = self.lister._store_listings('810071427688')['ebay']
+        self.assertEqual([e['listingId'] for e in found], ['188947499008'])
+
+    def test_reconcile_links_a_listing_whose_queue_row_was_cleared_after_it_went_live(self):
+        unit = '810071428487'
+        with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
+            conn.execute('''INSERT INTO listing_queue (upc, title, status, added_at, removed_at)
+                            VALUES (?, 'JoyJolt espresso cups', 'removed', '2026-09-16T16:26:28', '2026-09-18T10:23:19')''', (unit,))
+            conn.commit()
+        self.store_listing('188947233082', upc='810071428487', listed=self.utc('2026-09-18T09:06:54'))
+        dry = self.client.post('/api/lister/reconcile', json={'dry_run': True, 'days': 3650}).get_json()
+        self.assertEqual([(e['upc'], e['listing_id']) for e in dry['linked']], [(unit, '188947233082')])
+        self.assertEqual(self.sql('listagent.db', 'SELECT COUNT(*) AS n FROM listing_links')[0]['n'], 0, 'dry run writes nothing')
+
+        res = self.client.post('/api/lister/reconcile', json={'days': 3650}).get_json()
+        self.assertEqual(res['linked'][0]['upc'], unit)
+        self.assertTrue(res['linked'][0]['revived'])
+        link = self.sql('listagent.db', 'SELECT upc, platform, listing_id, source, kind FROM listing_links')[0]
+        self.assertEqual(link, {'upc': unit, 'platform': 'ebay', 'listing_id': '188947233082', 'source': 'sync', 'kind': 'listed'})
+        row = self.sql('listagent.db', 'SELECT status, listed_ebay_at FROM listing_queue WHERE upc = ?', (unit,))[0]
+        self.assertEqual(row['status'], 'done')
+        self.assertTrue(row['listed_ebay_at'])
+        # Cleared from both lists: it must not come back on Amazon's.
+        self.assertNotIn(unit, [it['upc'] for it in self.client.get('/api/lister/queue?platform=amazon').get_json()['items']])
+        log = self.sql('listinglog.db', "SELECT source, listing_id FROM listing_log WHERE upc = ?", (unit,))
+        self.assertIn({'source': 'lister', 'listing_id': '188947233082'}, log, 'the sale tracer can now find it')
+        # Idempotent.
+        self.assertEqual(self.client.post('/api/lister/reconcile', json={'days': 3650}).get_json()['linked'], [])
+
+    def test_reconcile_leaves_listings_older_than_the_queue_row_and_shared_upcs_alone(self):
+        self.store_listing('112200000001', upc=UPC, listed=self.utc('2026-09-12T09:00:00'))  # before the 09-13 queue add
+        self.assertEqual(self.reconcile()['linked'], [])
+        self.queue_add(UPC + '-1', 'Lenox plate damaged', '2026-09-18T08:00:00')
+        self.store_listing('112200000002', upc=UPC, listed=self.utc('2026-09-18T12:00:00'))
+        report = self.reconcile()
+        self.assertEqual(report['linked'], [])
+        self.assertEqual(report['ambiguous'][0]['listing_id'], '112200000002')
+        # Our SKU on the listing says whose it is.
+        self.store_listing('112200000003', upc=UPC, sku=UPC + '-1', listed=self.utc('2026-09-18T12:30:00'))
+        report = self.reconcile()
+        self.assertEqual([(e['upc'], e['listing_id']) for e in report['linked']], [(UPC + '-1', '112200000003')])
+
+    def test_reconcile_backfills_the_item_number_of_a_submitted_listing(self):
+        unit = '012345678905'
+        self.queue_add(unit, 'Other item', '2026-09-18T08:00:00')
+        self.client.post(f'/api/lister/queue/{unit}/submitted', json={'platform': 'ebay'})
+        self.store_listing('199900000001', upc=unit, listed=self.utc('2026-09-18T09:30:00'))
+        report = self.reconcile()
+        self.assertEqual([(e['upc'], e['listing_id']) for e in report['linked']], [(unit, '199900000001')])
+        ebay = [it for it in self.client.get('/api/lister/queue?platform=ebay').get_json()['items'] if it['upc'] == unit][0]
+        self.assertFalse(ebay['submitted'], 'the item number arrived')
+        self.assertEqual(ebay['links'][0]['listing_id'], '199900000001')
+
+    def test_reconcile_links_an_amazon_sku_that_is_the_unit_code(self):
+        unit = UPC + '-1'
+        self.queue_add(unit, 'Lenox plate damaged', '2026-09-18T08:00:00')
+        with closing(sqlite3.connect(self.root / 'amazonStore.db')) as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS ITEMS (ID INTEGER PRIMARY KEY, ASIN TEXT, SKU TEXT, TITLE TEXT, PRICE REAL, STATUS TEXT, UPC TEXT, FULFILLMENT_CHANNEL TEXT)')
+            conn.execute("INSERT INTO ITEMS (ASIN, SKU, TITLE, PRICE, STATUS, UPC) VALUES ('B0ABCDEF12', ?, 'Plate', 20, 'Active', ?)", (unit, UPC))
+            conn.commit()
+        report = self.reconcile()
+        self.assertEqual([(e['upc'], e['platform'], e['sku'], e['kind']) for e in report['linked']], [(unit, 'amazon', unit, 'listed')])
+        # A bare-UPC SKU the panel never submitted may be an older offer of ours: reported, not linked.
+        self.queue_add('012345678905', 'Other item', '2026-09-18T08:00:00')
+        with closing(sqlite3.connect(self.root / 'amazonStore.db')) as conn:
+            conn.execute("INSERT INTO ITEMS (ASIN, SKU, TITLE, PRICE, STATUS, UPC) VALUES ('B0ZZZZZZZ1', '012345678905', 'Other', 9, 'Active', '012345678905')")
+            conn.commit()
+        report = self.reconcile()
+        self.assertEqual(report['linked'], [])
+        self.assertEqual([e['upc'] for e in report['existing']], ['012345678905'])
+
+    def test_deleting_a_link_removes_its_log_row_even_when_the_queue_moved_on(self):
+        res = self.client.post('/api/lister/links', json={'upc': UPC, 'platform': 'ebay', 'listing_id': '335566778800'})
+        link_id = res.get_json()['link']['id']
+        with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:  # the queue now points at another listing
+            conn.execute("UPDATE listing_queue SET listed_listing_id = '999' WHERE upc = ?", (UPC,))
+            conn.commit()
+        self.client.delete(f'/api/lister/links/{link_id}', json={})
+        self.assertEqual(self.sql('listinglog.db', "SELECT COUNT(*) AS n FROM listing_log WHERE listing_id = '335566778800'")[0]['n'], 0)
+
+    def test_breadcrumbs_record_where_the_store_tab_went(self):
+        res = self.client.post('/api/lister/breadcrumbs', json={'upc': UPC, 'platform': 'ebay', 'stage': 'after-submit',
+                                                                'url': 'https://www.ebay.com/sl/list/success?itemId=1', 'kind': 'listing-form',
+                                                                'success': True, 'title': 'Listed', 'headline': 'Your listing is live'})
+        self.assertEqual(res.status_code, 201, res.get_json())
+        crumbs = self.client.get('/api/lister/breadcrumbs').get_json()['breadcrumbs']
+        self.assertEqual((crumbs[0]['url'], crumbs[0]['success'], crumbs[0]['stage']),
+                         ('https://www.ebay.com/sl/list/success?itemId=1', 1, 'after-submit'))
+        self.assertEqual(self.client.post('/api/lister/breadcrumbs', json={}).status_code, 400)
+
+    def test_ping_reports_the_published_feed_version(self):
+        feed = self.root / 'static' / 'lister'
+        feed.mkdir(parents=True, exist_ok=True)
+        (feed / 'latest.json').write_text(json.dumps({'version': '9.9.9'}), encoding='utf-8')
+        self.assertEqual(self.client.get('/api/lister/ping').get_json()['version'], '9.9.9')
+
+    def reconcile(self):
+        with self.app.app_context():
+            return self.lister.reconcile_stores(days=3650)
+
+    @staticmethod
+    def utc(local_stamp):
+        """A local wall-clock stamp as the eBay sync stores it (UTC, 'Z')."""
+        value = datetime.datetime.fromisoformat(local_stamp).astimezone(datetime.timezone.utc)
+        return value.strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 
 if __name__ == '__main__':

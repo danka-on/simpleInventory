@@ -657,6 +657,8 @@ def register_routes():
         'api_listingagent_amazon_catalog_search': ss_amazon_catalog.api_listingagent_amazon_catalog_search,
         'api_listingagent_amazon_restriction_check': ss_amazon_catalog.api_listingagent_amazon_restriction_check,
         'update_data_version': ss_caching.update_data_version,
+        # Store sync -> Lister links every 20 minutes (listings the page detection missed).
+        'lister_reconcile_loop': True,
         # "+ NEW": an item that is on no BOL yet, described from the phone and submitted from the panel.
         '_listagent_add_to_queue': ss_listing_queue._listagent_add_to_queue,
         '_add_item_screening_lookup': ss_warehouse_receiving._add_item_screening_lookup,

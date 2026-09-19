@@ -192,7 +192,7 @@ def resolve_listing_trace_from_marketplace_sale(*, platform=None, item_id=None, 
                 SELECT *
                 FROM listing_log
                 WHERE LOWER(TRIM(COALESCE(platform, ''))) = 'ebay'
-                  AND LOWER(TRIM(COALESCE(source, ''))) IN ('listingagent', 'lister')
+                  AND LOWER(TRIM(COALESCE(source, ''))) IN ('listingagent', 'lister', 'lister-submitted')
                   AND (
                         TRIM(COALESCE(listing_id, '')) = ? COLLATE NOCASE
                      OR TRIM(COALESCE(offer_id, '')) = ? COLLATE NOCASE
@@ -211,7 +211,7 @@ def resolve_listing_trace_from_marketplace_sale(*, platform=None, item_id=None, 
                 SELECT *
                 FROM listing_log
                 WHERE LOWER(TRIM(COALESCE(platform, ''))) = 'ebay'
-                  AND LOWER(TRIM(COALESCE(source, ''))) IN ('listingagent', 'lister')
+                  AND LOWER(TRIM(COALESCE(source, ''))) IN ('listingagent', 'lister', 'lister-submitted')
                   AND TRIM(COALESCE(sku, '')) = ? COLLATE NOCASE
                 ORDER BY created_at DESC, id DESC
                 ''',
@@ -230,7 +230,7 @@ def resolve_listing_trace_from_marketplace_sale(*, platform=None, item_id=None, 
                 SELECT *
                 FROM listing_log
                 WHERE LOWER(TRIM(COALESCE(platform, ''))) = 'amazon'
-                  AND LOWER(TRIM(COALESCE(source, ''))) IN ('listingagent', 'lister')
+                  AND LOWER(TRIM(COALESCE(source, ''))) IN ('listingagent', 'lister', 'lister-submitted')
                   AND TRIM(COALESCE(sku, '')) = ? COLLATE NOCASE
                 ORDER BY created_at DESC, id DESC
                 ''',

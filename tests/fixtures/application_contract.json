@@ -6326,6 +6326,32 @@
       "subdomain": ""
     },
     {
+      "rule": "/api/lister/reconcile",
+      "endpoint": "api_lister_reconcile",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
+      "rule": "/api/lister/breadcrumbs",
+      "endpoint": "api_lister_breadcrumbs",
+      "methods": [
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "POST"
+      ],
+      "defaults": null,
+      "strict_slashes": true,
+      "subdomain": ""
+    },
+    {
       "rule": "/api/lister/new",
       "endpoint": "api_lister_new_create",
       "methods": [

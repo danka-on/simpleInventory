@@ -1974,6 +1974,7 @@
     if (page.store === 'amazon' && success && !formish) page.kind = 'offer-success';
     page.successText = success;
     page.title = clip(document.title);
+    page.headline = clip((document.querySelector('h1, [role="heading"][aria-level="1"]') || {}).innerText || '');
     page.url = location.href;
     page.fieldCount = fields.length;
     page.guide = guide ? { active: true, index: guide.index, count: guide.rows.filter(r => !r.done).length, total: guide.rows.length } : { active: false };

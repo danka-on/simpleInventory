@@ -145,6 +145,11 @@
     state.savedTitlePrompt = stored[TITLE_PROMPT_KEY] || '';
     state.titlePrompt = state.savedTitlePrompt;
     try { state.tabItems = (await chrome.storage.session?.get('ssListerTabs'))?.ssListerTabs || {}; } catch { state.tabItems = {}; }
+    try {
+      const work = (await chrome.storage.session?.get(['ssListerFill', 'ssListerSubmission'])) || {};
+      state.fillSessions = work.ssListerFill || {};
+      state.submission = work.ssListerSubmission || null;
+    } catch { state.fillSessions = {}; }
   }
 
   async function saveSettings(settings) {
@@ -281,7 +286,14 @@
     for (const set of [state.autoFilled, state.autoText, state.autoSent, state.searched, state.autoLinked, state.autoPhotos])
       for (const key of [...set]) if (typeof key === 'string' && key.startsWith(tabId + '|')) set.delete(key);
     delete state.fillSessions[tabId];
+    saveTabWork();
     if (state.tab?.id === tabId) state.guide = null;
+  }
+
+  // Which item the panel filled in each tab, and a pending HUD submit, survive a panel reload: without
+  // them the success page that follows is not recognised as ours and nothing gets recorded.
+  function saveTabWork() {
+    try { void chrome.storage.session?.set({ ssListerFill: state.fillSessions, ssListerSubmission: state.submission || null }); } catch { /* session storage unavailable */ }
   }
 
   // "4 min ago" - how cold the unfinished listing is, in the fewest words.
@@ -1032,7 +1044,8 @@
       const result = await pageMessage({ type: 'fill', options: { values: values(info), store, aspects: info.fields.aspects || {}, learned, includeDescription: store === 'ebay', aiFields: aiFieldsFor(info) } });
       state.report = result.report;
       state.fillSessions[state.tab.id] = item.upc;
-      const filled = (result.report.filled || []).map(f => f.target);
+      saveTabWork();
+      const filled =(result.report.filled || []).map(f => f.target);
       toast(filled.length ? `Filled ${filled.length} field${filled.length === 1 ? '' : 's'} on ${storeName(store)}` : 'No matching fields found on this page. Use "Pick a field".', !filled.length);
       if (info.proposal?.id) void api('/api/lister/events', { method: 'POST', body: { proposal_id: info.proposal.id, event: filled.length ? 'helper_filled' : 'helper_fill_failed', note: `${store} ${state.page.kind || ''}${auto ? ' (auto)' : ''}`, payload: { filled, unmatched: result.report.unmatched, aspects: result.report.aspects } } }).catch(() => {});
       if (state.settings.autoGuide) await guide('start', { silent: true });
@@ -1122,6 +1135,7 @@
     if (!state.settings.autoLink || !item || !info || !page?.store) return;
     const platform = page.store;
     if (!(page.kind === 'listing-success' || page.kind === 'offer-success')) return;
+    breadcrumb('success', { upc: item.upc, platform, crumbs: state.successCrumbs || (state.successCrumbs = []) }, page);
     if (state.fillSessions[state.tab?.id] !== item.upc) return;  // only the item we filled in this tab
     if ((info.links || []).some(l => l.platform === platform)) return;
     const v = values(info);
@@ -1143,7 +1157,9 @@
     const upc = state.fillSessions[tabId] || state.locked || state.currentUpc;
     const platform = message.store || state.page?.store || '';
     if (!upc || !platform) return;
-    state.submission = { tabId, upc, platform, sku: message.sku || '', url: message.url || '', at: Date.now(), told: false };
+    state.submission = { tabId, upc, platform, sku: message.sku || '', url: message.url || '', at: Date.now(), told: false, crumbs: [] };
+    saveTabWork();
+    breadcrumb('submit', state.submission, { ...(state.page || {}), url: message.url || state.page?.url || '' });
     toast(`Pressed ${platform === 'amazon' ? 'Save and finish' : 'List it'} on ${storeName(platform)}\u2026`);
     setTimeout(() => { void refreshTab(); }, 2500);
     setTimeout(() => { void checkSubmission(); }, 45000);
@@ -1153,10 +1169,21 @@
     const sub = state.submission;
     const page = state.page;
     if (!sub) return;
-    if (Date.now() - sub.at > SUBMIT_WAIT_MS) { state.submission = null; return; }
+    if (Date.now() - sub.at > SUBMIT_WAIT_MS) { state.submission = null; saveTabWork(); return; }
     if (state.tab?.id !== sub.tabId || !page) return;
     const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
     const sameUrl = (page.url || '').split('#')[0] === (sub.url || '').split('#')[0];
+    if (!sameUrl) breadcrumb('after-submit', sub, page);
+    // A success page of the item we filled is maybeAutoLink's; any other page after List it that carries
+    // the item number (whatever eBay calls that page) is the listing too.
+    const autoLinks = page.kind === 'listing-success' && state.settings.autoLink && state.fillSessions[sub.tabId] === sub.upc;
+    const linked = (state.details[sub.upc]?.links || []).some(l => l.platform === 'ebay');
+    if (!sameUrl && !autoLinks && !linked && sub.platform === 'ebay' && page.store === 'ebay' && page.listingId && (page.kind === 'listing-live' || page.kind === 'listing-success')) {
+      state.submission = null; saveTabWork();
+      await recordLink({ upc: sub.upc, platform: 'ebay', listing_id: page.listingId, sku: page.sku || '', url: page.url || '',
+        note: 'item number from the page eBay showed after List it' }, { auto: true });
+      return;
+    }
     if (onForm && sameUrl) {
       // Still on the form after a while: the store said no (a missing field, an error).
       if (Date.now() - sub.at > 40000 && !sub.told) { sub.told = true; toast(`Still on the ${storeName(sub.platform)} form \u2014 check the page for an error`, true); }
@@ -1166,8 +1193,8 @@
     const info = state.details[sub.upc];
     const recorded = (info?.links || []).some(l => l.platform === sub.platform) ||
       state.items.some(it => it.upc === sub.upc && it.status === 'listed' && (it.links || []).length);
-    if (recorded) { state.submission = null; return; }
-    state.submission = null;
+    if (recorded) { state.submission = null; saveTabWork(); return; }
+    state.submission = null; saveTabWork();
     try {
       await api('/api/lister/queue/' + encodeURIComponent(sub.upc) + '/submitted', { method: 'POST', body: { platform: sub.platform, sku: sub.sku } });
       const undo = async () => {
@@ -1183,6 +1210,20 @@
     } catch (error) {
       toast('Could not mark it listed: ' + error.message, true);
     }
+  }
+
+  // Where the store tab went around a submit, posted once per page: the real success pages (their URL,
+  // heading, whether our text heuristics fired) so their detection can be fitted to what the stores show.
+  function breadcrumb(stage, sub, page) {
+    const url = (page?.url || '').split('#')[0];
+    if (!url || !sub?.upc) return;
+    sub.crumbs = sub.crumbs || [];
+    if (sub.crumbs.includes(stage + '|' + url)) return;
+    sub.crumbs.push(stage + '|' + url);
+    void api('/api/lister/breadcrumbs', { method: 'POST', body: {
+      upc: sub.upc, platform: sub.platform || page.store || '', stage, url, kind: page.kind || '', listing_id: page.listingId || '',
+      success: Boolean(page.successText), title: page.title || '', headline: page.headline || '', version: chrome.runtime.getManifest().version,
+    } }).catch(() => {});
   }
 
   async function recordLink(body, { auto = false } = {}) {
