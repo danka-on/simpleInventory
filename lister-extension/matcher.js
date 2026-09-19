@@ -437,9 +437,25 @@
     return -1;
   }
 
+  // Which Seller Hub row (after List it eBay lands on its active listings, no success page) is the listing
+  // just submitted: the row showing our custom label (the unit code), else the one with our title.
+  // Item numbers already linked are skipped; among several, the newest (highest) item number wins.
+  function hubMatch(rows, { code = '', title = '', taken = [] } = {}) {
+    const skip = new Set((taken || []).map(String));
+    const open = (rows || []).filter(r => r && /^\d{9,15}$/.test(String(r.itemId)) && !skip.has(String(r.itemId)));
+    const newest = list => list.reduce((a, b) => (BigInt(b.itemId) > BigInt(a.itemId) ? b : a));
+    const unit = String(code || '').toLowerCase().replace(/[^0-9a-z-]/g, '');
+    const bySku = unit ? open.filter(r => new RegExp('(^|[^0-9a-z-])' + unit + '($|[^0-9a-z-])', 'i').test(r.text || '')) : [];
+    if (bySku.length) return { ...newest(bySku), how: 'custom label' };
+    const key = s => ' ' + String(s || '').toLowerCase().replace(/[^0-9a-z]+/g, ' ').trim() + ' ';
+    const wanted = key(title);
+    const byTitle = wanted.trim().length >= 20 ? open.filter(r => key(r.text).includes(wanted)) : [];
+    return byTitle.length ? { ...newest(byTitle), how: 'title' } : null;
+  }
+
   return {
     TARGETS, CONDITION_LABELS, normalize, scoreTarget, assign, suggestTargets, matchAspects,
     signature, matchesSignature, detectPage, successInfo, isRequired, isEmptyValue, searchBoxScore,
-    conditionLabels, prelistCondition, lowestPrice, suggestedPrice, tokens, candidateScore, rankCandidates, categoryScore, chooseOption,
+    conditionLabels, prelistCondition, lowestPrice, suggestedPrice, tokens, candidateScore, rankCandidates, categoryScore, chooseOption, hubMatch,
   };
 });

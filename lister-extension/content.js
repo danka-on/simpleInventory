@@ -1920,6 +1920,21 @@
     return true;
   }
 
+  // Seller Hub's listing table: every row's item number with the row's own text, first 50 rows.
+  function hubRows() {
+    const out = [];
+    const seen = new Set();
+    for (const a of document.querySelectorAll('a[href*="/itm/"]')) {
+      const match = (a.getAttribute('href') || '').match(/\/itm\/(?:[^/?#]+\/)?(\d{9,15})/);
+      const row = match && a.closest('tr, [role="row"], li');
+      if (!row || seen.has(match[1])) continue;
+      seen.add(match[1]);
+      out.push({ itemId: match[1], text: String(row.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 600) });
+      if (out.length >= 50) break;
+    }
+    return out;
+  }
+
   // What the page itself says about the live listing (after publishing), beyond the URL.
   function detect() {
     const page = M.detectPage(location.href);
@@ -1975,6 +1990,9 @@
     page.successText = success;
     page.title = clip(document.title);
     page.headline = clip((document.querySelector('h1, [role="heading"][aria-level="1"]') || {}).innerText || '');
+    // After List it eBay lands on Seller Hub's active listings, not a success page: its rows say which
+    // item number the new listing got (custom label and title are in the row text).
+    if (page.store === 'ebay' && /^\/sh\/lst\//.test(location.pathname)) page.hubRows = hubRows();
     page.url = location.href;
     page.fieldCount = fields.length;
     page.guide = guide ? { active: true, index: guide.index, count: guide.rows.filter(r => !r.done).length, total: guide.rows.length } : { active: false };

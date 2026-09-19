@@ -527,7 +527,11 @@
       list.innerHTML = `<div class="empty">${state.listedLoading && !state.listed ? 'Loading…' : 'Nothing listed through the Lister ' + ({ today: 'today', yesterday: 'yesterday', 7: 'in the last 7 days', 30: 'in the last 30 days' }[range] || 'yet') + '.'}</div>`;
       return;
     }
-    const time = stamp => String(stamp || '').slice(11, 16);
+    // "Sep 19, 1:59 PM" (the server stamps local time, so the stamp reads as local here too).
+    const when = stamp => {
+      const d = new Date(String(stamp || '').replace(' ', 'T'));
+      return isNaN(d) ? String(stamp || '') : d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    };
     let lastDay = '';
     list.innerHTML = rows.map(l => {
       const day = String(l.created_at || '').slice(0, 10);
@@ -539,11 +543,11 @@
       const upcHtml = suffixed ? `${esc(l.upc.split('-')[0])}-<b class="suffix">${esc(l.upc.split('-').slice(1).join('-'))}</b>` : esc(l.upc);
       return `${head}<div class="litem" data-link="${esc(l.id)}" title="${esc(l.title || '')}">
           ${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : '<div class="noimg"></div>'}
-          <div><div class="title">${esc(l.title || '(no title)')}</div>
+          <div class="body"><div class="title">${esc(l.title || '(no title)')}</div>
+            <div class="when" title="${esc(l.created_at)}">${esc(when(l.created_at))}${l.created_by ? ` · ${esc(String(l.created_by).split('@')[0])}` : ''}</div>
             <div class="meta"><span class="chip store ${esc(l.platform)}">${esc(storeName(l.platform))}</span><span>${upcHtml}</span>
               ${id ? `<span>${l.url ? `<a href="${esc(l.url)}" target="_blank" rel="noopener" title="Open the live listing">${esc(id)} ↗</a>` : esc(id)}</span>` : ''}
-              ${l.price != null ? `<span>$${esc(Number(l.price).toFixed(2))}</span>` : ''}
-              <span title="${esc(l.created_at)}">${esc(time(l.created_at))}</span>${l.created_by ? `<span>· ${esc(String(l.created_by).split('@')[0])}</span>` : ''}</div></div>
+              ${l.price != null ? `<span>$${esc(Number(l.price).toFixed(2))}</span>` : ''}</div></div>
         </div>`;
     }).join('');
   }
@@ -1157,7 +1161,9 @@
     const upc = state.fillSessions[tabId] || state.locked || state.currentUpc;
     const platform = message.store || state.page?.store || '';
     if (!upc || !platform) return;
-    state.submission = { tabId, upc, platform, sku: message.sku || '', url: message.url || '', at: Date.now(), told: false, crumbs: [] };
+    const info = state.details[upc];
+    const title = (info && values(info).title) || state.items.find(it => it.upc === upc)?.title || '';
+    state.submission = { tabId, upc, platform, sku: message.sku || '', url: message.url || '', title, at: Date.now(), told: false, crumbs: [] };
     saveTabWork();
     breadcrumb('submit', state.submission, { ...(state.page || {}), url: message.url || state.page?.url || '' });
     toast(`Pressed ${platform === 'amazon' ? 'Save and finish' : 'List it'} on ${storeName(platform)}\u2026`);
@@ -1174,6 +1180,24 @@
     const onForm = page.kind === 'listing-form' || page.kind === 'offer-form';
     const sameUrl = (page.url || '').split('#')[0] === (sub.url || '').split('#')[0];
     if (!sameUrl) breadcrumb('after-submit', sub, page);
+    if (!sameUrl && sub.platform === 'ebay' && page.kind === 'seller-hub') {
+      // eBay went straight to Seller Hub's active listings: the new row there carries the item number.
+      const rows = page.hubRows || [];
+      const hit = M.hubMatch(rows, { code: sub.upc, title: sub.title, taken: (state.listed || []).map(l => l.listing_id).filter(Boolean) });
+      breadcrumb('seller-hub-rows', sub, { ...page, url: (page.url || '').split('#')[0] + '#rows' + (rows.length ? '' : '-waiting' + (sub.hubTries || 0)),
+        headline: `${rows.length} rows; ${hit ? 'item ' + hit.itemId + ' by ' + hit.how : 'no match'}` });
+      if (hit) {
+        state.submission = null; saveTabWork();
+        await recordLink({ upc: sub.upc, platform: 'ebay', listing_id: hit.itemId, sku: hit.how === 'custom label' ? sub.upc : '',
+          url: 'https://www.ebay.com/itm/' + hit.itemId, note: `item number read from Seller Hub after List it (${hit.how})` }, { auto: true });
+        return;
+      }
+      if (!rows.length && (sub.hubTries || 0) < 8) {  // the table renders after the page: look again shortly
+        sub.hubTries = (sub.hubTries || 0) + 1;
+        setTimeout(() => { void refreshTab(); }, 2500);
+        return;
+      }
+    }
     // A success page of the item we filled is maybeAutoLink's; any other page after List it that carries
     // the item number (whatever eBay calls that page) is the listing too.
     const autoLinks = page.kind === 'listing-success' && state.settings.autoLink && state.fillSessions[sub.tabId] === sub.upc;

@@ -1327,13 +1327,26 @@ class ListerTestCase(unittest.TestCase):
             found = self.lister._store_listings('810071427688')['ebay']
         self.assertEqual([e['listingId'] for e in found], ['188947499008'])
 
-    def test_reconcile_links_a_listing_whose_queue_row_was_cleared_after_it_went_live(self):
+    def test_reconcile_never_links_a_same_upc_listing_the_lister_did_not_make(self):
         unit = '810071428487'
         with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
             conn.execute('''INSERT INTO listing_queue (upc, title, status, added_at, removed_at)
                             VALUES (?, 'JoyJolt espresso cups', 'removed', '2026-09-16T16:26:28', '2026-09-18T10:23:19')''', (unit,))
             conn.commit()
+        # Listed by hand (no custom label, no List it press in the panel): reported, not the Lister's.
         self.store_listing('188947233082', upc='810071428487', listed=self.utc('2026-09-18T09:06:54'))
+        report = self.reconcile()
+        self.assertEqual(report['linked'], [])
+        self.assertEqual([(e['listing_id'], e['upc']) for e in report['existing']], [('188947233082', unit)])
+        self.assertEqual(self.sql('listagent.db', 'SELECT status FROM listing_queue WHERE upc = ?', (unit,))[0]['status'], 'removed')
+
+    def test_reconcile_links_a_lister_listing_whose_queue_row_was_cleared_after_it_went_live(self):
+        unit = '810071428487'
+        with closing(sqlite3.connect(self.root / 'listagent.db')) as conn:
+            conn.execute('''INSERT INTO listing_queue (upc, title, status, added_at, removed_at)
+                            VALUES (?, 'JoyJolt espresso cups', 'removed', '2026-09-16T16:26:28', '2026-09-18T10:23:19')''', (unit,))
+            conn.commit()
+        self.store_listing('188947233082', upc='', sku=unit, listed=self.utc('2026-09-18T09:06:54'))
         dry = self.client.post('/api/lister/reconcile', json={'dry_run': True, 'days': 3650}).get_json()
         self.assertEqual([(e['upc'], e['listing_id']) for e in dry['linked']], [(unit, '188947233082')])
         self.assertEqual(self.sql('listagent.db', 'SELECT COUNT(*) AS n FROM listing_links')[0]['n'], 0, 'dry run writes nothing')
@@ -1352,6 +1365,10 @@ class ListerTestCase(unittest.TestCase):
         self.assertIn({'source': 'lister', 'listing_id': '188947233082'}, log, 'the sale tracer can now find it')
         # Idempotent.
         self.assertEqual(self.client.post('/api/lister/reconcile', json={'days': 3650}).get_json()['linked'], [])
+        # Removing the link puts the row back where the person left it: cleared.
+        self.client.delete(f"/api/lister/links/{res['linked'][0]['link_id']}", json={})
+        row = self.sql('listagent.db', 'SELECT status, listed_ebay_at FROM listing_queue WHERE upc = ?', (unit,))[0]
+        self.assertEqual((row['status'], row['listed_ebay_at']), ('removed', None))
 
     def test_reconcile_leaves_listings_older_than_the_queue_row_and_shared_upcs_alone(self):
         self.store_listing('112200000001', upc=UPC, listed=self.utc('2026-09-12T09:00:00'))  # before the 09-13 queue add
@@ -1360,7 +1377,7 @@ class ListerTestCase(unittest.TestCase):
         self.store_listing('112200000002', upc=UPC, listed=self.utc('2026-09-18T12:00:00'))
         report = self.reconcile()
         self.assertEqual(report['linked'], [])
-        self.assertEqual(report['ambiguous'][0]['listing_id'], '112200000002')
+        self.assertEqual(report['existing'][-1]['listing_id'], '112200000002', 'same UPC, no custom label: not ours to link')
         # Our SKU on the listing says whose it is.
         self.store_listing('112200000003', upc=UPC, sku=UPC + '-1', listed=self.utc('2026-09-18T12:30:00'))
         report = self.reconcile()
@@ -1413,6 +1430,35 @@ class ListerTestCase(unittest.TestCase):
         self.assertEqual((crumbs[0]['url'], crumbs[0]['success'], crumbs[0]['stage']),
                          ('https://www.ebay.com/sl/list/success?itemId=1', 1, 'after-submit'))
         self.assertEqual(self.client.post('/api/lister/breadcrumbs', json={}).status_code, 400)
+
+    def test_reconcile_leaves_two_submitted_units_of_one_upc_alone(self):
+        for unit in (UPC + '-1', UPC + '-2'):
+            self.queue_add(unit, 'Lenox plate', '2026-09-18T08:00:00')
+            self.client.post(f'/api/lister/queue/{unit}/submitted', json={'platform': 'ebay'})
+        self.store_listing('112200000009', upc=UPC, listed=self.utc('2026-09-18T12:00:00'))
+        report = self.reconcile()
+        self.assertEqual(report['linked'], [])
+        self.assertEqual(report['ambiguous'][0]['listing_id'], '112200000009')
+
+    def test_a_same_title_ebay_listing_warns_before_a_duplicate(self):
+        unit = '810074933650'
+        self.queue_add(unit, 'Stone Lain Lucy Porcelain 16-Piece Round Dinnerware Set, Beige', '2026-09-18T08:00:00')
+        self.store_listing('188948682093', upc='', title='Stone Lain Lucy Porcelain 16-Piece Round Dinnerware Set Beige')
+        item = [it for it in self.client.get('/api/lister/queue?platform=ebay').get_json()['items'] if it['upc'] == unit][0]
+        self.assertTrue(item['alreadyOnStore'])
+        self.assertEqual((item['existing'][0]['listingId'], item['existing'][0]['match']), ('188948682093', 'title'))
+        # A short or different title never counts.
+        with self.app.app_context():
+            self.assertEqual(self.lister._ebay_title_matches('Stone Lain Lucy'), [])
+            self.assertEqual(self.lister._ebay_title_matches('Stone Lain Lucy Porcelain 16-Piece Round Dinnerware Set, Grey'), [])
+
+    def test_deleting_a_link_undoes_the_finder_alias_it_taught(self):
+        res = self.client.post('/api/lister/links', json={'upc': UPC, 'platform': 'ebay', 'listing_id': '335566778811', 'title': 'Lenox plate'})
+        link = res.get_json()['link']
+        self.assertTrue(link['effects']['inventory_match']['finder_alias_undo'])
+        self.assertEqual(self.sql('listing_alerts.db', "SELECT COUNT(*) AS n FROM finder_aliases WHERE source_key = 'ebay:335566778811'")[0]['n'], 1)
+        self.client.delete(f"/api/lister/links/{link['id']}", json={})
+        self.assertEqual(self.sql('listing_alerts.db', "SELECT COUNT(*) AS n FROM finder_aliases WHERE source_key = 'ebay:335566778811'")[0]['n'], 0)
 
     def test_ping_reports_the_published_feed_version(self):
         feed = self.root / 'static' / 'lister'

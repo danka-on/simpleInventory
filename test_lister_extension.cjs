@@ -107,6 +107,25 @@ assert.equal(live.kind, 'listing-live');
 assert.equal(live.listingId, '335566778899');
 assert.equal(M.detectPage('https://www.ebay.com/itm/335566778899').listingId, '335566778899');
 assert.equal(M.detectPage('https://www.ebay.com/sh/lst/active').kind, 'seller-hub');
+
+// --- after List it eBay lands on Seller Hub, not a success page: its rows name the new item number ---
+{
+  const title = 'Stone Lain Lucy Porcelain 16-Piece Round Dinnerware Set Beige';
+  const rows = [
+    { itemId: '188952169204', text: 'Lorren Home 2oz. Espresso Silver Service for 6 188952169204 $49.99' },
+    { itemId: '188948682093', text: title + ' 188948682093 $89.99' },
+    { itemId: '188952353640', text: title + ' 810074933650 188952353640 $89.99' },
+  ];
+  const bySku = M.hubMatch(rows, { code: '810074933650', title });
+  assert.equal(bySku.itemId, '188952353640', 'the custom label names the row');
+  assert.equal(bySku.how, 'custom label');
+  const noSku = rows.map(r => ({ ...r, text: r.text.replace('810074933650 ', '') }));
+  assert.equal(M.hubMatch(noSku, { code: '810074933650', title }).itemId, '188952353640', 'same title twice: the newest item number');
+  assert.equal(M.hubMatch(noSku, { code: '810074933650', title, taken: ['188952353640'] }).itemId, '188948682093', 'a linked item is skipped');
+  assert.equal(M.hubMatch(rows, { code: '8100749336', title: 'Short' }), null, 'a partial code or a short title never matches');
+  assert.equal(M.hubMatch(rows, { code: '810074933650-1', title: 'Nothing like it on the page at all here' }), null, 'the base code does not match a -1 unit');
+  assert.equal(M.hubMatch([], { code: '810074933650', title }), null);
+}
 const offer = M.detectPage('https://sellercentral.amazon.com/abis/listing/syh/ref=xx?asin=B0TESTASIN&sku=SS-1');
 assert.equal(offer.store, 'amazon');
 assert.equal(offer.kind, 'offer-form');
@@ -242,6 +261,12 @@ for (const route of ['/shelf-base/', '/shelf-image/', '/shelf-original/', 'garag
 }
 assert.ok(sidepanelSource.includes('https://www.ebay.com/itm/') && sidepanelSource.includes('https://www.amazon.com/dp/'),
   'a listed store tile links to the live listing');
+// --- the Seller Hub read and the Listed drawer --------------------------------------------------
+assert.ok(sidepanelSource.includes("M.hubMatch(rows"), 'the panel reads Seller Hub rows after List it');
+assert.ok(fs.readFileSync(path.join(root, 'content.js'), 'utf8').includes('page.hubRows = hubRows()'), 'the page script lists Seller Hub rows');
+assert.ok(sidepanelSource.includes("toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })"), 'Listed rows show date and time');
+assert.ok(!/\.litem \.title \{[^}]*nowrap/.test(fs.readFileSync(path.join(root, 'sidepanel.css'), 'utf8')), 'Listed titles wrap instead of being cut off');
+
 // --- "listed" means the panel listed it, not that the store already had it ---------------------
 assert.ok(sidepanelSource.includes("const isOwnListing = link => (link.kind || 'listed') !== 'existing'"),
   'a link row knows whether the panel listed it or only linked what the store already had');

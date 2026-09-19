@@ -118,6 +118,11 @@ def _local_dt(stamp):
     return value
 
 
+def _title_key(value):
+    """'Stone Lain Lucy Porcelain 16-Piece Set, Beige' -> 'stone lain lucy porcelain 16 piece set beige'."""
+    return ' '.join(re.sub(r'[^0-9a-z]+', ' ', _text(value).lower()).split())
+
+
 def _price(value):
     """A store's price column ('12.99', '$12.99', 12.99) as a number, or None."""
     try:
@@ -1060,9 +1065,41 @@ class Lister:
         except sqlite3.Error as error:
             print(f"Lister: could not remember Amazon listing {sku}: {error}")
 
-    def _store_listings(self, upc, *, live=False):
+    def _ebay_title_matches(self, title):
+        """Active eBay listings with the same title (case, punctuation and spacing aside). Catches a listing
+        that carries neither our UPC nor our SKU - eBay keeps the UPC off most of ours."""
+        key = _title_key(title)
+        if len(key) < 20:
+            return []
+        try:
+            with self.db('ebayStore.db') as conn:
+                cur = conn.cursor()
+                if not self._has_table(cur, 'INVENTORY'):
+                    return []
+                cur.execute('SELECT COUNT(*) AS n, MAX(ID) AS m FROM INVENTORY')
+                row = cur.fetchone()
+                stamp = (row['n'], row['m'], int(time.time() // 600))
+                cached = getattr(self, '_title_index', None)
+                if not cached or cached[0] != stamp:
+                    index = {}
+                    cur.execute('''SELECT ItemID, SKU, UPC, Title, List_State FROM INVENTORY
+                                   WHERE LOWER(TRIM(COALESCE(List_State, ''))) IN ('active', 'live')''')
+                    for r in cur.fetchall():
+                        r = _row(r)
+                        k = _title_key(r.get('Title'))
+                        if k:
+                            index.setdefault(k, []).append({'listingId': _text(r.get('ItemID')), 'sku': _text(r.get('SKU')),
+                                                            'upc': _text(r.get('UPC')), 'title': _text(r.get('Title')),
+                                                            'state': _text(r.get('List_State')), 'match': 'title'})
+                    cached = self._title_index = (stamp, index)
+        except sqlite3.Error:
+            return []
+        return [dict(e) for e in cached[1].get(key, [])][:5]
+
+    def _store_listings(self, upc, *, live=False, title=''):
         """Listings the stores already carry for this UPC, so the panel can warn before a duplicate.
-        With live, Amazon itself is asked about our SKU when the synced table has nothing (cached)."""
+        With live, Amazon itself is asked about our SKU when the synced table has nothing (cached).
+        With title, an eBay listing of the same title counts when nothing carries the UPC or SKU."""
         variants = self._variants(upc)
         base = variants[0].split('-', 1)[0]
         keys = {v for v in variants} | {base, base.lstrip('0')}
@@ -1084,6 +1121,8 @@ class Lister:
                                             'state': _text(r.get('List_State'))})
         except sqlite3.Error:
             pass
+        if not out['ebay'] and title:
+            out['ebay'] = self._ebay_title_matches(title)
         try:
             with self.db('amazonStore.db') as conn:
                 cur = conn.cursor()
@@ -1419,6 +1458,8 @@ class Lister:
                     cur.execute(f'''UPDATE listing_queue SET listed_{platform}_at = NULL, status = 'queued',
                                     listed_listing_id = NULL, listed_offer_id = NULL, listed_sku = NULL, listed_asin = NULL, listed_url = NULL,
                                     listed_platform = NULL, listed_at = NULL WHERE id = ?''', (queue_row['id'],))
+                    if effects.get('revived_from_removed') and queue_row.get('removed_at'):
+                        cur.execute("UPDATE listing_queue SET status = 'removed' WHERE id = ?", (queue_row['id'],))
                     link['queue_reverted'] = True
             conn.commit()
         # The listing log row this link wrote would otherwise still trace sales to this unit - whether or
@@ -1465,7 +1506,13 @@ class Lister:
                     if self._has_table(cur, 'listing_inventory_matches'):
                         cur.execute('DELETE FROM listing_inventory_matches WHERE store = ? AND LOWER(listing_key) = LOWER(?) AND searchrack_id = ?',
                                     (match['store'], match['listing_key'], match.get('searchrack_id')))
-                        conn.commit()
+                    if match.get('finder_alias_undo'):  # the Finder alias the link taught goes back too
+                        try:
+                            from finder_aliases import update_alias
+                            update_alias(conn, f"{match['store']}:{_text(match['listing_key']).lower()}", undo_token=match['finder_alias_undo'])
+                        except Exception:
+                            pass
+                    conn.commit()
             except sqlite3.Error:
                 pass
         if self.clear_scan_cache:
@@ -1643,7 +1690,7 @@ class Lister:
             if skipped_at and not listed_at:
                 hidden += 1
                 continue
-            stores = self._store_listings(upc)
+            stores = self._store_listings(upc, title=row.get('title') or '')
             existing = stores.get(platform) or []
             live = [e for e in existing if not e.get('state') or e['state'].lower() in ('active', 'live')]
             own_links = [l for l in links.get(upc, []) + links.get(row['upc'], []) if l['platform'] == platform]
@@ -1968,7 +2015,7 @@ class Lister:
                           'rows': (inventory.get('rows') or [])[:10]},
             'cost': cost,
             'bol': {k: bol.get(k) for k in ('description', 'lot_number', 'original_retail', 'avg_cost') if isinstance(bol, dict) and k in bol},
-            'existing': {'ebay': (detail.get('ebay_store') or {}).get('listings') or [],
+            'existing': {'ebay': (detail.get('ebay_store') or {}).get('listings') or self._ebay_title_matches(queue_row.get('title')),
                          'amazon': (detail.get('amazon_store') or {}).get('listings') or []},
             'links': links,
             'queue': {'id': queue_row.get('id'), 'status': queue_row.get('status'),
@@ -2241,10 +2288,11 @@ class Lister:
     def reconcile_stores(self, *, days=None, dry_run=False, actor='store-sync'):
         """Link listings the store sync brought in to the Lister unit they came from.
 
-        A listing belongs to a unit when its SKU is the unit's code, or its UPC is the unit's UPC and it
-        went live after the unit was queued (and before a cleared row was cleared). Queue rows of every
-        status count - "Clear all" and the X removed listed items too - and so do HUD submissions still
-        waiting for their item number. A UPC shared by two open units is left alone (reported)."""
+        Only listings the Lister made are linked: the store's SKU (eBay custom label) is the unit's code, or
+        the UPC is the unit's and the panel saw its List it press - and it went live after the unit was queued
+        (and before a cleared row was cleared). Queue rows of every status count - "Clear all" and the X
+        removed listed items too. Same-UPC listings without that evidence and UPCs shared by two open units
+        are reported, never linked."""
         days = int(days or self.RECONCILE_DAYS)
         since = datetime.datetime.now() - datetime.timedelta(days=days)
         since_utc = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)).strftime('%Y-%m-%dT%H:%M:%S')
@@ -2332,9 +2380,16 @@ class Lister:
             sku = '' if sku.lower() in ('none', 'null') else sku
             listed_at = _local_dt(listing.get('List_Date'))
             open_units = [u for u in units.values() if open_on(u, 'ebay') and fits_dates(u, listed_at)]
+            # Only the Lister's own listings are linked. Its custom label is the unit code; a bare UPC match
+            # counts only for a unit whose List it press the panel saw. Anything else (the same UPC listed by
+            # hand, another tool) is reported, never linked.
             candidates = [u for u in open_units if sku and self.format_upc12(sku) == u['upc']]
             if not candidates and digits(listing.get('UPC')):
-                candidates = [u for u in open_units if digits(_base_upc(u['upc'])) == digits(listing.get('UPC'))]
+                same_upc = [u for u in open_units if digits(_base_upc(u['upc'])) == digits(listing.get('UPC'))]
+                candidates = [u for u in same_upc if 'ebay' in u['submitted']]
+                if same_upc and not candidates:
+                    report['existing'].append({'platform': 'ebay', 'listing_id': item_id, 'upc': same_upc[0]['upc'],
+                                               'units': [u['upc'] for u in same_upc]})
             if not candidates:
                 continue
             unit = pick(candidates, 'ebay')
@@ -2414,6 +2469,12 @@ class Lister:
             return False
         entry['link_id'] = (result.get('link') or {}).get('id')
         entry['duplicate'] = bool(result.get('duplicate'))
+        if entry.get('revived') and entry['link_id'] and not entry['duplicate']:
+            # Deleting this link must put the row back where the person left it: cleared.
+            effects = dict((result.get('link') or {}).get('effects') or {}, revived_from_removed=True)
+            with self.db('listagent.db') as conn:
+                conn.execute('UPDATE listing_links SET effects_json = ? WHERE id = ?', (json.dumps(effects, default=str), entry['link_id']))
+                conn.commit()
         report['linked'].append(entry)
         return True
 
