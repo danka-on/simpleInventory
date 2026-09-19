@@ -582,8 +582,40 @@ button.tiny.phone-btn .phone-ico { font-size: 13px; line-height: 1; }
 .fbview .fb-photos img { width: 64px; height: 64px; object-fit: cover; border-radius: 7px; background: var(--chip); flex: none; }
 .fbview .fb-two { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
 .fbview .fb-n { float: right; font-variant-numeric: tabular-nums; color: var(--faint); }
+/* Review card: one section per decision (title, price, category, description); labels are small caps, inputs carry the ink. */
+.fbview .fb-edit { padding: 10px 12px 12px; }
+.fbview .fb-upc { margin: 2px 0 4px; font-variant-numeric: tabular-nums; }
+.fbview .fb-pill { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--chip); color: var(--muted); letter-spacing: .02em; }
+.fbview .fb-pill.ready { background: var(--green-soft); color: var(--green); }
+.fbview .fb-pill.in_template { background: var(--amber-soft); color: var(--amber); }
+.fbview .fb-pill.queued { background: var(--fb-soft); color: var(--fb); }
+.fbview .fb-photorow { margin-bottom: 2px; }
+.fbview .fb-form { margin-top: 6px; border-top: 1px solid var(--line-2); }
+.fbview .fb-sect { padding: 10px 0 11px; border-bottom: 1px solid var(--line-2); }
+.fbview .fb-sect-h { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; min-height: 22px; }
+.fbview .fb-sect-h .lbl { font-size: 10px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; color: var(--faint); }
+.fbview .fb-sect-h .sp, .fbview .fb-actions .sp { flex: 1; }
+.fbview .fb-sect-h .fb-n { float: none; font-size: 11px; }
+.fbview .fb-sect .fb-ai { margin: 0; }
+.fbview .fb-title-in { font-size: 14px; font-weight: 600; padding: 8px 10px; }
+.fbview .fb-form .fb-two { grid-template-columns: 1fr 1.5fr; align-items: stretch; }
+.fbview .fb-money { position: relative; }
+.fbview .fb-money .cur { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-weight: 600; pointer-events: none; }
+.fbview .fb-money input { padding-left: 22px; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fbview .fb-form select { padding: 7px 8px; }
+.fbview .fb-catline { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 4px; margin-bottom: 6px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+.fbview .fb-catline .crumb.last { color: var(--ink); font-weight: 600; }
+.fbview .fb-catline .sep { color: var(--faint); }
+.fbview .fb-catline.none { color: var(--faint); font-style: italic; }
+.fbview .fb-auto { font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; background: var(--green-soft); color: var(--green); margin-left: 4px; }
+.fbview .fb-catsel { color: var(--muted); font-size: 12px; }
+.fbview #fbCatSearch { margin-top: 6px; }
+.fbview .fb-form textarea { line-height: 1.5; }
+.fbview .fb-form input::placeholder, .fbview .fb-form textarea::placeholder { color: var(--faint); }
+.fbview .fb-actions { margin-top: 12px; }
+.fbview .fb-actions button.primary { padding: 8px 18px; }
 /* Asking prices elsewhere (eBay comps, Amazon offers): press a chip to use it; Search opens the barcode on the web. */
-.fbview .fb-prices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 8px; min-height: 24px; }
+.fbview .fb-prices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 0; min-height: 24px; }
 .fbview .fb-price { border: 1px solid var(--line-2); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 3px 9px; color: var(--ink); }
 .fbview .fb-price:not(.off):not([disabled]):hover { background: var(--green-soft); color: var(--green); border-color: var(--green); }
 .fbview .fb-price small { color: var(--muted); font-size: 10px; }

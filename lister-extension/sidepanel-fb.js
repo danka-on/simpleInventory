@@ -21,6 +21,8 @@
     open: false, items: [], counts: {}, batches: [], listedToday: 0, uploadUrl: '', helpUrl: '', maxRows: 50,
     upc: null, item: null, info: null, aiBusy: '', itemError: '', loaded: false, error: '', armed: null, armTimer: null, searchTimer: null,
     prices: {},  // upc -> { loading, error, searchUrl, sources } (asking prices on eBay / Amazon)
+    autoCat: {},  // upc -> { category, pending, manual } (category picked from the title, until the user picks one)
+    autoCatTimer: null,
     uploading: 0,  // workbook id being sent to Facebook
   };
 
@@ -60,7 +62,15 @@
     } finally {
       done();
     }
-    if (fb.upc === upc) { renderItem(); P().renderActionBar(); }
+    if (fb.upc === upc) {
+      if (fb.item && !fb.autoCat[upc]) {
+        const d = fb.item.draft || {};
+        // The server already picked the top suggestion for an unsaved category; show it as auto and let the title refine it.
+        fb.autoCat[upc] = { category: d.category && (d.suggestions || [])[0] === d.category ? d.category : '', pending: false, manual: false };
+        if (!d.category) autoCategory(d.title, { now: true });
+      }
+      renderItem(); P().renderActionBar();
+    }
   }
 
   async function loadInfo(upc) {
@@ -89,6 +99,7 @@
       if (box) {
         box.value = String(kind === 'title' ? data.title : data.descriptionText || '').slice(0, box.maxLength > 0 ? box.maxLength : undefined);
         box.dispatchEvent(new Event('input', { bubbles: true }));
+        if (kind === 'title') autoCategory(box.value, { now: true });
       }
       P().toast((kind === 'title' ? 'AI title written' : 'AI description written') + ' \u2014 press Save to keep it');
     } catch (error) {
@@ -340,7 +351,7 @@
         args: [{ name, base64, mime: 'text/csv' }] });
       const result = (results && results[0] && results[0].result) || { ok: false, error: 'The Facebook page gave no answer.' };
       if (!result.ok) throw new Error(result.error || 'Upload failed');
-      P().toast(`Workbook #${id} is in Facebook's file box. Check the rows there, publish, then add photos and press Mark listed here.`);
+      P().toast(`Workbook #${id} is in Facebook's editor as draft rows. Add a photo to each row, press Publish there, then Mark listed here.`);
     } catch (error) {
       P().toast(error.message || String(error), true);
     } finally {
@@ -422,8 +433,8 @@
       <div class="fb-batch">
         <div><b>Workbook #${b.id}</b> · ${b.count} item${b.count === 1 ? '' : 's'} <span class="muted small">${esc((b.createdAt || '').replace('T', ' ').slice(0, 16))}</span></div>
         <ol class="fb-steps small">
-          <li>Press <b>Upload to Facebook</b>: it opens Facebook's multiple-listings page and drops the file in. Check the rows there and publish.</li>
-          <li>Add the photos to each new listing (open an item here → Save photos).</li>
+          <li>Press <b>Upload to Facebook</b>: it opens Facebook's multiple-listings page and drops the file in. Each item shows up there as a draft row.</li>
+          <li>Add photos to each row there (open an item here → Save photos gives you the files), then press Publish on Facebook.</li>
           <li>Come back and press Mark listed.</li>
         </ol>
         <div class="row tight">
@@ -483,32 +494,48 @@
     const categories = [...new Set([d.category, ...(d.suggestions || [])].filter(Boolean))];
     const photos = (info.photos || []).slice(0, 8).map(p => `<img src="${esc(p.thumb || p.url)}" alt="" loading="lazy">`).join('');
     const note = [info.defect, info.notes].filter(Boolean).join(' · ');
+    const status = info.status;
+    const auto = fb.autoCat[info.upc];
+    const crumbs = d.category ? d.category.split('//').map((c, i, all) => `<span class="crumb${i === all.length - 1 ? ' last' : ''}">${esc(c)}</span>`).join('<span class="sep">›</span>') : '';
+    const catLine = d.category
+      ? `<div class="fb-catline">${crumbs}${auto && auto.category === d.category ? '<span class="fb-auto" title="Picked from the title; type a title and it follows. Choosing one below keeps yours.">auto</span>' : ''}</div>`
+      : `<div class="fb-catline none">No category yet${auto && auto.pending ? ' · <span class="spin"></span>' : ' · type a title or search below'}</div>`;
+    const sect = (label, extra, body) => `<section class="fb-sect"><div class="fb-sect-h"><span class="lbl">${label}</span><span class="sp"></span>${extra || ''}</div>${body}</section>`;
     P().setHtml(card, `
       <div class="card fb-edit">
         <div class="fb-editbar"><button class="link" type="button" data-act="back">← Facebook list</button>
-          <span class="muted small">${esc(info.upc)} · ${esc(STATUS[info.status] || info.status)}</span></div>
+          <span class="fb-pill ${esc(status)}">${esc(STATUS[status] || status)}</span></div>
+        <div class="fb-upc muted small">${esc(info.upc)}${info.racks && info.racks.length ? ` · ${esc(info.racks.slice(0, 3).join(', '))}` : ''}</div>
         ${locked ? `<div class="small fb-lock">In workbook #${esc(info.batchId)}. Put that workbook back to change it.</div>` : ''}
         ${full ? P().statusStripHtml(full) : ''}
         ${full ? P().photoCardHtml(full) : `<div class="fb-photos">${photos || '<span class="muted small">No photos yet.</span>'}</div>`}
-        <div class="row tight"><button class="mini" type="button" data-act="photos"${photos ? '' : ' disabled'}>⬇ Save photos</button>
-          <span class="muted small">Facebook's file has no photos; add them on the listing.</span></div>
+        <div class="row tight fb-photorow"><button class="mini" type="button" data-act="photos"${photos ? '' : ' disabled'}>⬇ Save photos</button>
+          <span class="muted small">Photos go on each row in Facebook's editor after the upload.</span></div>
         ${note ? `<div class="small fb-note">${esc(note)}</div>` : ''}
-        <label>Title ${aiBtn('title', 'AI title')}<span class="fb-n" id="fbTitleN"></span><input id="fbTitle" maxlength="${info.limits.title}" value="${esc(d.title)}"></label>
-        <div class="fb-two">
-          <label>Price (whole $)<input id="fbPrice" type="number" min="1" step="1" inputmode="numeric" value="${esc(d.price ?? '')}"></label>
-          <label>Condition<select id="fbCond">${info.conditions.map(c => `<option${c === d.condition ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+        <div class="fb-form">
+          ${sect('Title', `<span class="fb-n" id="fbTitleN"></span>${aiBtn('title', 'AI title')}`,
+            `<input id="fbTitle" class="fb-title-in" maxlength="${info.limits.title}" value="${esc(d.title)}" placeholder="What is it? Brand, item, size">`)}
+          ${sect('Price &amp; condition', '',
+            `<div class="fb-two">
+              <div class="fb-money"><span class="cur">$</span><input id="fbPrice" type="number" min="1" step="1" inputmode="numeric" value="${esc(d.price ?? '')}" placeholder="0" aria-label="Price, whole dollars"></div>
+              <select id="fbCond" aria-label="Condition">${info.conditions.map(c => `<option${c === d.condition ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>
+            </div>
+            <div id="fbPrices" class="fb-prices" aria-label="Asking prices elsewhere">${pricesHtml()}</div>`)}
+          ${sect('Category', '',
+            `${catLine}
+            <select id="fbCat" class="fb-catsel" aria-label="Category"><option value="">(none)</option>${categories.map(c => `<option value="${esc(c)}"${c === d.category ? ' selected' : ''}>${esc(c.replace(/\/\//g, ' › '))}</option>`).join('')}</select>
+            <input id="fbCatSearch" type="search" placeholder="Search all Facebook categories…" aria-label="Search Facebook categories">
+            <div id="fbCatResults" class="fb-results"></div>`)}
+          ${sect('Description', `<span class="fb-n" id="fbDescN"></span>${aiBtn('description', 'AI description')}`,
+            `<textarea id="fbDesc" rows="7" maxlength="${info.limits.description}" placeholder="Condition, what is included, measurements">${esc(d.description)}</textarea>`)}
         </div>
-        <div id="fbPrices" class="fb-prices" aria-label="Asking prices elsewhere">${pricesHtml()}</div>
-        <label>Category<select id="fbCat"><option value="">(none)</option>${categories.map(c => `<option value="${esc(c)}"${c === d.category ? ' selected' : ''}>${esc(c.replace(/\/\//g, ' › '))}</option>`).join('')}</select></label>
-        <input id="fbCatSearch" type="search" placeholder="Search all Facebook categories…" aria-label="Search Facebook categories">
-        <div id="fbCatResults" class="fb-results"></div>
-        <label>Description ${aiBtn('description', 'AI description')}<span class="fb-n" id="fbDescN"></span><textarea id="fbDesc" rows="8" maxlength="${info.limits.description}">${esc(d.description)}</textarea></label>
-        <div class="row">
-          <button type="button" data-act="save"${locked ? ' disabled' : ''}>Save</button>
+        <div class="row fb-actions">
+          <button class="primary" type="button" data-act="save"${locked ? ' disabled' : ''}>Save</button>
+          <span class="sp"></span>
           <button class="danger" type="button" data-act="remove">Remove from FB</button>
         </div>
       </div>`);
-    for (const el of card.querySelectorAll('.fb-edit > label input, .fb-edit > label select, .fb-edit > label textarea, .fb-two input, .fb-two select')) el.disabled = locked;
+    for (const el of card.querySelectorAll('.fb-form input, .fb-form select, .fb-form textarea')) el.disabled = locked;
     if (full) P().wirePhotoCard(card, full, { rerender: renderItem, refresh: () => loadInfo(fb.upc) });
     counters();
   }
@@ -537,16 +564,61 @@
     }, 250);
   }
 
-  function pickCategory(category) {
+  function pickCategory(category, { manual = true } = {}) {
     const select = $('fbCat');
+    if (!select) return;
     if (![...select.options].some(o => o.value === category)) {
       const option = document.createElement('option');
       option.value = category; option.textContent = category.replace(/\/\//g, ' › ');
       select.appendChild(option);
     }
     select.value = category;
-    $('fbCatResults').innerHTML = '';
-    $('fbCatSearch').value = '';
+    if (manual) {
+      $('fbCatResults').innerHTML = '';
+      $('fbCatSearch').value = '';
+      fb.autoCat[fb.upc] = { category: '', pending: false, manual: true };
+    }
+    renderCatLine();
+  }
+
+  // Auto-category: the title says what the thing is, so the category follows it (debounced) until the
+  // user picks one by hand for this item. The server scores Facebook's 1870 categories by the title words.
+  function autoCategory(title, { now = false } = {}) {
+    const upc = fb.upc;
+    clearTimeout(fb.autoCatTimer);
+    if (!upc || !fb.item || fb.item.status === 'in_template') return;
+    const state = fb.autoCat[upc] || (fb.autoCat[upc] = { category: '', pending: false, manual: false });
+    if (state.manual) return;
+    const q = String(title || '').trim();
+    if (q.length < 3) return;
+    state.pending = true; renderCatLine();
+    fb.autoCatTimer = setTimeout(async () => {
+      try {
+        const data = await P().api('/api/lister/fb/categories?q=' + encodeURIComponent(q.slice(0, 120)));
+        const best = (data.suggested || [])[0] || '';
+        if (fb.upc !== upc || fb.autoCat[upc] !== state || state.manual) return;
+        state.pending = false;
+        if (best) { state.category = best; pickCategory(best, { manual: false }); }
+        else renderCatLine();
+      } catch { state.pending = false; renderCatLine(); }
+    }, now ? 0 : 450);
+  }
+
+  function renderCatLine() {
+    const line = document.querySelector('#fbCard .fb-catline');
+    const select = $('fbCat');
+    if (!line || !select) return;
+    const category = select.value;
+    const auto = fb.autoCat[fb.upc];
+    if (!category) {
+      line.className = 'fb-catline none';
+      line.innerHTML = `No category yet${auto && auto.pending ? ' · <span class="spin"></span>' : ' · type a title or search below'}`;
+      return;
+    }
+    line.className = 'fb-catline';
+    line.innerHTML = category.split('//').map((c, i, all) => `<span class="crumb${i === all.length - 1 ? ' last' : ''}">${esc(c)}</span>`).join('<span class="sep">›</span>')
+      + (auto && auto.category === category && !auto.manual ? '<span class="fb-auto" title="Picked from the title; type a title and it follows. Choosing one below keeps yours.">auto</span>' : '')
+      + (auto && auto.pending ? ' <span class="spin"></span>' : '');
   }
 
   function openFacebook() {
@@ -599,6 +671,10 @@
     card.addEventListener('input', event => {
       if (event.target.id === 'fbCatSearch') searchCategories(event.target.value);
       else counters();
+      if (event.target.id === 'fbTitle') autoCategory(event.target.value);
+    });
+    card.addEventListener('change', event => {
+      if (event.target.id === 'fbCat' && event.isTrusted) { fb.autoCat[fb.upc] = { category: '', pending: false, manual: true }; renderCatLine(); }
     });
     setInterval(() => { if (fb.open && !fb.upc && document.visibilityState === 'visible') void load({ quiet: true }); }, 20000);
   }

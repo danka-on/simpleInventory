@@ -19,7 +19,7 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
     channel: 'msedge', headless: false, acceptDownloads: true,
     args: ['--headless=new', `--disable-extensions-except=${extensionPath}`, `--load-extension=${extensionPath}`, '--no-first-run'],
   });
-  const calls = { panel: [], saves: [], build: 0, listed: 0, generate: [] };
+  const calls = { panel: [], saves: [], build: 0, listed: 0, generate: [], categories: [] };
   const fbItem = { upc: UPC, status: 'queued', title: 'Lenox Butterfly Meadow Dinner Plate', price: 24, condition: 'New', category: '',
                    reviewed: false, batchId: null, thumb: '', problems: [] };
   const batches = [];
@@ -58,7 +58,12 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
           mobilePhotosUrl: 'https://pi.nexuscentralhq.org/items-to-list/mobile-photos/x' } });
       }
       if (url.pathname === '/api/lister/qr') return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
-      if (url.pathname === '/api/lister/fb/categories') return json({ success: true, categories: [CATEGORY], suggested: [] });
+      if (url.pathname === '/api/lister/fb/categories') {
+        // Word search ('plates') lists matches; a whole title scores suggestions (auto-category).
+        const q = url.searchParams.get('q') || '';
+        calls.categories.push(q);
+        return json({ success: true, categories: q === 'plates' ? [CATEGORY] : [], suggested: /dinner plate/i.test(q) ? [CATEGORY] : [] });
+      }
       if (url.pathname.startsWith('/static/')) return route.fulfill({ status: 200, contentType: 'image/gif', body: Buffer.from('R0lGODlhAQABAAAAACw=', 'base64') });
       if (/^\/api\/lister\/fb\/batch\/\d+\.xlsx$/.test(url.pathname)) {
         return route.fulfill({ status: 200, contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', body: Buffer.from('PK fake xlsx') });
@@ -114,6 +119,10 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
     // Review: price, condition, a category found by search, then Ready.
     await panel.click(`#fbCard .fb-row[data-upc="${UPC}"]`);
     await panel.waitForSelector('#fbTitle');
+    // Auto-category: the title alone picks the category and says so; nothing was chosen by hand yet.
+    await panel.waitForFunction(cat => document.getElementById('fbCat').value === cat, CATEGORY);
+    assert.match(await panel.textContent('#fbCard .fb-catline'), /Plates\s*auto/);
+    assert.ok(calls.categories.some(q => /Lenox Butterfly Meadow Dinner Plate/.test(q)), 'the whole title was scored');
     assert.equal(await panel.$eval('#fbTitle', el => el.value), 'Lenox Butterfly Meadow Dinner Plate');
     assert.match(await panel.textContent('#fbTitleN'), /^35\/150$/);
     assert.match(await panel.textContent('#fbCard .fb-note'), /Small chip/);
@@ -150,6 +159,7 @@ const CATEGORY = 'Home & Kitchen//Kitchen & Dining//Dinnerware//Plates';
     await panel.waitForSelector('#fbCatResults .fb-cat');
     await panel.click('#fbCatResults .fb-cat');
     assert.equal(await panel.$eval('#fbCat', el => el.value), CATEGORY);
+    assert.doesNotMatch(await panel.textContent('#fbCard .fb-catline'), /auto/, 'a hand-picked category is not auto');
     assert.equal(await panel.textContent('#goBtn'), 'Ready ✓ · next item');
     await panel.click('#goBtn');
     await panel.waitForSelector(`#fbCard .fb-row.ready[data-upc="${UPC}"]`);
