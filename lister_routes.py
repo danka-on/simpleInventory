@@ -642,6 +642,46 @@ def validate_link(data):
     }
 
 
+_amazon_listings_client = {}
+
+
+def _amazon_listing_by_sku_default(sku):
+    """Ask Amazon's Listings API for one of our SKUs. None when Amazon has no such SKU."""
+    try:
+        from sp_api.api import ListingsItems
+        from sp_api.base import Marketplaces, SellingApiException
+    except ImportError:
+        return None
+    client = _amazon_listings_client.get('client')
+    if client is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(base_dir, 'amazon_credentials.json')
+        if not os.path.exists(path):
+            return None
+        with open(path, 'r', encoding='utf-8') as handle:
+            creds = json.load(handle)
+        credentials = {'refresh_token': creds['refresh_token'], 'lwa_app_id': creds['lwa_app_id'],
+                       'lwa_client_secret': creds.get('lwa_client_secret', '')}
+        client = {'api': ListingsItems(credentials=credentials, marketplace=Marketplaces.US),
+                  'seller_id': creds.get('seller_id') or '', 'marketplace_id': Marketplaces.US.marketplace_id}
+        _amazon_listings_client['client'] = client
+    if not client['seller_id']:
+        return None
+    try:
+        response = client['api'].get_listings_item(sellerId=client['seller_id'], sku=sku,
+                                                   marketplaceIds=[client['marketplace_id']], includedData=['summaries'])
+    except SellingApiException as error:
+        if 'NOT_FOUND' in str(error) or getattr(error, 'code', None) == 404:
+            return None
+        raise
+    payload = getattr(response, 'payload', response) or {}
+    summary = ((payload.get('summaries') or [{}])[0]) or {}
+    status = [str(x).upper() for x in (summary.get('status') or [])]
+    return {'asin': summary.get('asin') or '', 'title': summary.get('itemName') or '',
+            'condition': summary.get('conditionType') or '',
+            'state': 'Active' if (not status or 'BUYABLE' in status or 'DISCOVERABLE' in status) else 'Inactive'}
+
+
 class Lister:
     def __init__(self, deps, static_folder, app=None):
         self.app = app
@@ -652,6 +692,12 @@ class Lister:
         self.format_upc12 = deps['_listagent_format_upc12']
         self.init_listagent = deps['_listagent_init_tables']
         self.clear_scan_cache = deps.get('_listing_helper_scan_cache_clear')
+        # Live "is our SKU on Amazon" check (Listings API, one call per SKU, answers cached for a while):
+        # the store sync runs once a day, so a listing made today is otherwise invisible until tomorrow.
+        self.amazon_listing_by_sku = deps.get('_amazon_listing_by_sku')
+        self._live_sku_cache = {}
+        self._live_sku_lock = threading.Lock()
+        self._live_sku_last_call = 0.0
         # Queue-driven lister (0.2): everything below is optional so older hosts keep the 0.1 routes.
         self.upc_detail_view = deps.get('api_listingagent_upc_detail')
         self.build_proposal = deps.get('_agent_build_proposal')
@@ -908,8 +954,71 @@ class Lister:
             'listedListingId': proposal.get('listed_listing_id') or '',
         }
 
-    def _store_listings(self, upc):
-        """Listings the stores already carry for this UPC, so the panel can warn before a duplicate."""
+    LIVE_SKU_TTL = 600  # seconds an Amazon answer (found or not) is kept before asking again
+    LIVE_SKU_GAP = 0.25  # seconds between two Amazon calls (Listings API allows 5/s)
+
+    def _amazon_sku_lookup(self, sku):
+        """One Listings API call: {'asin', 'title', 'state', 'condition'} for our SKU, or None when Amazon has no such SKU."""
+        return self.amazon_listing_by_sku(sku)
+
+    def _amazon_live(self, skus, *, fetch=True):
+        """Our SKUs that Amazon carries right now, from the cache and (with fetch) from Amazon itself."""
+        out = []
+        if self.amazon_listing_by_sku is None:  # no store wired (tests, hosts without Amazon)
+            return out
+        now = time.time()
+        for sku in list(dict.fromkeys(_text(s) for s in skus if _text(s)))[:3]:
+            with self._live_sku_lock:
+                cached = self._live_sku_cache.get(sku)
+            if cached and now - cached[0] < self.LIVE_SKU_TTL:
+                result = cached[1]
+            elif not fetch:
+                continue
+            else:
+                with self._live_sku_lock:
+                    wait = self.LIVE_SKU_GAP - (time.time() - self._live_sku_last_call)
+                    if wait > 0:
+                        time.sleep(wait)
+                    self._live_sku_last_call = time.time()
+                try:
+                    result = self._amazon_sku_lookup(sku)
+                except Exception as error:  # noqa: BLE001 - a store hiccup must not break the panel
+                    print(f"Lister: Amazon SKU lookup failed for {sku}: {error}")
+                    continue
+                with self._live_sku_lock:
+                    self._live_sku_cache[sku] = (time.time(), result)
+                if result:
+                    self._remember_amazon_listing(sku, result)
+            if result:
+                out.append({'asin': _text(result.get('asin')), 'sku': sku, 'upc': sku.split('-', 1)[0],
+                            'title': _text(result.get('title')), 'state': _text(result.get('state')) or 'Active',
+                            'fulfillment': _text(result.get('fulfillment')) or 'DEFAULT', 'live': True})
+        return out
+
+    def _remember_amazon_listing(self, sku, result):
+        """Write a listing Amazon confirmed into amazonStore.db, so every later read (and the Items to List
+        pills) sees it without another call, until the daily sync writes the full row."""
+        try:
+            with self.db('amazonStore.db') as conn:
+                cur = conn.cursor()
+                if not self._has_table(cur, 'ITEMS'):
+                    return
+                cur.execute("SELECT 1 FROM ITEMS WHERE TRIM(COALESCE(SKU, '')) = ?", (sku,))
+                if cur.fetchone():
+                    cur.execute("UPDATE ITEMS SET STATUS = 'Active', LAST_UPDATED = ? WHERE TRIM(COALESCE(SKU, '')) = ? AND COALESCE(STATUS, '') <> 'Active'",
+                                (_now(), sku))
+                else:
+                    cur.execute('''INSERT INTO ITEMS (ASIN, SKU, TITLE, PRICE, QUANTITY, STATUS, UPC, CONDITION, FULFILLMENT_CHANNEL, LAST_UPDATED)
+                                   VALUES (?, ?, ?, NULL, NULL, 'Active', ?, ?, 'DEFAULT', ?)''',
+                                (_text(result.get('asin')), sku, _text(result.get('title')), sku.split('-', 1)[0],
+                                 _text(result.get('condition')), _now()))
+                conn.commit()
+        except sqlite3.Error as error:
+            print(f"Lister: could not remember Amazon listing {sku}: {error}")
+
+    def _store_listings(self, upc, *, live=False):
+        """Listings the stores already carry for this UPC, so the panel can warn before a duplicate.
+        With live, Amazon itself is asked about our SKU when the synced table has nothing (cached)."""
         variants = self._variants(upc)
         base = variants[0].split('-', 1)[0]
         keys = {v for v in variants} | {base, base.lstrip('0')}
@@ -943,6 +1052,9 @@ class Lister:
                                               'fulfillment': _text(r.get('FULFILLMENT_CHANNEL'))})
         except sqlite3.Error:
             pass
+        if not out['amazon']:
+            # Our SKU is the unit's code (with its -N) - or, before suffixes, the bare UPC.
+            out['amazon'] = self._amazon_live([variants[0], base], fetch=live)
         return out
 
     def select(self, proposal_ids, *, selected=True, actor='', platform_hint=''):
@@ -1733,6 +1845,10 @@ class Lister:
             return units
         ebay_live = (detail.get('ebay_store') or {}).get('listings') or []
         amazon_live = (detail.get('amazon_store') or {}).get('listings') or []
+        if not amazon_live:
+            amazon_live = self._amazon_live([upc, _base_upc(upc)], fetch=True)
+            if amazon_live:
+                detail['amazon_store'] = dict(detail.get('amazon_store') or {}, listings=amazon_live)
         prep_qty = prep_status.get('quantity')
         try:
             prep_qty = int(prep_qty) if prep_qty not in (None, '') else None
@@ -2107,7 +2223,11 @@ class Lister:
             self.init_listagent(cur)
             cur.execute("SELECT upc, platform FROM lister_queue_state WHERE state = 'skipped'")
             skipped = {(r['upc'], r['platform']) for r in cur.fetchall()}
-            for raw in list(dict.fromkeys(_text(u) for u in (upcs or []) if _text(u)))[:250]:
+            wanted = list(dict.fromkeys(_text(u) for u in (upcs or []) if _text(u)))[:250]
+            # A few codes (the panel asking about the item it holds) may go to Amazon; a page of pills
+            # (Items to List) only reads what is cached or synced, so it never waits on the store.
+            live = len(wanted) <= 5
+            for raw in wanted:
                 variants = self._variants(raw)
                 marks = ','.join('?' for _ in variants)
                 cur.execute(f'SELECT * FROM listing_queue WHERE upc IN ({marks}) ORDER BY id DESC', tuple(variants))
@@ -2117,7 +2237,7 @@ class Lister:
                 latest = rows[0] if rows else {}
                 key = self.format_upc12(raw) or raw
                 entry = {'queue': latest.get('status') or ''}
-                stores = self._store_listings(key)
+                stores = self._store_listings(key, live=live)
                 for p in PLATFORMS:
                     ours = any(_text(e.get('sku')).lower() == key.lower() and (not e.get('state') or e['state'].lower() in ('active', 'live'))
                                for e in stores.get(p) or [])

@@ -607,6 +607,47 @@ class ListerTestCase(unittest.TestCase):
         existing = self.client.get('/api/lister/links?kind=existing').get_json()['links']
         self.assertEqual([l['listing_id'] for l in existing], ['112233445566'])
 
+    def test_amazon_is_asked_about_our_sku_when_the_synced_table_has_nothing(self):
+        # The store sync runs once a day: a listing made today is only visible through a live ask.
+        new = '012345678905'
+        self.queue_add(new, 'Amelia set', '2026-09-18T08:00:00')
+        with closing(sqlite3.connect(self.root / 'amazonStore.db')) as conn:
+            conn.execute("""CREATE TABLE ITEMS (ID INTEGER PRIMARY KEY, ASIN TEXT, SKU TEXT, TITLE TEXT, PRICE REAL, QUANTITY INTEGER,
+                            STATUS TEXT, IMAGE TEXT, UPC TEXT, CONDITION TEXT, FULFILLMENT_CHANNEL TEXT, LAST_UPDATED TEXT)""")
+            conn.commit()
+        calls = []
+
+        def fake(sku):
+            calls.append(sku)
+            return {'asin': 'B0971PMYLN', 'title': 'Amelia set', 'condition': 'new_new', 'state': 'Active'} if sku == new else None
+        self.lister.amazon_listing_by_sku = fake
+        stores = lambda upc: self.client.post('/api/lister/queue-stores', json={'upcs': [upc]}).get_json()['items'][upc]
+        self.assertEqual(stores(new)['amazon'], 'listed')
+        self.assertEqual(calls, [new], 'one call for the unit code (the base is the same code)')
+        # Remembered in the synced table, so nothing asks Amazon again - not even after the cache is gone.
+        with closing(sqlite3.connect(self.root / 'amazonStore.db')) as conn:
+            rows = conn.execute("SELECT ASIN, SKU, UPC, STATUS FROM ITEMS").fetchall()
+        self.assertEqual(rows, [('B0971PMYLN', new, new, 'Active')])
+        self.lister._live_sku_cache.clear()
+        self.assertEqual(stores(new)['amazon'], 'listed')
+        self.assertEqual(calls, [new])
+        # The panel's own list for Amazon shows it as listed there as well.
+        items = {it['upc']: it['status'] for it in self.client.get('/api/lister/queue?platform=amazon').get_json()['items']}
+        self.assertEqual(items.get(new), 'listed')
+        # Not on Amazon: asked once, the miss is cached, the item stays on the list.
+        other = '042648477752'
+        self.queue_add(other, 'Not there', '2026-09-18T09:00:00')
+        self.assertEqual(stores(other)['amazon'], 'on')
+        self.assertEqual(stores(other)['amazon'], 'on')
+        self.assertEqual(calls, [new, other], 'a miss is asked about once per cache window')
+        # A store hiccup never breaks the answer.
+        self.lister._live_sku_cache.clear()
+
+        def broken(sku):
+            raise RuntimeError('SP-API down')
+        self.lister.amazon_listing_by_sku = broken
+        self.assertEqual(stores(other)['amazon'], 'on')
+
     def test_detail_merges_inventory_prep_notes_voice_text_and_photos(self):
         (self.root / 'static' / 'listingagent_uploads').mkdir()
         self.detail_payload = {

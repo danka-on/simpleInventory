@@ -633,7 +633,7 @@ def register_routes():
 
     # Sweet Shelves Lister: the Chrome side panel that lists the Listing Agent queue on eBay /
     # Seller Central pages and links the live listing back to the warehouse.
-    from lister_routes import register as register_lister
+    from lister_routes import register as register_lister, _amazon_listing_by_sku_default as _lister_amazon_sku
     try:  # the proposal builder (Listing Agent phase 1) is optional: without it the panel fills basic values
         from .listing_proposals import _agent_build_proposal as _lister_build_proposal
     except Exception:
@@ -646,6 +646,8 @@ def register_routes():
         '_listagent_format_upc12': ss_listing_queue._listagent_format_upc12,
         '_listagent_init_tables': ss_listing_checks._listagent_init_tables,
         '_listing_helper_scan_cache_clear': ss_caching._listing_helper_scan_cache_clear,
+        # Live "is our SKU on Amazon" ask (cached): the daily store sync is too slow for a listing made today.
+        '_amazon_listing_by_sku': _lister_amazon_sku,
         # Queue-driven panel (0.2): item detail, proposal build, per-store skip, Items-to-List flag, AI photos.
         'api_listingagent_upc_detail': ss_listing_queue.api_listingagent_upc_detail,
         '_agent_build_proposal': _lister_build_proposal,

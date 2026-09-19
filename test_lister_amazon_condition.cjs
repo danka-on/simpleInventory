@@ -188,6 +188,21 @@ const sent = page => page.evaluate(() => window.sent.map(m => m.type));
     assert.equal(await condition(page), 'new_new', 'Use puts our condition into the dropdown');
     await page.close();
 
+    // The user presses the page's own Submit (inside the kat-button's shadow root): the panel hears of it once.
+    page = await openOffer(context, {});
+    await page.waitForSelector('#match');
+    await fill(page);
+    await page.evaluate(() => document.getElementById('submit').shadowRoot.querySelector('button').click());
+    await page.evaluate(() => document.getElementById('submit').shadowRoot.querySelector('button').click());
+    const messages = await page.evaluate(() => window.sent.filter(m => m.type === 'ss-lister-submitted'));
+    assert.equal(messages.length, 1, "one submitted message for the user's own press: " + JSON.stringify(messages));
+    assert.equal(messages[0].store, 'amazon');
+    assert.equal(messages[0].own, true, "flagged as the user's own press");
+    assert.deepEqual(await pressed(page), ['Submit', 'Submit'], 'the page still gets the click');
+    await page.evaluate(() => document.getElementById('cancel').shadowRoot.querySelector('button').click());
+    assert.equal((await page.evaluate(() => window.sent.filter(m => m.type === 'ss-lister-submitted'))).length, 1, 'Cancel is not a submit');
+    await page.close();
+
     console.log('lister Amazon condition + submit: ok');
   } finally {
     await browser.close();

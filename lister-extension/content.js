@@ -7,6 +7,7 @@
   const picked = new Map();
   let pickState = null;
   let guide = null;
+  let ownSubmitTold = '';  // page URL whose own List it / Submit press was already reported
 
   function clip(text) {
     return String(text || '').replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT);
@@ -1157,10 +1158,34 @@
     const previous = button.style.boxShadow;
     button.style.boxShadow = '0 0 0 4px rgba(22,163,74,.75)';
     setTimeout(() => { button.style.boxShadow = previous; }, 2500);
+    ownSubmitTold = location.href.split('#')[0];  // the click below is ours: the watcher must not report it twice
     chrome.runtime.sendMessage({ type: 'ss-lister-submitted', store: page.store || '', sku: page.sku || '', url: location.href }).catch(() => {});
     setTimeout(() => { try { button.click(); } catch { /* gone */ } }, 300);
     return true;
   }
+
+  // The user presses the page's own List it / Submit instead of the HUD's: that counts just the same.
+  // A capture-phase click on the document sees it first (Katal buttons keep the real <button> in a
+  // shadow root, so the composed path is walked); the panel is told once per page.
+  function watchOwnSubmit() {
+    document.addEventListener('click', event => {
+      try {
+        let page = {};
+        try { page = detect(); } catch { return; }
+        if (page.kind !== 'listing-form' && page.kind !== 'offer-form') return;
+        const button = findSubmitButton(page.store || '');
+        if (!button) return;
+        const host = shadowHost(button);
+        const path = typeof event.composedPath === 'function' ? event.composedPath() : [event.target];
+        if (!path.some(node => node === button || (host && node === host))) return;
+        const key = location.href.split('#')[0];
+        if (ownSubmitTold === key) return;
+        ownSubmitTold = key;
+        chrome.runtime.sendMessage({ type: 'ss-lister-submitted', store: page.store || '', sku: page.sku || '', url: location.href, own: true }).catch(() => {});
+      } catch { /* never in the way of the page's own click */ }
+    }, true);
+  }
+  watchOwnSubmit();
 
   // Buttons on the overlay that need the server go through the side panel.
   function panelAction(action, extra) {
