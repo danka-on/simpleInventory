@@ -852,6 +852,8 @@ def _fba_amazon_refresh_operation(api, state):
         success_flag = ss_fba_schema._fba_trim(operation.get('success_flag'), 80)
         if success_flag:
             state[success_flag] = True
+        if kind == 'submit_boxes':
+            state.pop('unfulfillable_error', None)
     elif status == 'FAILED':
         problems = operation.get('problems') if isinstance(operation.get('problems'), list) else []
         detail = next((
@@ -864,6 +866,10 @@ def _fba_amazon_refresh_operation(api, state):
         )
         if operation.get('kind') == 'create_plan':
             state['stage'] = 'plan_failed'
+        # Amazon names an item it will not receive only once; a retry that fails
+        # generically must not erase it, or the remove-and-rebuild offer vanishes.
+        if 'not fulfillable' in state['last_error'].lower():
+            state['unfulfillable_error'] = state['last_error']
     return state
 
 

@@ -172,6 +172,41 @@ class FbaStalePackingTest(unittest.TestCase):
         self.assertTrue(ss_fba_shipments._fba_operation_needs_new_packing(
             {"status": "FAILED", "problems": [STALE_PROBLEM]}))
 
+    def test_unfulfillable_item_text_survives_a_generic_retry_failure(self):
+        # Session 12 (2026-09-19): the first failure named DU-0SWH-1M7L; a retry failed
+        # with "Something went wrong" and the remove-and-rebuild offer disappeared.
+        named = ("ERROR: Something went wrong with placement. Please regenerate the packing options. "
+                 "Validation failed due to: Units in the request are not fulfillable., for items: "
+                 "Item{asin=B0DMKQFYPW, mSku=DU-0SWH-1M7L, fnsku=X005BAXWUP, condition=NewItem, numberOfUnits=1}")
+        generic = "ERROR: Something went wrong. Please try again later."
+
+        class Api:
+            def __init__(self, message):
+                self.message = message
+
+            def get_inbound_operation_status(self, _operation_id):
+                return SimpleNamespace(payload={"operationStatus": "FAILED", "operationProblems": [
+                    {"severity": "ERROR", "code": "FBA_INB_0364", "message": self.message}]}, errors=None)
+
+        state = {"inbound_plan_id": "wf-plan", "stage": "boxes_submitting",
+                 "operation": {"id": "op-1", "kind": "submit_boxes", "status": "IN_PROGRESS"}}
+        state = ss_fba_shipments._fba_amazon_refresh_operation(Api(named), state)
+        self.assertEqual(state["unfulfillable_error"], named)
+        state["operation"] = {"id": "op-2", "kind": "recovery_generate_packing", "status": "IN_PROGRESS"}
+        state = ss_fba_shipments._fba_amazon_refresh_operation(Api(generic), state)
+        self.assertEqual(state["last_error"], generic)
+        self.assertEqual(state["unfulfillable_error"], named)
+
+        class Accepted:
+            def get_inbound_operation_status(self, _operation_id):
+                return SimpleNamespace(payload={"operationStatus": "SUCCESS", "operationProblems": []}, errors=None)
+
+        state["operation"] = {"id": "op-3", "kind": "submit_boxes", "status": "IN_PROGRESS",
+                              "next_stage": "boxes_submitted", "success_flag": "boxes_submitted"}
+        state = ss_fba_shipments._fba_amazon_refresh_operation(Accepted(), state)
+        self.assertNotIn("unfulfillable_error", state)
+        self.assertTrue(state["boxes_submitted"])
+
 
 if __name__ == "__main__":
     unittest.main()
