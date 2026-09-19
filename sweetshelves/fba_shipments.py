@@ -271,6 +271,9 @@ def _fba_operation_needs_new_packing(operation):
             continue
         code = ss_fba_schema._fba_trim(problem.get('code'), 40).upper()
         message = str(problem.get('message') or problem.get('details') or '').lower()
+        # Amazon reuses 0364 for an item it will not accept; new packing cannot fix that.
+        if 'not fulfillable' in message:
+            return False
         if code in _FBA_STALE_PACKING_CODES or 'regenerate the packing options' in message:
             return True
     return False
@@ -1542,7 +1545,12 @@ def api_fba_prep_amazon_action(session_id, action):
         if action == 'recover-remove-item':
             if data.get('confirm') is not True:
                 raise FbaInboundValidationError('Confirm the missing-item plan rebuild')
-            if not plan_id or not state.get('packing_confirmed'):
+            prior_recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
+            # A failed packing regeneration left the plan unconfirmed but the cartons intact.
+            regen_failed = prior_recovery.get('kind') == 'regenerate_packing' and prior_recovery.get('phase') == 'failed'
+            if regen_failed:
+                state['recovery'] = {}
+            if not plan_id or not (state.get('packing_confirmed') or regen_failed):
                 raise FbaInboundValidationError('Missing items can be removed during physical carton packing')
             if state.get('placement_confirmed'):
                 raise FbaInboundValidationError(

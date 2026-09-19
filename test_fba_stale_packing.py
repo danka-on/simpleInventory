@@ -163,5 +163,15 @@ class FbaStalePackingTest(unittest.TestCase):
         self.assertNotIn("recovery", state)
 
 
+    def test_unfulfillable_item_is_not_treated_as_stale_packing(self):
+        operation = {"status": "FAILED", "problems": [dict(STALE_PROBLEM, message=(
+            "ERROR: Something went wrong with placement. Please regenerate the packing options. "
+            "Validation failed due to: Units in the request are not fulfillable., for items: "
+            "Item{asin=B0DMKQFYPW, mSku=DU-0SWH-1M7L, fnsku=X005BAXWUP, condition=NewItem, numberOfUnits=1}"))]}
+        self.assertFalse(ss_fba_shipments._fba_operation_needs_new_packing(operation))
+        self.assertTrue(ss_fba_shipments._fba_operation_needs_new_packing(
+            {"status": "FAILED", "problems": [STALE_PROBLEM]}))
+
+
 if __name__ == "__main__":
     unittest.main()
