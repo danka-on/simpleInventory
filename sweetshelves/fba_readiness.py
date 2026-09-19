@@ -463,6 +463,115 @@ def _fba_prep_error_is_inbound_pending(value):
     return 'not available for inbound' in ss_fba_schema._fba_trim(value, 1000).lower()
 
 
+_FBA_INBOUND_ELIGIBILITY_CACHE = {}
+
+
+_FBA_INBOUND_ELIGIBILITY_CACHE_LOCK = threading.Lock()
+
+
+_FBA_INBOUND_ELIGIBILITY_CACHE_TTL = 30 * 60
+
+
+# Amazon FBA Inbound Eligibility API reason codes, in the words a packer needs.
+_FBA_INBOUND_INELIGIBILITY_REASONS = {
+    'FBA_INB_0004': 'Amazon is missing the package dimensions for this product.',
+    'FBA_INB_0006': 'Amazon cannot find the SKU for this product.',
+    'FBA_INB_0007': 'Amazon is still reviewing this product for hazmat (more product information needed).',
+    'FBA_INB_0008': 'Amazon needs detailed battery information before it will accept this product.',
+    'FBA_INB_0009': 'Amazon needs a safety data sheet for this product (hazmat review).',
+    'FBA_INB_0010': 'Amazon found mismatched dangerous-goods information (hazmat review).',
+    'FBA_INB_0011': 'Amazon found incomplete or conflicting dangerous-goods information (hazmat review).',
+    'FBA_INB_0012': 'Amazon found conflicting product information (hazmat review).',
+    'FBA_INB_0013': 'Amazon needs more information to finish its hazmat review.',
+    'FBA_INB_0014': 'Amazon is reviewing this product as possible dangerous goods (4-7 business days).',
+    'FBA_INB_0015': 'Amazon classifies this product as unfulfillable dangerous goods (hazmat).',
+    'FBA_INB_0017': 'This product does not exist in the destination marketplace catalog.',
+    'FBA_INB_0018': 'This product has no category on Amazon.',
+    'FBA_INB_0019': 'This product has no title on Amazon.',
+    'FBA_INB_0034': 'This product cannot be commingled; it must be removed.',
+    'FBA_INB_0035': 'Expiration-dated or lot-controlled product must be labeled.',
+    'FBA_INB_0037': 'Your account is missing tax documents required for inbound shipments.',
+    'FBA_INB_0038': 'This is a parent ASIN; list against the child ASIN instead.',
+    'FBA_INB_0050': 'No Amazon fulfillment center in this country can receive this product right now.',
+    'FBA_INB_0051': 'FBA has blocked this product; it cannot be sent to Amazon.',
+    'FBA_INB_0053': 'This product is not eligible in the destination marketplace.',
+    'FBA_INB_0055': 'This product is unfulfillable because of media region restrictions.',
+    'FBA_INB_0056': 'Used non-media goods cannot be shipped to Amazon.',
+    'FBA_INB_0059': 'Amazon reports an unknown problem; this product must be removed.',
+    'FBA_INB_0065': 'This product cannot be commingled; it must be removed.',
+    'FBA_INB_0066': 'Amazon reports an unknown problem; this product must be removed.',
+    'FBA_INB_0067': 'This product is not eligible for freight shipping.',
+    'FBA_INB_0068': 'Your account is not configured for expiration-dated or lot-controlled products.',
+    'FBA_INB_0095': 'The barcode for this product is linked to more than one product.',
+    'FBA_INB_0097': 'This product is a fully regulated dangerous good.',
+    'FBA_INB_0098': 'Your account is not authorized to send this product to the destination marketplace.',
+    'FBA_INB_0099': 'Amazon reports the seller account was previously terminated.',
+    'FBA_INB_0103': 'This expiration-dated or lot-controlled product cannot be handled right now.',
+    'FBA_INB_0104': 'Only new products can be stored without a product label; this one needs a manufacturer barcode.',
+    'FBA_INB_0197': 'This product requires safety and compliance documentation.',
+    'FBA_INB_0342': 'The manufacturer barcode was removed from this ASIN, so the offer is ineligible.',
+}
+
+
+def _fba_inbound_ineligibility_message(reasons):
+    codes = [ss_fba_schema._fba_trim(code, 40).upper() for code in (reasons or []) if ss_fba_schema._fba_trim(code, 40)]
+    if not codes:
+        return 'Amazon says this product is not eligible for inbound shipments.'
+    parts = []
+    for code in codes:
+        text = _FBA_INBOUND_INELIGIBILITY_REASONS.get(code)
+        parts.append(f'{text} ({code})' if text else f'Amazon reason {code}')
+    return 'Amazon will not accept this product into FBA: ' + ' '.join(parts)
+
+
+def _fba_inbound_eligibility(asin, *, force_refresh=False):
+    """Ask Amazon's FBA Inbound Eligibility API whether an ASIN can be sent inbound.
+
+    The listing check alone cannot see this: a listing can be FBA with an FNSKU
+    and still be refused at placement with "Units in the request are not
+    fulfillable". A lookup failure is reported as unchecked, never as ineligible.
+    """
+    asin = ss_fba_schema._fba_trim(asin, 30).upper()
+    if not asin:
+        return {'checked': False, 'eligible': None, 'reasons': [], 'error': 'ASIN missing'}
+    now = time.time()
+    if not force_refresh:
+        with _FBA_INBOUND_ELIGIBILITY_CACHE_LOCK:
+            cached = _FBA_INBOUND_ELIGIBILITY_CACHE.get(asin)
+            if cached and now - float(cached.get('ts') or 0) < _FBA_INBOUND_ELIGIBILITY_CACHE_TTL:
+                return dict(cached.get('data') or {})
+    result = {'checked': False, 'eligible': None, 'reasons': [], 'error': ''}
+    try:
+        credentials, _seller_id, marketplace_id, marketplace = ss_amazon_catalog._amazon_spapi_context()
+        if marketplace is None:
+            result['error'] = 'Amazon SP-API marketplace is not available'
+            return result
+        from sp_api.api import FbaInboundEligibility
+        payload = ss_fba_shipments._fba_amazon_payload(
+            FbaInboundEligibility(credentials=credentials, marketplace=marketplace).get_item_eligibility_preview(
+                asin=asin, program='INBOUND', marketplaceIds=[marketplace_id],
+            )
+        )
+        if not isinstance(payload, dict) or 'isEligibleForProgram' not in payload:
+            result['error'] = 'Amazon returned no eligibility verdict'
+            return result
+        reasons = payload.get('ineligibilityReasonList')
+        result['reasons'] = [
+            ss_fba_schema._fba_trim(code, 40).upper()
+            for code in (reasons if isinstance(reasons, list) else [])
+            if ss_fba_schema._fba_trim(code, 40)
+        ]
+        result['eligible'] = bool(payload.get('isEligibleForProgram'))
+        result['checked'] = True
+    except Exception as exc:
+        ss_config.logger.warning('FBA inbound eligibility lookup failed for %s: %s', asin, exc)
+        result['error'] = ss_fba_schema._fba_trim(exc, 500)
+        return result
+    with _FBA_INBOUND_ELIGIBILITY_CACHE_LOCK:
+        _FBA_INBOUND_ELIGIBILITY_CACHE[asin] = {'ts': now, 'data': dict(result)}
+    return result
+
+
 def _fba_inventory_fnsku(msku):
     """Read the FNSKU from FBA inventory, which often leads the Listings Items summary."""
     seller_sku = ss_fba_schema._fba_trim(msku, 255)
@@ -528,11 +637,13 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
 
     fnsku = ''
     product_type = ss_fba_schema._fba_trim(payload.get('productType') or payload.get('product_type'), 120)
+    asin = ''
     listing_statuses = []
     for summary in summaries:
         if not isinstance(summary, dict):
             continue
         fnsku = fnsku or ss_fba_schema._fba_trim(summary.get('fnSku') or summary.get('fnsku'), 80)
+        asin = asin or ss_fba_schema._fba_trim(summary.get('asin'), 30)
         product_type = product_type or ss_fba_schema._fba_trim(summary.get('productType') or summary.get('product_type'), 120)
         raw_status = summary.get('status')
         if isinstance(raw_status, list):
@@ -579,6 +690,9 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
     listing_invalid = prep_kind == 'invalid' and any(
         value.casefold() == seller_sku.casefold() for value in prep_named
     )
+    inbound_eligibility = _fba_inbound_eligibility(asin, force_refresh=force_refresh) if asin else {
+        'checked': False, 'eligible': None, 'reasons': [], 'error': 'ASIN missing'}
+    inbound_ineligible = bool(inbound_eligibility.get('checked')) and inbound_eligibility.get('eligible') is False
     activation_note = ''
     # An FNSKU alone does not make a SKU shippable: a listing switched back to
     # merchant fulfillment keeps its old FNSKU but has no FBA offer to receive.
@@ -590,6 +704,12 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         # "not valid" means the listing is gone even if inventory still has an FNSKU.
         status = 'failed'
         error = _fba_listing_gone_message(seller_sku)
+    elif inbound_ineligible:
+        # The Inbound Eligibility API is the only place Amazon says an ASIN
+        # cannot be received; placement otherwise fails later with
+        # "Units in the request are not fulfillable".
+        status = 'failed'
+        error = _fba_inbound_ineligibility_message(inbound_eligibility.get('reasons'))
     elif fnsku and not inbound_pending and not merchant_only:
         status = 'ready'
         error = ''
@@ -634,6 +754,8 @@ def _fba_listing_readiness(msku, *, force_refresh=False, client=None):
         'activation_note': activation_note,
         'inbound_pending': inbound_pending,
         'listing_missing': listing_invalid,
+        'asin': asin,
+        'inbound_eligibility': inbound_eligibility,
     }
     result['prep_details'] = prep_details
     with _FBA_LISTING_READINESS_CACHE_LOCK:

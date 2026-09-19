@@ -1107,6 +1107,79 @@ class PlanHealthTest(unittest.TestCase):
         self.assertTrue(result['listing_missing'])
         self.assertIn('SKU-DEAD', result['error'])
 
+    ELIGIBLE = {'checked': True, 'eligible': True, 'reasons': [], 'error': ''}
+
+    def test_readiness_refuses_an_asin_amazon_cannot_receive_inbound(self):
+        # DU-0SWH-1M7L (2026-09-19): FBA listing, FNSKU assigned, yet placement
+        # failed with "Units in the request are not fulfillable"; only the
+        # Inbound Eligibility API knew (FBA_INB_0008 + FBA_INB_0050).
+        listings = Mock()
+        listings.get_listings_item.return_value = Mock(errors=None, payload={
+            'summaries': [{'asin': 'B0DMKQFYPW', 'productType': 'DRINKING_CUP', 'status': ['DISCOVERABLE'], 'fnSku': 'X005BAXWUP'}],
+            'issues': [], 'fulfillmentAvailability': [{'fulfillmentChannelCode': 'AMAZON_NA'}], 'attributes': {},
+        })
+        client = (listings, 'SELLER', US_MARKETPLACE_ID)
+        ineligible = {'checked': True, 'eligible': False, 'reasons': ['FBA_INB_0008', 'FBA_INB_0050'], 'error': ''}
+        with (patch.object(ss_fba_readiness, '_fba_inventory_fnsku', return_value='X005BAXWUP'),
+              patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value={'checked': True, 'error': ''}),
+              patch.object(ss_fba_readiness, '_fba_inbound_eligibility', return_value=ineligible) as eligibility):
+            result = ss_fba_readiness._fba_listing_readiness('DU-0SWH-1M7L', force_refresh=True, client=client)
+        eligibility.assert_called_once_with('B0DMKQFYPW', force_refresh=True)
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('FBA_INB_0050', result['error'])
+        self.assertIn('No Amazon fulfillment center', result['error'])
+        self.assertIn('battery information', result['error'])
+        self.assertEqual(result['asin'], 'B0DMKQFYPW')
+        self.assertEqual(result['inbound_eligibility'], ineligible)
+        item = ss_fba_readiness._fba_apply_listing_readiness({'seller_sku': 'DU-0SWH-1M7L'}, result)
+        self.assertEqual(item['fba_enablement_status'], 'failed')
+        self.assertIsNone(item['inbound_eligible'])
+
+        # A lookup outage must not block shipping: unchecked leaves the SKU ready.
+        unchecked = {'checked': False, 'eligible': None, 'reasons': [], 'error': 'boom'}
+        with (patch.object(ss_fba_readiness, '_fba_inventory_fnsku', return_value='X005BAXWUP'),
+              patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value={'checked': True, 'error': ''}),
+              patch.object(ss_fba_readiness, '_fba_inbound_eligibility', return_value=unchecked)):
+            result = ss_fba_readiness._fba_listing_readiness('DU-0SWH-1M7L', force_refresh=True, client=client)
+        self.assertEqual(result['status'], 'ready')
+        with (patch.object(ss_fba_readiness, '_fba_inventory_fnsku', return_value='X005BAXWUP'),
+              patch.object(ss_fba_readiness, '_fba_item_prep_details', return_value={'checked': True, 'error': ''}),
+              patch.object(ss_fba_readiness, '_fba_inbound_eligibility', return_value=self.ELIGIBLE)):
+            result = ss_fba_readiness._fba_listing_readiness('DU-0SWH-1M7L', force_refresh=True, client=client)
+        self.assertEqual(result['status'], 'ready')
+
+    def test_inbound_eligibility_reads_amazon_verdict_and_tolerates_outages(self):
+        api = Mock()
+        api.get_item_eligibility_preview.return_value = Mock(errors=None, payload={
+            'asin': 'B0DMKQFYPW', 'program': 'INBOUND', 'isEligibleForProgram': False,
+            'ineligibilityReasonList': ['FBA_INB_0050'],
+        })
+        fake_module = SimpleNamespace(FbaInboundEligibility=Mock(return_value=api))
+        context = ({'refresh_token': 'x'}, 'SELLER', US_MARKETPLACE_ID, object())
+        ss_fba_readiness._FBA_INBOUND_ELIGIBILITY_CACHE.clear()
+        try:
+            with (patch.object(ss_fba_readiness.ss_amazon_catalog, '_amazon_spapi_context', return_value=context),
+                  patch.dict('sys.modules', {'sp_api.api': fake_module})):
+                result = ss_fba_readiness._fba_inbound_eligibility('b0dmkqfypw', force_refresh=True)
+                self.assertEqual(result, {'checked': True, 'eligible': False, 'reasons': ['FBA_INB_0050'], 'error': ''})
+                api.get_item_eligibility_preview.assert_called_once_with(
+                    asin='B0DMKQFYPW', program='INBOUND', marketplaceIds=[US_MARKETPLACE_ID])
+                # Cached by ASIN: a second call within the TTL does not hit Amazon.
+                ss_fba_readiness._fba_inbound_eligibility('B0DMKQFYPW')
+                self.assertEqual(api.get_item_eligibility_preview.call_count, 1)
+                api.get_item_eligibility_preview.side_effect = Exception('throttled')
+                result = ss_fba_readiness._fba_inbound_eligibility('B0OTHER', force_refresh=True)
+                self.assertFalse(result['checked'])
+                self.assertIsNone(result['eligible'])
+                self.assertIn('throttled', result['error'])
+            self.assertEqual(ss_fba_readiness._fba_inbound_eligibility(''), {
+                'checked': False, 'eligible': None, 'reasons': [], 'error': 'ASIN missing'})
+            self.assertEqual(
+                ss_fba_readiness._fba_inbound_ineligibility_message(['FBA_INB_9999']),
+                'Amazon will not accept this product into FBA: Amazon reason FBA_INB_9999')
+        finally:
+            ss_fba_readiness._FBA_INBOUND_ELIGIBILITY_CACHE.clear()
+
     def test_session_listing_health_flags_counted_items_and_clears_them_again(self):
         items = [
             {'seller_sku': 'SKU-OK', 'title': 'Fine', 'fba_enablement_status': 'ready', 'amazon_fnsku': 'X001'},
