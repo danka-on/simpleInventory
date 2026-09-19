@@ -257,6 +257,50 @@ _FBA_ACTION_ORDER = (
 )
 
 
+# Amazon answers setPackingInformation with FBA_INB_0364 when the confirmed
+# packing option went stale on its side; only fresh packing options clear it.
+_FBA_STALE_PACKING_CODES = ('FBA_INB_0364',)
+
+
+def _fba_operation_needs_new_packing(operation):
+    operation = operation if isinstance(operation, dict) else {}
+    if str(operation.get('status') or '').upper() != 'FAILED':
+        return False
+    for problem in operation.get('problems') or []:
+        if not isinstance(problem, dict):
+            continue
+        code = ss_fba_schema._fba_trim(problem.get('code'), 40).upper()
+        message = str(problem.get('message') or problem.get('details') or '').lower()
+        if code in _FBA_STALE_PACKING_CODES or 'regenerate the packing options' in message:
+            return True
+    return False
+
+
+def _fba_start_packing_regeneration(api, state, plan_id, boxes):
+    """Regenerate packing on the same plan; recovery sync re-confirms and resubmits the boxes."""
+    state['boxes'] = boxes
+    state['recovery'] = {
+        'active': True,
+        'kind': 'regenerate_packing',
+        'phase': 'generating_packing',
+        'started_at': ss_listing_checks._listagent_now_iso(),
+        'old_plan_id': plan_id,
+        'old_packing_option_id': ss_fba_schema._fba_trim(state.get('selected_packing_option_id'), 38),
+        'old_stage': 'packing',
+        'saved_boxes': json.loads(json.dumps(boxes)),
+        'auto_submit_boxes': True,
+        'packed_scan_count': sum(
+            int(item.get('quantity') or 0)
+            for box in boxes if isinstance(box, dict)
+            for item in (box.get('contents') or []) if isinstance(item, dict)
+        ),
+    }
+    state['packing_options'] = []
+    state['packing_confirmed'] = False
+    state['stage'] = 'packing_generating'
+    return _fba_amazon_payload(api.generate_packing_options(plan_id))
+
+
 def _fba_action_repeats_or_precedes(action_kind, failed_kind):
     """True when action_kind is the failed step itself or an earlier one."""
     if action_kind == failed_kind:
@@ -843,8 +887,11 @@ def _fba_amazon_sync_snapshot(api, state):
         lambda **kwargs: api.list_packing_options(plan_id, **kwargs), 'packingOptions', page_size=20, limit=100
     )
     state['packing_options'] = [_fba_amazon_option_summary(option, 'packing') for option in packing_options]
-    accepted_packing = next((row for row in state['packing_options'] if option_state(row) == 'ACCEPTED'), None)
     selected_packing_id = ss_fba_schema._fba_trim(state.get('selected_packing_option_id'), 38)
+    accepted_packing = next((
+        row for row in state['packing_options']
+        if option_state(row) == 'ACCEPTED' and row.get('packingOptionId') == selected_packing_id
+    ), None) or next((row for row in state['packing_options'] if option_state(row) == 'ACCEPTED'), None)
     selected_packing = accepted_packing or next(
         (row for row in state['packing_options'] if row.get('packingOptionId') == selected_packing_id), None
     )
@@ -1611,7 +1658,15 @@ def api_fba_prep_amazon_action(session_id, action):
             api, marketplace_id = _fba_amazon_client()
             recovery['active'] = True
             recovery.pop('error', None)
-            if recovery.get('old_plan_cancelled'):
+            if recovery.get('kind') == 'regenerate_packing':
+                response_payload = _fba_start_packing_regeneration(
+                    api, state, plan_id, recovery.get('saved_boxes') or state.get('boxes') or []
+                )
+                recovery = state['recovery'] = {**recovery, **state['recovery']}
+                operation_id = _fba_set_amazon_operation(
+                    state, response_payload, 'recovery_generate_packing', 'packing_options'
+                )
+            elif recovery.get('old_plan_cancelled'):
                 recovery['phase'] = 'creating_plan'
                 preserved = {
                     key: state.get(key) for key in (
@@ -1797,6 +1852,10 @@ def api_fba_prep_amazon_action(session_id, action):
                 return jsonify({'success': True, 'amazon_workflow': state, 'plan_health': health})
             state = _fba_amazon_refresh_operation(api, state)
             pending = state.get('operation') if isinstance(state.get('operation'), dict) else {}
+            stale_packing = (
+                action == 'submit-boxes' and pending.get('kind') == 'submit_boxes'
+                and _fba_operation_needs_new_packing(pending)
+            )
             if str(pending.get('status') or '').upper() == 'FAILED':
                 # Redoing the failed step, or any step before it, is how the operator
                 # recovers; only a later step is refused so a failure cannot be skipped.
@@ -1839,11 +1898,16 @@ def api_fba_prep_amazon_action(session_id, action):
                 request_body, boxes = build_set_packing_request(
                     boxes, state.get('plan_items') or session_data.get('items'), marketplace_id=marketplace_id
                 )
-                response_payload = _fba_amazon_payload(api.set_packing_information(plan_id, **request_body))
-                state['boxes'] = boxes
-                state['stage'] = 'boxes_submitting'
-                next_stage = 'boxes_submitted'
-                success_flag = 'boxes_submitted'
+                if stale_packing:
+                    response_payload = _fba_start_packing_regeneration(api, state, plan_id, boxes)
+                    operation_kind = 'recovery_generate_packing'
+                    next_stage = 'packing_options'
+                else:
+                    response_payload = _fba_amazon_payload(api.set_packing_information(plan_id, **request_body))
+                    state['boxes'] = boxes
+                    state['stage'] = 'boxes_submitting'
+                    next_stage = 'boxes_submitted'
+                    success_flag = 'boxes_submitted'
             elif action == 'generate-placement':
                 if not state.get('boxes_submitted'):
                     raise FbaInboundValidationError('Submit complete box contents to Amazon first')
@@ -2492,6 +2556,27 @@ def _fba_amazon_sync_recovery(api, marketplace_id, conn, session_id, session_dat
         recovery['completed_at'] = ss_listing_checks._listagent_now_iso() if not unresolved else ''
         state['stage'] = 'packing'
         state['recovery'] = recovery
+        if recovery.get('auto_submit_boxes') and not unresolved and not resort_required:
+            try:
+                request_body, boxes = build_set_packing_request(
+                    restored_boxes, state.get('plan_items') or session_data.get('items'),
+                    marketplace_id=marketplace_id,
+                )
+                response = _fba_amazon_payload(
+                    api.set_packing_information(state['inbound_plan_id'], **request_body)
+                )
+                state['boxes'] = boxes
+                state['stage'] = 'boxes_submitting'
+                state['last_error'] = ''
+                recovery['boxes_resubmitted'] = True
+                _fba_set_amazon_operation(
+                    state, response, 'submit_boxes', 'boxes_submitted', 'boxes_submitted'
+                )
+            except Exception as exc:
+                state['last_error'] = (
+                    'Amazon made new packing choices, but resending the boxes failed: '
+                    + ss_errors._safe_error(exc, 'FBA resubmit boxes')
+                )
     return state, session_data
 
 
