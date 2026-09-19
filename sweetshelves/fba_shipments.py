@@ -1909,6 +1909,26 @@ def api_fba_prep_amazon_action(session_id, action):
                 success_flag = 'packing_confirmed'
             elif action == 'submit-boxes':
                 boxes = data.get('boxes') if isinstance(data.get('boxes'), list) else state.get('boxes')
+                if _fba_boxes_have_stale_packing_groups(boxes, state):
+                    # Amazon: 'Provided package grouping ids are incorrect'. Re-sort the
+                    # cartons onto the current groups instead of sending the old ids.
+                    recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
+                    _remapped, unresolved, resort_required = _fba_remap_recovery_cartons(
+                        conn, session_id, state, recovery, boxes
+                    )
+                    if unresolved or resort_required:
+                        _fba_save_amazon_state(conn, session_id, state, preserve_concurrent_pack=True)
+                        conn.commit()
+                        moved = '; '.join(
+                            f"{move.get('msku')}: {move.get('from_box_id')} -> {move.get('to_box_id')}"
+                            for row in resort_required for move in (row.get('moves') or [])
+                        )
+                        raise FbaInboundValidationError(
+                            'Amazon changed the packing groups, so the cartons were re-sorted: '
+                            + (moved or 'some items are no longer in the plan')
+                            + '. Move those units, check the carton weights, then send the box contents again.'
+                        )
+                    boxes = state['boxes']
                 request_body, boxes = build_set_packing_request(
                     boxes, state.get('plan_items') or session_data.get('items'), marketplace_id=marketplace_id
                 )
@@ -2430,6 +2450,61 @@ def _fba_recovery_save_updated_items(conn, session_id, updated_items):
     return clean_items
 
 
+def _fba_current_packing_group_ids(state):
+    return {
+        ss_fba_schema._fba_trim(group.get('packing_group_id') or group.get('packingGroupId'), 38)
+        for group in (state.get('packing_groups') or []) if isinstance(group, dict)
+    } - {''}
+
+
+def _fba_boxes_have_stale_packing_groups(boxes, state):
+    """True when a carton still points at a packing group the current plan does not have."""
+    current = _fba_current_packing_group_ids(state)
+    if not current:
+        return False
+    for box in boxes or []:
+        if not isinstance(box, dict):
+            continue
+        group_id = ss_fba_schema._fba_trim(box.get('packing_group_id'), 38)
+        if group_id and group_id not in current:
+            return True
+    return False
+
+
+def _fba_remap_recovery_cartons(conn, session_id, state, recovery, boxes):
+    """Move preserved cartons onto the current packing groups and record any re-sorting owed."""
+    restored_boxes, conflicts = remap_recovery_boxes(boxes or [], state.get('packing_groups') or [])
+    unresolved = [row for row in conflicts if row.get('unknown_mskus')]
+    resort_required = []
+    for conflict in conflicts:
+        moves = conflict.get('moves') if isinstance(conflict.get('moves'), list) else []
+        if moves:
+            resort_required.append({
+                'from_box_id': conflict.get('box_id'),
+                'box_ids': conflict.get('split_box_ids') or [],
+                'moves': moves,
+            })
+        for move in moves:
+            conn.execute('''
+                UPDATE fba_pack_scans
+                SET box_id = ?, packing_group_id = ?
+                WHERE session_id = ? AND box_id = ? COLLATE NOCASE AND msku = ? COLLATE NOCASE
+            ''', (
+                move.get('to_box_id'), move.get('packing_group_id'), session_id,
+                move.get('from_box_id'), move.get('msku'),
+            ))
+    state['boxes'] = restored_boxes
+    recovery['box_conflicts'] = conflicts
+    recovery['resort_required'] = resort_required
+    recovery['phase'] = 'box_conflict' if unresolved else 'complete'
+    recovery['active'] = bool(unresolved)
+    recovery['completed_at'] = ss_listing_checks._listagent_now_iso() if not unresolved else ''
+    recovery.pop('warning', None)
+    state['stage'] = 'packing'
+    state['recovery'] = recovery
+    return restored_boxes, unresolved, resort_required
+
+
 def _fba_amazon_sync_recovery(api, marketplace_id, conn, session_id, session_data, state):
     """Advance one safe recovery step per sync without repeating physical prep work."""
     recovery = state.get('recovery') if isinstance(state.get('recovery'), dict) else {}
@@ -2539,37 +2614,13 @@ def _fba_amazon_sync_recovery(api, marketplace_id, conn, session_id, session_dat
         state['recovery'] = recovery
         return state, session_data
 
-    if phase == 'confirming_packing' and state.get('packing_confirmed') and state.get('packing_groups'):
-        restored_boxes, conflicts = remap_recovery_boxes(
-            recovery.get('saved_boxes') or [], state.get('packing_groups') or []
+    # A manual confirm-packing during 'choose_packing' can lose its phase flip to a
+    # concurrent sync; the confirmed option and loaded groups are proof enough.
+    if (phase in ('confirming_packing', 'choose_packing') and state.get('packing_confirmed')
+            and state.get('packing_groups')):
+        restored_boxes, unresolved, resort_required = _fba_remap_recovery_cartons(
+            conn, session_id, state, recovery, recovery.get('saved_boxes') or []
         )
-        unresolved = [row for row in conflicts if row.get('unknown_mskus')]
-        resort_required = []
-        for conflict in conflicts:
-            moves = conflict.get('moves') if isinstance(conflict.get('moves'), list) else []
-            if moves:
-                resort_required.append({
-                    'from_box_id': conflict.get('box_id'),
-                    'box_ids': conflict.get('split_box_ids') or [],
-                    'moves': moves,
-                })
-            for move in moves:
-                conn.execute('''
-                    UPDATE fba_pack_scans
-                    SET box_id = ?, packing_group_id = ?
-                    WHERE session_id = ? AND box_id = ? COLLATE NOCASE AND msku = ? COLLATE NOCASE
-                ''', (
-                    move.get('to_box_id'), move.get('packing_group_id'), session_id,
-                    move.get('from_box_id'), move.get('msku'),
-                ))
-        state['boxes'] = restored_boxes
-        recovery['box_conflicts'] = conflicts
-        recovery['resort_required'] = resort_required
-        recovery['phase'] = 'box_conflict' if unresolved else 'complete'
-        recovery['active'] = bool(unresolved)
-        recovery['completed_at'] = ss_listing_checks._listagent_now_iso() if not unresolved else ''
-        state['stage'] = 'packing'
-        state['recovery'] = recovery
         if recovery.get('auto_submit_boxes') and not unresolved and not resort_required:
             try:
                 request_body, boxes = build_set_packing_request(

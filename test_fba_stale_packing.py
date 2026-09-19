@@ -207,6 +207,74 @@ class FbaStalePackingTest(unittest.TestCase):
         self.assertNotIn("unfulfillable_error", state)
         self.assertTrue(state["boxes_submitted"])
 
+    def stale_group_state(self, phase):
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        state = json.loads(db.execute("SELECT amazon_state_json FROM fba_prep_sessions").fetchone()[0])
+        state.update({
+            "stage": "packing", "packing_confirmed": True, "selected_packing_option_id": "po-new",
+            "packing_options": [{"packingOptionId": "po-new", "status": "ACCEPTED", "packingGroups": ["pg-new"]}],
+            "packing_groups": [{"packing_group_id": "pg-new", "label": "Group 1",
+                                "items": [{"msku": "SKU-1", "quantity": 2}]}],
+            "operation": {"id": "op-confirm", "kind": "confirm_packing", "status": "SUCCESS",
+                          "next_stage": "packing", "success_flag": "packing_confirmed"},
+            "last_error": "",
+            "recovery": {"active": True, "phase": phase, "old_plan_id": "wf-old",
+                         "saved_boxes": json.loads(json.dumps(state["boxes"]))},
+        })
+        db.execute("UPDATE fba_prep_sessions SET amazon_state_json = ?", (json.dumps(state),))
+        db.commit()
+        db.close()
+        self.api.regenerated = True
+        self.api.confirmed = "po-new"
+
+    def test_sync_remaps_cartons_when_the_manual_confirm_lost_its_phase_flip(self):
+        # Session 12 (2026-09-19): confirm-packing ran during 'choose_packing' but the phase
+        # stayed put, so the cartons kept the old plan's packing group ids.
+        self.stale_group_state("choose_packing")
+        state = self.request("get", "/api/fba-prep/sessions/1/amazon/sync")
+        self.assertEqual({box["packing_group_id"] for box in state["boxes"]}, {"pg-new"})
+        self.assertEqual(state["recovery"]["phase"], "complete")
+        self.assertFalse(state["recovery"]["active"])
+        self.assertNotIn("warning", state["recovery"])
+
+    def test_submit_boxes_never_sends_stale_packing_group_ids(self):
+        # Amazon: "Provided package grouping ids are incorrect. Expected all of [...]".
+        self.stale_group_state("choose_packing")
+        state = self.request("post", "/api/fba-prep/sessions/1/amazon/submit-boxes")
+        self.assertEqual(self.api.calls, ["set_packing_information"])
+        sent_groups = {box["packingGroupId"] for box in self.api.last_packing_body["packageGroupings"]}
+        self.assertEqual(sent_groups, {"pg-new"})
+        self.assertEqual({box["packing_group_id"] for box in state["boxes"]}, {"pg-new"})
+        self.assertEqual(state["stage"], "boxes_submitting")
+
+    def test_submit_boxes_stops_when_the_re_sort_moves_units_between_cartons(self):
+        self.stale_group_state("choose_packing")
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        state = json.loads(db.execute("SELECT amazon_state_json FROM fba_prep_sessions").fetchone()[0])
+        state["packing_groups"] = [
+            {"packing_group_id": "pg-new", "label": "Group 1", "items": [{"msku": "SKU-1", "quantity": 1}]},
+            {"packing_group_id": "pg-two", "label": "Group 2", "items": [{"msku": "SKU-2", "quantity": 1}]},
+        ]
+        state["boxes"][0]["contents"] = [{"msku": "SKU-1", "quantity": 1}, {"msku": "SKU-2", "quantity": 1}]
+        state["plan_items"] = [{"msku": "SKU-1", "quantity": 2, "fnsku": "X001234567"},
+                               {"msku": "SKU-2", "quantity": 1, "fnsku": "X001234568"}]
+        db.execute("UPDATE fba_prep_sessions SET amazon_state_json = ?", (json.dumps(state),))
+        db.commit()
+        db.close()
+        with patch.object(ss_config, "BASE_DIR", self.base_dir), \
+                patch.object(ss_fba_shipments, "_fba_amazon_client", return_value=(self.api, "ATVPDKIKX0DER")):
+            response = self.client.post("/api/fba-prep/sessions/1/amazon/submit-boxes", json={})
+        body = response.get_json()
+        self.assertEqual(response.status_code, 400, body)
+        self.assertIn("re-sorted", body["error"])
+        self.assertIn("SKU-2: BOX-01 -> BOX-03", body["error"])
+        self.assertEqual(self.api.calls, [])
+        db = sqlite3.connect(self.base_dir / "searchRack.db")
+        saved = json.loads(db.execute("SELECT amazon_state_json FROM fba_prep_sessions").fetchone()[0])
+        db.close()
+        self.assertEqual([(box["local_id"], box["packing_group_id"]) for box in saved["boxes"]],
+                         [("BOX-01", "pg-new"), ("BOX-02", "pg-new"), ("BOX-03", "pg-two")])
+
 
 if __name__ == "__main__":
     unittest.main()
